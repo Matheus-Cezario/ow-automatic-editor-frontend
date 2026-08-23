@@ -43,7 +43,11 @@ class _NewJobScreenState extends State<NewJobScreen> {
 
   Future<void> _submit() async {
     if (_video == null) return;
-    setState(() { _sending = true; _sent = 0; _error = null; });
+    setState(() {
+      _sending = true;
+      _sent = 0;
+      _error = null;
+    });
     try {
       await _api.createJob(
         video: _video!,
@@ -52,7 +56,12 @@ class _NewJobScreenState extends State<NewJobScreen> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _sending = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _sending = false;
+        });
+      }
     }
   }
 
@@ -83,8 +92,11 @@ class _NewJobScreenState extends State<NewJobScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.music_note,
-                      size: 18, color: theme.colorScheme.primary),
+                  Icon(
+                    Icons.music_note,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -100,13 +112,17 @@ class _NewJobScreenState extends State<NewJobScreen> {
             ),
 
             const SizedBox(height: 24),
-            Text('O que considerar um momento',
-                style: theme.textTheme.titleSmall),
+            Text(
+              'O que considerar um momento',
+              style: theme.textTheme.titleSmall,
+            ),
             const SizedBox(height: 4),
             Text(
               'Os padrões costumam funcionar; mexa se sua partida rende '
               'muitos ou pouquíssimos vídeos.',
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
             ),
             const SizedBox(height: 8),
 
@@ -136,7 +152,8 @@ class _NewJobScreenState extends State<NewJobScreen> {
               suffix: 's',
               enabled: !_sending,
               onChanged: (v) => setState(
-                  () => _params = _params.copyWith(multikillWindowS: v)),
+                () => _params = _params.copyWith(multikillWindowS: v),
+              ),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -144,10 +161,12 @@ class _NewJobScreenState extends State<NewJobScreen> {
               onChanged: _sending
                   ? null
                   : (v) => setState(
-                      () => _params = _params.copyWith(makeBeatMontage: v)),
+                      () => _params = _params.copyWith(makeBeatMontage: v),
+                    ),
               title: const Text('Propor montagens no ritmo'),
               subtitle: const Text(
-                  'junta os momentos avulsos num vídeo cortado na batida'),
+                'junta os momentos avulsos num vídeo cortado na batida',
+              ),
             ),
 
             if (_error != null) ...[
@@ -158,8 +177,10 @@ class _NewJobScreenState extends State<NewJobScreen> {
                   color: theme.colorScheme.error.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(_error!,
-                    style: TextStyle(color: theme.colorScheme.error)),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
               ),
             ],
 
@@ -213,29 +234,29 @@ class _Stepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Expanded(child: Text(label)),
-            IconButton(
-              onPressed:
-                  enabled && value > min ? () => onChanged(value - 1) : null,
-              icon: const Icon(Icons.remove_circle_outline),
-            ),
-            SizedBox(
-              width: 24,
-              child: Text('$value',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium),
-            ),
-            IconButton(
-              onPressed:
-                  enabled && value < max ? () => onChanged(value + 1) : null,
-              icon: const Icon(Icons.add_circle_outline),
-            ),
-          ],
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Expanded(child: Text(label)),
+        IconButton(
+          onPressed: enabled && value > min ? () => onChanged(value - 1) : null,
+          icon: const Icon(Icons.remove_circle_outline),
         ),
-      );
+        SizedBox(
+          width: 24,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ),
+        IconButton(
+          onPressed: enabled && value < max ? () => onChanged(value + 1) : null,
+          icon: const Icon(Icons.add_circle_outline),
+        ),
+      ],
+    ),
+  );
 }
 
 class _SliderRow extends StatelessWidget {
@@ -259,25 +280,27 @@ class _SliderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                Expanded(child: Text(label)),
-                Text('${value.toStringAsFixed(0)}$suffix',
-                    style: Theme.of(context).textTheme.titleMedium),
-              ],
-            ),
-            Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: (max - min).round(),
-              onChanged: enabled ? onChanged : null,
+            Expanded(child: Text(label)),
+            Text(
+              '${value.toStringAsFixed(0)}$suffix',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
           ],
         ),
-      );
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          divisions: (max - min).round(),
+          onChanged: enabled ? onChanged : null,
+        ),
+      ],
+    ),
+  );
 }

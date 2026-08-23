@@ -11,19 +11,40 @@ class HighlightStyle {
 
   static const _map = <String, HighlightStyle>{
     'solo_wipe': HighlightStyle(
-        'Sozinho contra todos', Icons.local_fire_department, Color(0xFFFF5252)),
+      'Sozinho contra todos',
+      Icons.local_fire_department,
+      Color(0xFFFF5252),
+    ),
     'multikill': HighlightStyle(
-        'Rajada de eliminações', Icons.bolt, Color(0xFFFFB300)),
+      'Rajada de eliminações',
+      Icons.bolt,
+      Color(0xFFFFB300),
+    ),
     'escape': HighlightStyle(
-        'Fuga por pouco', Icons.directions_run, Color(0xFF4FC3F7)),
+      'Fuga por pouco',
+      Icons.directions_run,
+      Color(0xFF4FC3F7),
+    ),
     'beat_montage': HighlightStyle(
-        'Montagem no ritmo', Icons.graphic_eq, Color(0xFFAB47BC)),
+      'Montagem no ritmo',
+      Icons.graphic_eq,
+      Color(0xFFAB47BC),
+    ),
     'ult_montage': HighlightStyle(
-        'Ultimates anuladas', Icons.shield_moon, Color(0xFF66BB6A)),
+      'Ultimates anuladas',
+      Icons.shield_moon,
+      Color(0xFF66BB6A),
+    ),
     'sleep_montage': HighlightStyle(
-        'Dardos no alvo', Icons.bedtime, Color(0xFF29B6F6)),
+      'Dardos no alvo',
+      Icons.bedtime,
+      Color(0xFF29B6F6),
+    ),
     'stun_montage': HighlightStyle(
-        'Pedradas certeiras', Icons.landslide, Color(0xFF8D6E63)),
+      'Pedradas certeiras',
+      Icons.landslide,
+      Color(0xFF8D6E63),
+    ),
   };
 
   static HighlightStyle of(String kind) =>

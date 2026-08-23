@@ -75,8 +75,10 @@ class EventTimeline extends StatelessWidget {
             const SizedBox(width: 108),
             Text('00:00', style: Theme.of(context).textTheme.labelSmall),
             const Spacer(),
-            Text(formatClock(durationS),
-                style: Theme.of(context).textTheme.labelSmall),
+            Text(
+              formatClock(durationS),
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
           ],
         ),
       ],
@@ -92,36 +94,38 @@ class _Track extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) => SizedBox(
-          height: 18,
-          child: Stack(
-            children: [
-              Align(
-                alignment: Alignment.center,
-                child: Container(
-                  height: 2,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).dividerColor,
-                    borderRadius: BorderRadius.circular(1),
-                  ),
+    builder: (context, constraints) => SizedBox(
+      height: 18,
+      child: Stack(
+        children: [
+          Align(
+            alignment: Alignment.center,
+            child: Container(
+              height: 2,
+              decoration: BoxDecoration(
+                color: Theme.of(context).dividerColor,
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+          for (final p in positions)
+            Positioned(
+              left: (p * (constraints.maxWidth - 3)).clamp(
+                0.0,
+                constraints.maxWidth - 3,
+              ),
+              top: 3,
+              child: Container(
+                width: 3,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              for (final p in positions)
-                Positioned(
-                  left: (p * (constraints.maxWidth - 3)).clamp(
-                      0.0, constraints.maxWidth - 3),
-                  top: 3,
-                  child: Container(
-                    width: 3,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
+            ),
+        ],
+      ),
+    ),
+  );
 }

@@ -28,7 +28,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _open() async {
     final url = widget.clip.videoUrl;
-    if (url == null) return;  // montagem falhou: só há os cortes
+    if (url == null) return; // montagem falhou: só há os cortes
     final c = VideoPlayerController.networkUrl(Uri.parse(url));
     try {
       await c.initialize();
@@ -69,9 +69,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               icon: const Icon(Icons.link),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: widget.clip.videoUrl!));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Link copiado')),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Link copiado')));
               },
             ),
         ],
@@ -94,22 +94,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                       )
                     : c == null
-                        ? const CircularProgressIndicator()
-                        : AspectRatio(
-                            aspectRatio: c.value.aspectRatio,
-                            child: Stack(
-                              alignment: Alignment.bottomCenter,
-                              children: [
-                                VideoPlayer(c),
-                                VideoProgressIndicator(c,
-                                    allowScrubbing: true),
-                                GestureDetector(
-                                  onTap: () => setState(() =>
-                                      c.value.isPlaying ? c.pause() : c.play()),
-                                ),
-                              ],
+                    ? const CircularProgressIndicator()
+                    : AspectRatio(
+                        aspectRatio: c.value.aspectRatio,
+                        child: Stack(
+                          alignment: Alignment.bottomCenter,
+                          children: [
+                            VideoPlayer(c),
+                            VideoProgressIndicator(c, allowScrubbing: true),
+                            GestureDetector(
+                              onTap: () => setState(
+                                () => c.value.isPlaying ? c.pause() : c.play(),
+                              ),
                             ),
-                          ),
+                          ],
+                        ),
+                      ),
               ),
             ),
             Container(
@@ -119,8 +119,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.clip.title,
-                      style: theme.textTheme.titleMedium),
+                  Text(widget.clip.title, style: theme.textTheme.titleMedium),
                   const SizedBox(height: 8),
                   Text(
                     [
@@ -133,19 +132,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         'cortado na batida'
                             '${widget.clip.meta['bpm'] != null ? ' (${(widget.clip.meta['bpm'] as num).toStringAsFixed(0)} BPM)' : ''}',
                     ].join('  ·  '),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.hintColor),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
                   ),
                   if (c != null) ...[
                     const SizedBox(height: 14),
                     Row(
                       children: [
                         IconButton.filled(
-                          onPressed: () => setState(() =>
-                              c.value.isPlaying ? c.pause() : c.play()),
-                          icon: Icon(c.value.isPlaying
-                              ? Icons.pause
-                              : Icons.play_arrow),
+                          onPressed: () => setState(
+                            () => c.value.isPlaying ? c.pause() : c.play(),
+                          ),
+                          icon: Icon(
+                            c.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                          ),
                         ),
                         const SizedBox(width: 8),
                         IconButton(
@@ -173,8 +174,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     Text(
                       'Cada corte vem num arquivo, nomeado pelo instante de onde '
                       'saiu na gravação — para reeditar do seu jeito.',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.hintColor),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.hintColor,
+                      ),
                     ),
                   ],
                 ],
@@ -186,7 +188,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 }
-
 
 /// Mostrado quando a montagem falhou mas os cortes sobreviveram.
 class _SemVideo extends StatelessWidget {
@@ -204,8 +205,10 @@ class _SemVideo extends StatelessWidget {
         children: [
           Icon(Icons.folder_zip_outlined, size: 56, color: theme.hintColor),
           const SizedBox(height: 16),
-          Text('O vídeo final não foi gerado',
-              style: theme.textTheme.titleMedium),
+          Text(
+            'O vídeo final não foi gerado',
+            style: theme.textTheme.titleMedium,
+          ),
           const SizedBox(height: 8),
           Text(
             'A junção dos trechos falhou, mas os ${clip.segments} cortes foram '
@@ -218,8 +221,9 @@ class _SemVideo extends StatelessWidget {
             Text(
               clip.renderError!,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.error),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
             ),
           ],
         ],

@@ -28,7 +28,10 @@ void main() {
     // vídeos da mesma gravação saem com trilhas e durações diferentes.
     test('janela de música só vai no JSON quando o fim é escolhido', () {
       expect(const ClipOptions().toJson().containsKey('music_end_s'), isFalse);
-      final comFim = const ClipOptions().copyWith(musicEndS: 40, musicStartS: 10);
+      final comFim = const ClipOptions().copyWith(
+        musicEndS: 40,
+        musicStartS: 10,
+      );
       final json = comFim.toJson();
       expect(json['music_end_s'], 40);
       expect(json['music_start_s'], 10);
@@ -71,11 +74,11 @@ void main() {
 
   group('Job', () {
     Map<String, dynamic> base(Map<String, dynamic> extra) => {
-          'id': 'j1',
-          'status': 'ready',
-          'created_at': '2024-01-01T00:00:00',
-          ...extra,
-        };
+      'id': 'j1',
+      'status': 'ready',
+      'created_at': '2024-01-01T00:00:00',
+      ...extra,
+    };
 
     test('ready significa pronto para escolher, não terminado', () {
       final job = Job.fromJson(base({'n_proposals': 3}));

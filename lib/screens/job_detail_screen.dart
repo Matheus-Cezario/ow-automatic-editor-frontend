@@ -44,23 +44,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _refresh() async {
     try {
       final job = await _api.getJob(widget.jobId);
-      if (mounted) setState(() { _job = job; _error = null; });
+      if (mounted) {
+        setState(() {
+          _job = job;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
   }
 
   Future<void> _gerar(Job job) async {
-    final feito = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => GenerateScreen(job: job)),
-    );
+    final feito = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => GenerateScreen(job: job)));
     if (feito == true) await _refresh();
   }
 
   Future<void> _montar(Job job) async {
-    final feito = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => TimelineScreen(job: job)),
-    );
+    final feito = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => TimelineScreen(job: job)));
     if (feito == true) await _refresh();
   }
 
@@ -69,8 +74,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       await _api.deleteRender(r.id);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
     await _refresh();
@@ -99,8 +105,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     if (job.isFailed && job.error != null) _Failure(job: job),
                     const SizedBox(height: 20),
                     if (job.events.isNotEmpty) ...[
-                      Text('Linha do tempo',
-                          style: theme.textTheme.titleSmall),
+                      Text('Linha do tempo', style: theme.textTheme.titleSmall),
                       const SizedBox(height: 10),
                       EventTimeline(
                         events: job.events,
@@ -137,8 +142,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: Text('Vídeos gerados',
-                                style: theme.textTheme.titleSmall),
+                            child: Text(
+                              'Vídeos gerados',
+                              style: theme.textTheme.titleSmall,
+                            ),
                           ),
                           if (job.zipUrl != null)
                             BotaoBaixar(
@@ -197,34 +204,39 @@ class _Propostas extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
-                Builder(builder: (_) {
-                  final style = HighlightStyle.of(p.kind);
-                  return Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: style.color.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(style.icon, size: 18, color: style.color),
-                  );
-                }),
+                Builder(
+                  builder: (_) {
+                    final style = HighlightStyle.of(p.kind);
+                    return Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: style.color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(style.icon, size: 18, color: style.color),
+                    );
+                  },
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(p.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium),
+                      Text(
+                        p.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
                       Text(
                         p.acceptsMusic
                             ? '${p.nMoments} momentos  ·  aceita música'
                             : '${formatDuration(p.durationS)}  ·  '
-                                'áudio da partida',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.hintColor),
+                                  'áudio da partida',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
                       ),
                     ],
                   ),
@@ -236,9 +248,11 @@ class _Propostas extends StatelessWidget {
         FilledButton.icon(
           onPressed: onGerar,
           icon: const Icon(Icons.movie_creation_outlined),
-          label: Text(job.renders.isEmpty
-              ? 'Escolher e gerar vídeos'
-              : 'Gerar mais vídeos'),
+          label: Text(
+            job.renders.isEmpty
+                ? 'Escolher e gerar vídeos'
+                : 'Gerar mais vídeos',
+          ),
         ),
       ],
     );
@@ -291,8 +305,9 @@ class _RenderCard extends StatelessWidget {
                         ].join('  ·  '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.hintColor),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
                       ),
                     ],
                   ),
@@ -316,9 +331,10 @@ class _RenderCard extends StatelessWidget {
             ],
             if (render.isFailed && render.error != null) ...[
               const SizedBox(height: 8),
-              Text(render.error!,
-                  style: TextStyle(
-                      color: theme.colorScheme.error, fontSize: 12)),
+              Text(
+                render.error!,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+              ),
             ],
             if (render.clips.isNotEmpty) const SizedBox(height: 10),
             for (final c in render.clips)
@@ -350,20 +366,25 @@ class _Progress extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Text(job.stage.isEmpty ? job.status : job.stage,
-                  style: theme.textTheme.titleMedium),
+              child: Text(
+                job.stage.isEmpty ? job.status : job.stage,
+                style: theme.textTheme.titleMedium,
+              ),
             ),
             if (job.isAnalyzing)
-              Text('${(job.progress * 100).toStringAsFixed(0)}%',
-                  style: theme.textTheme.titleMedium),
+              Text(
+                '${(job.progress * 100).toStringAsFixed(0)}%',
+                style: theme.textTheme.titleMedium,
+              ),
           ],
         ),
         const SizedBox(height: 10),
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: LinearProgressIndicator(
-            value:
-                job.isAnalyzing ? (job.progress > 0 ? job.progress : null) : 1,
+            value: job.isAnalyzing
+                ? (job.progress > 0 ? job.progress : null)
+                : 1,
             minHeight: 7,
             color: job.isFailed ? theme.colorScheme.error : null,
           ),
@@ -377,12 +398,14 @@ class _Progress extends StatelessWidget {
             _Fact(icon: Icons.flash_on, text: '${job.events.length} eventos'),
             if (job.proposals.isNotEmpty)
               _Fact(
-                  icon: Icons.playlist_add_check,
-                  text: '${job.proposals.length} vídeos possíveis'),
+                icon: Icons.playlist_add_check,
+                text: '${job.proposals.length} vídeos possíveis',
+              ),
             if (job.renders.isNotEmpty)
               _Fact(
-                  icon: Icons.movie_creation_outlined,
-                  text: '${job.renders.length} pedido(s)'),
+                icon: Icons.movie_creation_outlined,
+                text: '${job.renders.length} pedido(s)',
+              ),
           ],
         ),
       ],
@@ -398,13 +421,13 @@ class _Fact extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: Theme.of(context).hintColor),
-          const SizedBox(width: 5),
-          Text(text, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 15, color: Theme.of(context).hintColor),
+      const SizedBox(width: 5),
+      Text(text, style: Theme.of(context).textTheme.bodySmall),
+    ],
+  );
 }
 
 class _Failure extends StatelessWidget {
@@ -463,8 +486,9 @@ class _Detectors extends StatelessWidget {
                 Expanded(child: Text(_labels[d.detector] ?? d.detector)),
                 Text(
                   d.ok ? '${d.nEvents}' : 'falhou',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.hintColor),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.hintColor,
+                  ),
                 ),
               ],
             ),
@@ -497,13 +521,18 @@ class _ClipCard extends StatelessWidget {
                   ? Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.network(clip.thumbUrl!, fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                Container(color: Colors.black26)),
+                        Image.network(
+                          clip.thumbUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              Container(color: Colors.black26),
+                        ),
                         Center(
-                          child: Icon(Icons.play_circle_fill,
-                              size: 32,
-                              color: Colors.white.withValues(alpha: 0.85)),
+                          child: Icon(
+                            Icons.play_circle_fill,
+                            size: 32,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
                         ),
                       ],
                     )
@@ -525,8 +554,9 @@ class _ClipCard extends StatelessWidget {
                         const SizedBox(width: 5),
                         Text(
                           style.label,
-                          style: theme.textTheme.labelSmall
-                              ?.copyWith(color: style.color),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: style.color,
+                          ),
                         ),
                       ],
                     ),
@@ -579,8 +609,7 @@ class _NothingFound extends StatelessWidget {
         children: [
           Icon(Icons.search_off, size: 44, color: theme.hintColor),
           const SizedBox(height: 12),
-          Text('Nenhum momento encontrado',
-              style: theme.textTheme.titleSmall),
+          Text('Nenhum momento encontrado', style: theme.textTheme.titleSmall),
           const SizedBox(height: 6),
           Text(
             'Se a partida claramente tinha bons momentos, a HUD provavelmente '

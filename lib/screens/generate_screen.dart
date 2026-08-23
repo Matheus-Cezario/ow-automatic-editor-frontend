@@ -37,8 +37,7 @@ class _GenerateScreenState extends State<GenerateScreen> {
 
   List<Proposal> get _propostas => widget.job.proposals;
 
-  bool _tudoValido() =>
-      _escolhas.values.every((s) => s.options.janelaValida);
+  bool _tudoValido() => _escolhas.values.every((s) => s.options.janelaValida);
 
   void _alternar(Proposal p, bool marcado) {
     setState(() {
@@ -67,7 +66,11 @@ class _GenerateScreenState extends State<GenerateScreen> {
 
   Future<void> _gerar() async {
     if (_escolhas.isEmpty) return;
-    setState(() { _sending = true; _sent = 0; _error = null; });
+    setState(() {
+      _sending = true;
+      _sent = 0;
+      _error = null;
+    });
     try {
       await _api.createRender(
         jobId: widget.job.id,
@@ -76,7 +79,12 @@ class _GenerateScreenState extends State<GenerateScreen> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _sending = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _sending = false;
+        });
+      }
     }
   }
 
@@ -95,8 +103,9 @@ class _GenerateScreenState extends State<GenerateScreen> {
               'A análise encontrou ${_propostas.length} vídeo(s) possíveis. '
               'Marque os que quiser e dê uma música para cada um — quem ficar '
               'sem música sai com o áudio original da partida.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.hintColor),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
             ),
             const SizedBox(height: 16),
             for (final p in _propostas)
@@ -109,8 +118,7 @@ class _GenerateScreenState extends State<GenerateScreen> {
                 onToggle: (v) => _alternar(p, v),
                 onPickMusic: () => _escolherMusica(p),
                 onClearMusic: () => setState(() {
-                  _escolhas[p.id] =
-                      _escolhas[p.id]!.copyWith(clearMusic: true);
+                  _escolhas[p.id] = _escolhas[p.id]!.copyWith(clearMusic: true);
                   _musicBytes.remove(p.id);
                 }),
                 onOptions: (o) => setState(() {
@@ -126,8 +134,10 @@ class _GenerateScreenState extends State<GenerateScreen> {
                   color: theme.colorScheme.error.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(_error!,
-                    style: TextStyle(color: theme.colorScheme.error)),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
               ),
             ],
 
@@ -139,16 +149,20 @@ class _GenerateScreenState extends State<GenerateScreen> {
               ),
               const SizedBox(height: 8),
               Center(
-                child: Text('enviando as músicas…',
-                    style: theme.textTheme.bodySmall),
+                child: Text(
+                  'enviando as músicas…',
+                  style: theme.textTheme.bodySmall,
+                ),
               ),
             ] else
               FilledButton.icon(
                 onPressed: n == 0 || !_tudoValido() ? null : _gerar,
                 icon: const Icon(Icons.movie_creation_outlined),
-                label: Text(n == 0
-                    ? 'Escolha ao menos um vídeo'
-                    : 'Gerar $n vídeo${n > 1 ? 's' : ''}'),
+                label: Text(
+                  n == 0
+                      ? 'Escolha ao menos um vídeo'
+                      : 'Gerar $n vídeo${n > 1 ? 's' : ''}',
+                ),
               ),
           ],
         ),
@@ -199,9 +213,12 @@ class _ProposalCard extends StatelessWidget {
               children: [
                 Icon(style.icon, size: 14, color: style.color),
                 const SizedBox(width: 5),
-                Text(style.label,
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: style.color)),
+                Text(
+                  style.label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: style.color,
+                  ),
+                ),
               ],
             ),
             subtitle: Column(
@@ -220,8 +237,9 @@ class _ProposalCard extends StatelessWidget {
                       formatDuration(proposal.durationS),
                     if (!proposal.acceptsMusic) 'áudio da partida',
                   ].join('  ·  '),
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.hintColor),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.hintColor,
+                  ),
                 ),
               ],
             ),
@@ -243,15 +261,16 @@ class _ProposalCard extends StatelessWidget {
                         : _mb(musicBytes ?? 0),
                     chosen: sel.music != null,
                     onTap: enabled ? onPickMusic : null,
-                    onClear:
-                        sel.music == null || !enabled ? null : onClearMusic,
+                    onClear: sel.music == null || !enabled
+                        ? null
+                        : onClearMusic,
                   ),
                   const SizedBox(height: 12),
                   _Beats(
                     value: sel.options.montageClipBeats,
                     enabled: enabled,
-                    onChanged: (v) => onOptions(
-                        sel.options.copyWith(montageClipBeats: v)),
+                    onChanged: (v) =>
+                        onOptions(sel.options.copyWith(montageClipBeats: v)),
                   ),
                   const SizedBox(height: 4),
                   MusicWindow(
@@ -287,24 +306,26 @@ class _Beats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-        children: [
-          const Expanded(child: Text('Batidas por corte')),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: enabled && value > 1 ? () => onChanged(value - 1) : null,
-            icon: const Icon(Icons.remove_circle_outline),
-          ),
-          SizedBox(
-            width: 22,
-            child: Text('$value',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: enabled && value < 8 ? () => onChanged(value + 1) : null,
-            icon: const Icon(Icons.add_circle_outline),
-          ),
-        ],
-      );
+    children: [
+      const Expanded(child: Text('Batidas por corte')),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        onPressed: enabled && value > 1 ? () => onChanged(value - 1) : null,
+        icon: const Icon(Icons.remove_circle_outline),
+      ),
+      SizedBox(
+        width: 22,
+        child: Text(
+          '$value',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+      ),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        onPressed: enabled && value < 8 ? () => onChanged(value + 1) : null,
+        icon: const Icon(Icons.add_circle_outline),
+      ),
+    ],
+  );
 }

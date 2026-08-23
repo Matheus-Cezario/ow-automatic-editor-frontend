@@ -41,16 +41,21 @@ class _JobsScreenState extends State<JobsScreen> {
   Future<void> _refresh() async {
     try {
       final jobs = await _api.listJobs();
-      if (mounted) setState(() { _jobs = jobs; _error = null; });
+      if (mounted) {
+        setState(() {
+          _jobs = jobs;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
   }
 
   Future<void> _newJob() async {
-    final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const NewJobScreen()),
-    );
+    final created = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => const NewJobScreen()));
     if (created == true) _refresh();
   }
 
@@ -166,8 +171,9 @@ class _JobCard extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 job.stage.isEmpty ? '—' : job.stage,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.hintColor),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.hintColor,
+                ),
               ),
               if (job.isAnalyzing) ...[
                 const SizedBox(height: 10),
@@ -192,19 +198,21 @@ class _JobCard extends StatelessWidget {
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    Icon(Icons.movie_filter,
-                        size: 16, color: theme.hintColor),
+                    Icon(Icons.movie_filter, size: 16, color: theme.hintColor),
                     const SizedBox(width: 6),
                     Text(
-                        job.nClips > 0
-                            ? '${job.nClips} vídeo(s) gerados'
-                            : '${job.nProposals} para gerar',
-                        style: theme.textTheme.bodySmall),
+                      job.nClips > 0
+                          ? '${job.nClips} vídeo(s) gerados'
+                          : '${job.nProposals} para gerar',
+                      style: theme.textTheme.bodySmall,
+                    ),
                     const SizedBox(width: 14),
                     Icon(Icons.schedule, size: 16, color: theme.hintColor),
                     const SizedBox(width: 6),
-                    Text(formatDuration(job.durationS),
-                        style: theme.textTheme.bodySmall),
+                    Text(
+                      formatDuration(job.durationS),
+                      style: theme.textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ],
@@ -246,7 +254,11 @@ class _StatusChip extends StatelessWidget {
       ),
       child: Text(
         _labels[job.status] ?? job.status,
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -266,14 +278,15 @@ class _EmptyState extends StatelessWidget {
           children: [
             Icon(Icons.videocam_off, size: 56, color: theme.hintColor),
             const SizedBox(height: 16),
-            Text('Nenhuma partida ainda',
-                style: theme.textTheme.titleMedium),
+            Text('Nenhuma partida ainda', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
               'Envie a gravação de uma partida e o sistema separa as rajadas '
               'de eliminação, as fugas e monta o resto no ritmo da sua música.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
             ),
           ],
         ),
@@ -299,19 +312,25 @@ class _ErrorState extends StatelessWidget {
           children: [
             Icon(Icons.cloud_off, size: 48, color: theme.colorScheme.error),
             const SizedBox(height: 14),
-            Text('Não consegui falar com a API',
-                style: theme.textTheme.titleMedium),
+            Text(
+              'Não consegui falar com a API',
+              style: theme.textTheme.titleMedium,
+            ),
             const SizedBox(height: 6),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
               kApiBase.isEmpty ? '(mesma origem)' : kApiBase,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.hintColor, fontFamily: 'monospace'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+                fontFamily: 'monospace',
+              ),
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(

@@ -38,7 +38,7 @@ class MusicWindow extends StatelessWidget {
         Text(
           enabled
               ? 'Onde a música entra e onde termina. O vídeo é montado para '
-                  'caber nesse trecho.'
+                    'caber nesse trecho.'
               : 'Escolha uma música para poder recortar um trecho.',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         ),
@@ -89,10 +89,10 @@ class MusicWindow extends StatelessWidget {
           subtitle: Text(
             options.montageLoop
                 ? 'o vídeo terá exatamente a duração do trecho; os momentos '
-                    'entram em ordem sorteada, sem repetir nenhum antes de '
-                    'todos terem aparecido'
+                      'entram em ordem sorteada, sem repetir nenhum antes de '
+                      'todos terem aparecido'
                 : 'o vídeo para quando os momentos acabarem, sem passar da '
-                    'duração do trecho',
+                      'duração do trecho',
           ),
         ),
       ],
@@ -122,8 +122,9 @@ class TimeField extends StatefulWidget {
 }
 
 class _TimeFieldState extends State<TimeField> {
-  late final TextEditingController _c =
-      TextEditingController(text: _format(widget.seconds));
+  late final TextEditingController _c = TextEditingController(
+    text: _format(widget.seconds),
+  );
 
   static String _format(double? s) {
     if (s == null || s <= 0) return '';
@@ -153,15 +154,15 @@ class _TimeFieldState extends State<TimeField> {
 
   @override
   Widget build(BuildContext context) => TextField(
-        controller: _c,
-        enabled: widget.enabled,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          labelText: widget.label,
-          hintText: widget.hint ?? '0:00',
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
-        onChanged: (v) => widget.onChanged(_parse(v)),
-      );
+    controller: _c,
+    enabled: widget.enabled,
+    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    decoration: InputDecoration(
+      labelText: widget.label,
+      hintText: widget.hint ?? '0:00',
+      border: const OutlineInputBorder(),
+      isDense: true,
+    ),
+    onChanged: (v) => widget.onChanged(_parse(v)),
+  );
 }

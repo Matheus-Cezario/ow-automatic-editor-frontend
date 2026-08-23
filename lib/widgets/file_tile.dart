@@ -42,28 +42,31 @@ class FileTile extends StatelessWidget {
                       .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(dense ? 9 : 12),
                 ),
-                child: Icon(icon,
-                    size: dense ? 18 : 24,
-                    color: chosen ? scheme.primary : scheme.onSurfaceVariant),
+                child: Icon(
+                  icon,
+                  size: dense ? 18 : 24,
+                  color: chosen ? scheme.primary : scheme.onSurfaceVariant,
+                ),
               ),
               SizedBox(width: dense ? 10 : 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: dense
-                            ? Theme.of(context).textTheme.bodyMedium
-                            : Theme.of(context).textTheme.titleSmall),
+                    Text(
+                      title,
+                      style: dense
+                          ? Theme.of(context).textTheme.bodyMedium
+                          : Theme.of(context).textTheme.titleSmall,
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: Theme.of(context).hintColor),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
                     ),
                   ],
                 ),
@@ -75,9 +78,11 @@ class FileTile extends StatelessWidget {
                   tooltip: 'Remover',
                 )
               else
-                Icon(chosen ? Icons.check_circle : Icons.chevron_right,
-                    size: dense ? 20 : 24,
-                    color: chosen ? scheme.primary : null),
+                Icon(
+                  chosen ? Icons.check_circle : Icons.chevron_right,
+                  size: dense ? 20 : 24,
+                  color: chosen ? scheme.primary : null,
+                ),
             ],
           ),
         ),
