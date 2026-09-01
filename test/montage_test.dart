@@ -63,6 +63,67 @@ void main() {
     });
   });
 
+  group('a jogada dentro do bloco', () {
+    test('o instante da jogada em tempo de vídeo', () {
+      // o corte começa antes dela, para dar embalo: a conta é onde o bloco
+      // entra mais o quanto se consumiu de gravação até a jogada
+      final c = corte(3, 2, t: 90); // começa em 90 - 2*0.7 = 88.6
+      expect(momentoNoVideo(c), closeTo(3 + 1.4, 1e-9));
+    });
+
+    test('sem jogada dentro do bloco, não há o que alinhar', () {
+      // aparar até a jogada sair é permitido; marcar o que não está lá, não
+      final c = corte(0, 2, t: 90).copyWith(startS: 200);
+      expect(momentoNoVideo(c), isNull);
+      // e um bloco que não veio de momento nenhum também não tem marca
+      const media = TimelineClip(
+        atS: 0,
+        durationS: 2,
+        startS: 0,
+        source: 'media',
+        mediaId: 'm1',
+      );
+      expect(momentoNoVideo(media), isNull);
+    });
+  });
+
+  group('o ímã e a jogada', () {
+    // batidas de meio em meio segundo
+    const batidas = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+
+    test('a jogada gruda na batida, e não só as bordas', () {
+      // é o que uma montagem no ritmo quer dizer: o impacto cai no tempo, e a
+      // borda do corte cai onde tiver de cair
+      final cortes = [corte(0, 1.0, t: 10)]; // jogada a 0,7s do começo
+      // solto em 0,85: a jogada cairia em 1,55 — 0,05 depois da batida de 1,5
+      final movido = mover(cortes, 0, 0.85, beats: batidas, snap: true);
+
+      expect(movido.atS, closeTo(0.8, 1e-9));
+      expect(momentoNoVideo(movido), closeTo(1.5, 1e-9));
+    });
+
+    test('entre a borda e a jogada, ganha quem estiver mais perto', () {
+      // o ímã segue sendo previsível: quem se vê grudar é o que estava perto
+      final cortes = [corte(0, 1.0, t: 10)];
+      final movido = mover(cortes, 0, 0.98, beats: batidas, snap: true);
+
+      // o começo está a 0,02 da batida de 1,0; a jogada, a 0,18 da de 1,5
+      expect(movido.atS, closeTo(1.0, 1e-9));
+    });
+
+    test('bloco sem jogada continua grudando pelas bordas', () {
+      const media = TimelineClip(
+        atS: 0,
+        durationS: 1.0,
+        startS: 0,
+        source: 'media',
+        mediaId: 'm1',
+      );
+      final movido = mover([media], 0, 0.96, beats: batidas, snap: true);
+      expect(movido.atS, closeTo(1.0, 1e-9));
+    });
+  });
+
   group('grade de batidas ajustável', () {
     const grade = [0.0, 0.5, 1.0, 1.5, 2.0];
 

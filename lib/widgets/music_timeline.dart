@@ -193,6 +193,15 @@ class _MusicTimelineState extends State<MusicTimeline> {
     return math.max(fim + 4, widget.fallbackDurationS);
   }
 
+  /// A jogada deste bloco cai exatamente sob a cabeça de leitura?
+  ///
+  /// Meio quadro de tolerância: alinhar é uma decisão de montagem, não uma
+  /// medida de precisão infinita.
+  bool _jogadaNoCursor(TimelineClip clip) {
+    final marca = momentoNoVideo(clip);
+    return marca != null && (marca - widget.playheadS).abs() < 0.017;
+  }
+
   /// Em que camada cai um ponto da régua — a conta inversa do empilhamento.
   int _camadaEm(double dy) {
     final linha = ((dy - MusicTimeline.waveHeight) / MusicTimeline.blockHeight)
@@ -338,6 +347,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
                               musica: widget.musicas[clip.mediaId],
                               selected: widget.selecao.contains(clip.id),
                               travada: widget.layers[camada].locked,
+                              marcaNoCursor: _jogadaNoCursor(clip),
                               pxPerSecond: px,
                               left: clip.atS * px,
                               top:
@@ -738,6 +748,7 @@ class _Block extends StatefulWidget {
     required this.musica,
     required this.selected,
     required this.travada,
+    required this.marcaNoCursor,
     required this.pxPerSecond,
     required this.left,
     required this.top,
@@ -765,6 +776,10 @@ class _Block extends StatefulWidget {
 
   /// Camada travada: o clipe ainda se escolhe, mas não se arrasta.
   final bool travada;
+
+  /// A jogada deste bloco está debaixo da cabeça de leitura?
+  final bool marcaNoCursor;
+
   final double pxPerSecond;
   final double left;
   final double top;
@@ -967,15 +982,19 @@ class _BlockState extends State<_Block> {
                 // o que se alinha com a percussão é ela, não a borda do corte.
                 if (_marca != null)
                   Positioned(
-                    left: _marca! * largura - 1,
+                    left: _marca! * largura - (widget.marcaNoCursor ? 1.5 : 1),
                     top: 0,
                     bottom: 0,
-                    width: 2,
+                    width: widget.marcaNoCursor ? 3 : 2,
                     child: IgnorePointer(
                       child: ColoredBox(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.85,
-                        ),
+                        // acesa quando a jogada está exatamente sob a cabeça de
+                        // leitura: é a confirmação de que o encaixe pegou
+                        color: widget.marcaNoCursor
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurface.withValues(
+                                alpha: 0.85,
+                              ),
                       ),
                     ),
                   ),
@@ -986,8 +1005,10 @@ class _BlockState extends State<_Block> {
                     child: IgnorePointer(
                       child: Icon(
                         Icons.arrow_drop_down,
-                        size: 12,
-                        color: theme.colorScheme.onSurface,
+                        size: widget.marcaNoCursor ? 14 : 12,
+                        color: widget.marcaNoCursor
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurface,
                       ),
                     ),
                   ),

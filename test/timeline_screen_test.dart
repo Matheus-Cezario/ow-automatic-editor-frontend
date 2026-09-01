@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ow_editor/api.dart';
+import 'package:ow_editor/montage.dart';
 import 'package:ow_editor/screens/timeline_screen.dart';
 import 'package:ow_editor/widgets/music_timeline.dart';
 import 'package:ow_editor/widgets/preview_player.dart';
@@ -48,6 +49,15 @@ Map<String, dynamic> jobJson({bool comMusica = false}) => {
     {'kind': 'kill', 't': 30.0, 'confidence': 1.0},
     {'kind': 'sleep', 't': 75.0, 'confidence': 1.0},
     {'kind': 'stun', 't': 120.0, 'confidence': 1.0},
+    // o tiro na cabeça e a morte por habilidade são a jogada que se procura
+    // numa montagem — ficaram de fora da prateleira por engano
+    {'kind': 'headshot', 't': 140.0, 'confidence': 1.0},
+    {
+      'kind': 'ability_kill',
+      't': 160.0,
+      'confidence': 1.0,
+      'meta': {'ability': 'orisa/energy_javelin'},
+    },
     // contexto, não jogada: não deve virar bloco
     {'kind': 'death', 't': 200.0, 'confidence': 1.0},
     {'kind': 'low_hp', 't': 210.0, 'confidence': 1.0},
@@ -124,7 +134,18 @@ void main() {
       find.byKey(ValueKey('bloco-${cortes(tester)[i].id}'));
 
   /// O item na prateleira de momentos, pelo instante em que aconteceu.
-  Finder momento(double t) => find.byKey(ValueKey('momento-$t'));
+  ///
+  /// A chave traz o tipo junto — uma eliminação na cabeça acende dois
+  /// detectores quase no mesmo quadro, e só o instante não identificaria o
+  /// cartão. O tipo sai da mesma lista de eventos que abasteceu a tela, para o
+  /// teste não ter de repeti-la.
+  Finder momento(double t) {
+    final evento = (jobJson()['events'] as List)
+        .cast<Map<String, dynamic>>()
+        .firstWhere((e) => e['t'] == t);
+    final chave = chaveDoMomento(evento['kind'] as String, t);
+    return find.byKey(ValueKey('momento-$chave'));
+  }
 
   testWidgets('oferece os momentos da partida, e só os que viram corte', (
     tester,
@@ -134,9 +155,41 @@ void main() {
     expect(momento(30.0), findsOneWidget);
     expect(momento(75.0), findsOneWidget);
     expect(momento(120.0), findsOneWidget);
+    expect(momento(140.0), findsOneWidget);
+    expect(momento(160.0), findsOneWidget);
     // vida baixa e interrupção são o contexto da jogada, não a jogada
     expect(find.textContaining('Interrupção'), findsNothing);
     expect(find.textContaining('Vida baixa'), findsNothing);
+  });
+
+  testWidgets('a eliminação com habilidade diz qual habilidade foi', (
+    tester,
+  ) async {
+    await abrir(tester);
+
+    // "Orisa: Energy Javelin", e não "Morte por habilidade": numa partida com
+    // cinco habilidades diferentes o rótulo genérico daria cinco cartões
+    // idênticos, e escolher entre eles seria escolher no escuro
+    expect(
+      find.descendant(
+        of: momento(160.0),
+        matching: find.text('Orisa: Energy Javelin'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('o tiro na cabeça vira bloco como qualquer outra jogada', (
+    tester,
+  ) async {
+    await abrir(tester);
+    await tester.tap(momento(140.0));
+    await tester.pump();
+
+    final blocos = cortes(tester);
+    expect(blocos, hasLength(1));
+    expect(blocos.first.sourceT, 140.0);
+    expect(blocos.first.kind, 'headshot');
   });
 
   testWidgets('sem cortes, não há o que gerar', (tester) async {
@@ -1970,6 +2023,157 @@ void main() {
       // acontecia quando os atalhos da tela alcançavam quem está escrevendo
       expect(tester.widget<TextField>(noDialogo).controller?.text, 'short');
       expect(cortes(tester), hasLength(1));
+    });
+  });
+
+  // ── alinhar a jogada ──────────────────────────────────────────────────────
+  //
+  // O bloco é um trecho; a jogada é um instante dentro dele, marcado na régua.
+  // Alinhar pela borda deixaria o impacto meio segundo depois da batida.
+
+  group('alinhar a jogada ao cursor', () {
+    testWidgets('o botão leva a jogada para debaixo da cabeça de leitura', (
+      tester,
+    ) async {
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      final antes = cortes(tester).single;
+      expect(momentoNoVideo(antes), isNotNull);
+
+      // parar a cabeça de leitura na batida, escolher o bloco, alinhar
+      await cursorEm(tester, 4);
+      await tester.tap(bloco(tester, 0));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('alinhar-momento')));
+      await assentar(tester);
+
+      final depois = cortes(tester).single;
+      expect(momentoNoVideo(depois), closeTo(4.0, 0.2));
+      expect(depois.durationS, antes.durationS, reason: 'não estica nem apara');
+    });
+
+    testWidgets('sem seleção, vale o bloco sob a cabeça de leitura', (
+      tester,
+    ) async {
+      // tocar na régua para posicionar o cursor limpa a seleção; pedir para
+      // escolher o bloco de novo seria o mesmo gesto duas vezes
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await cursorEm(tester, 0.9); // dentro do bloco, que começa em 0
+      expect(
+        find.byKey(const Key('alinhar-momento')),
+        findsNothing,
+        reason: 'sem seleção não há painel',
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+      await tester.pump();
+
+      expect(momentoNoVideo(cortes(tester).single), closeTo(0.9, 0.2));
+    });
+
+    testWidgets('sem seleção, vale o bloco sob a cabeça de leitura', (
+      tester,
+    ) async {
+      // tocar na régua para posicionar o cursor limpa a seleção; pedir para
+      // escolher o bloco de novo seria o mesmo gesto duas vezes
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await cursorEm(tester, 0.9); // dentro do bloco, que começa em 0
+      expect(
+        find.byKey(const Key('alinhar-momento')),
+        findsNothing,
+        reason: 'sem seleção não há painel',
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+      await tester.pump();
+
+      expect(momentoNoVideo(cortes(tester).single), closeTo(0.9, 0.2));
+    });
+
+    testWidgets('o atalho M faz o mesmo', (tester) async {
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await cursorEm(tester, 5);
+      await tester.tap(bloco(tester, 0));
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+      await tester.pump();
+
+      expect(momentoNoVideo(cortes(tester).single), closeTo(5.0, 0.2));
+    });
+
+    testWidgets('com o vizinho colado, o trecho desliza e a tela conta', (
+      tester,
+    ) async {
+      // numa montagem de blocos colados o bloco não tem para onde andar — e
+      // silêncio aqui faria parecer que o comando não funcionou
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await tester.tap(momento(75.0));
+      await tester.pump();
+      final antes = cortes(tester).first;
+
+      await cursorEm(tester, 0.4);
+      await tester.tap(bloco(tester, 0));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('alinhar-momento')));
+      await assentar(tester);
+
+      final depois = cortes(tester).first;
+      expect(momentoNoVideo(depois), closeTo(0.4, 0.2));
+      expect(depois.atS, antes.atS, reason: 'o bloco ficou onde estava');
+      expect(depois.startS, isNot(antes.startS), reason: 'o trecho andou');
+      expect(cortes(tester)[1].atS, 1.2, reason: 'o vizinho não se mexeu');
+      expect(find.textContaining('deslizou dentro dele'), findsOneWidget);
+    });
+
+    testWidgets('um bloco de música não tem jogada a alinhar', (tester) async {
+      await abrir(tester, comMusica: true);
+      await aba(tester, 'Biblioteca');
+      await tester.tap(find.byKey(const ValueKey('midia-m1')));
+      await assentar(tester);
+      await aba(tester, 'Momentos');
+
+      // o bloco de música fica escolhido depois de posto
+      expect(find.byKey(const Key('alinhar-momento')), findsNothing);
+    });
+
+    testWidgets('a marca acende quando a jogada está sob o cursor', (
+      tester,
+    ) async {
+      // é a confirmação visual do encaixe: sem ela, alinhar é um ato de fé
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await cursorEm(tester, 4);
+
+      bool marcaAcesa() {
+        final blocos = tester.widgetList<MusicTimeline>(
+          find.byType(MusicTimeline),
+        );
+        return blocos.first.layers.any(
+          (l) => l.clips.any(
+            (c) =>
+                momentoNoVideo(c) != null &&
+                (momentoNoVideo(c)! - blocos.first.playheadS).abs() < 0.017,
+          ),
+        );
+      }
+
+      expect(marcaAcesa(), isFalse);
+      await tester.tap(bloco(tester, 0));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('alinhar-momento')));
+      await assentar(tester);
+      expect(marcaAcesa(), isTrue);
     });
   });
 }

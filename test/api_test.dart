@@ -23,52 +23,15 @@ void main() {
     });
   });
 
-  group('ClipOptions', () {
-    // A janela de música é por vídeo, não por partida: é assim que dois
-    // vídeos da mesma gravação saem com trilhas e durações diferentes.
-    test('janela de música só vai no JSON quando o fim é escolhido', () {
-      expect(const ClipOptions().toJson().containsKey('music_end_s'), isFalse);
-      final comFim = const ClipOptions().copyWith(
-        musicEndS: 40,
-        musicStartS: 10,
-      );
-      final json = comFim.toJson();
-      expect(json['music_end_s'], 40);
-      expect(json['music_start_s'], 10);
-    });
-
-    test('dá para limpar o fim escolhido', () {
-      final o = const ClipOptions().copyWith(musicEndS: 40);
-      expect(o.copyWith(clearMusicEnd: true).musicEndS, isNull);
-    });
-
-    test('fim antes do início é apontado como inválido', () {
-      expect(const ClipOptions().janelaValida, isTrue);
-      final ruim = const ClipOptions().copyWith(musicStartS: 30, musicEndS: 10);
-      expect(ruim.janelaValida, isFalse);
-    });
-  });
-
   group('JobParams', () {
     test('só carrega os parâmetros da análise', () {
       final json = const JobParams().toJson();
+      // nada de música: ela entra pela biblioteca, no editor
       expect(json.containsKey('music_start_s'), isFalse);
       expect(json.containsKey('montage_loop'), isFalse);
-      expect(json['multikill_min'], 3);
-    });
-  });
-
-  group('Selection', () {
-    test('o JSON leva a proposta e as opções, e a música vai à parte', () {
-      const sel = Selection(
-        proposalId: 'p1',
-        options: ClipOptions(montageClipBeats: 4),
-      );
-      final json = sel.toJson();
-      expect(json['proposal_id'], 'p1');
-      expect((json['options'] as Map)['montage_clip_beats'], 4);
-      // o arquivo em si sobe como campo multipart separado
-      expect(json.containsKey('music'), isFalse);
+      // e nada de agrupar momentos: isso deixou de ser trabalho da análise
+      expect(json.containsKey('multikill_min'), isFalse);
+      expect(json['ult_negate_window_s'], 6);
     });
   });
 
@@ -80,12 +43,11 @@ void main() {
       ...extra,
     };
 
-    test('ready significa pronto para escolher, não terminado', () {
-      final job = Job.fromJson(base({'n_proposals': 3}));
+    test('ready significa pronto para editar, não terminado', () {
+      final job = Job.fromJson(base({'n_clips': 0}));
       expect(job.isReady, isTrue);
       expect(job.isAnalyzing, isFalse);
       expect(job.isActive, isFalse);
-      expect(job.nProposals, 3);
     });
 
     test('um pedido em andamento mantém o app consultando', () {

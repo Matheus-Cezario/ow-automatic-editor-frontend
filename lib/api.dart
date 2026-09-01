@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 
+import 'upload.dart';
+
 /// Base da API. Quando o app Flutter é servido pelo próprio gateway, fica
 /// vazia e as chamadas viram relativas — assim funciona em qualquer host sem
 /// recompilar. Em desenvolvimento o app roda numa porta e a API em outra.
@@ -46,118 +48,23 @@ class ApiException implements Exception {
 
 // ─────────────────────────────── modelos ────────────────────────────────────
 
-/// Parâmetros da **análise**: o que conta como momento importante.
+/// Parâmetros da **análise**: como ler a partida.
 ///
-/// Valem para a partida inteira e são decididos no upload. Nada de música aqui
-/// — ela só aparece na hora de gerar cada vídeo, em [ClipOptions].
+/// Valem para a partida inteira e são decididos no upload. Já foram muitos
+/// mais — quantas eliminações faziam uma rajada, quantas faziam um "sozinho
+/// contra todos" — porque a análise terminava propondo vídeos prontos. Ela não
+/// propõe mais: entrega os momentos, e agrupá-los é trabalho de quem edita.
 class JobParams {
-  const JobParams({
-    this.multikillMin = 3,
-    this.multikillWindowS = 10,
-    this.soloWipeMin = 4,
-    this.escapeMinEvents = 2,
-    this.makeBeatMontage = true,
-  });
+  const JobParams({this.ultNegateWindowS = 6});
 
-  final int multikillMin;
-  final double multikillWindowS;
-  final int soloWipeMin;
-  final int escapeMinEvents;
-  final bool makeBeatMontage;
+  /// Uma ultimate inimiga seguida de eliminação dentro desta janela conta
+  /// como ultimate anulada — a única leitura que precisa de dois detectores.
+  final double ultNegateWindowS;
 
-  Map<String, dynamic> toJson() => {
-    'multikill_min': multikillMin,
-    'multikill_window_s': multikillWindowS,
-    'solo_wipe_min': soloWipeMin,
-    'escape_min_events': escapeMinEvents,
-    'make_beat_montage': makeBeatMontage,
-  };
+  Map<String, dynamic> toJson() => {'ult_negate_window_s': ultNegateWindowS};
 
-  JobParams copyWith({
-    int? multikillMin,
-    double? multikillWindowS,
-    int? soloWipeMin,
-    int? escapeMinEvents,
-    bool? makeBeatMontage,
-  }) => JobParams(
-    multikillMin: multikillMin ?? this.multikillMin,
-    multikillWindowS: multikillWindowS ?? this.multikillWindowS,
-    soloWipeMin: soloWipeMin ?? this.soloWipeMin,
-    escapeMinEvents: escapeMinEvents ?? this.escapeMinEvents,
-    makeBeatMontage: makeBeatMontage ?? this.makeBeatMontage,
-  );
-}
-
-/// Escolhas de **um** vídeo, na hora de gerar. Cada vídeo tem as suas — é
-/// assim que músicas diferentes convivem na mesma partida.
-class ClipOptions {
-  const ClipOptions({
-    this.montageClipBeats = 2,
-    this.musicStartS = 0,
-    this.musicEndS,
-    this.montageLoop = false,
-  });
-
-  final int montageClipBeats;
-
-  /// Trecho da música usado na montagem. Com [musicEndS] definido, o vídeo tem
-  /// exatamente essa duração quando [montageLoop] está ligado, e no máximo
-  /// essa duração quando está desligado.
-  final double musicStartS;
-  final double? musicEndS;
-  final bool montageLoop;
-
-  bool get janelaValida => musicEndS == null || musicEndS! > musicStartS;
-
-  Map<String, dynamic> toJson() => {
-    'montage_clip_beats': montageClipBeats,
-    'music_start_s': musicStartS,
-    if (musicEndS != null) 'music_end_s': musicEndS,
-    'montage_loop': montageLoop,
-  };
-
-  ClipOptions copyWith({
-    int? montageClipBeats,
-    double? musicStartS,
-    double? musicEndS,
-    bool clearMusicEnd = false,
-    bool? montageLoop,
-  }) => ClipOptions(
-    montageClipBeats: montageClipBeats ?? this.montageClipBeats,
-    musicStartS: musicStartS ?? this.musicStartS,
-    musicEndS: clearMusicEnd ? null : (musicEndS ?? this.musicEndS),
-    montageLoop: montageLoop ?? this.montageLoop,
-  );
-}
-
-/// Uma proposta escolhida, pronta para virar pedido de geração.
-class Selection {
-  const Selection({
-    required this.proposalId,
-    this.options = const ClipOptions(),
-    this.music,
-  });
-
-  final String proposalId;
-  final ClipOptions options;
-
-  /// Sem música o vídeo sai com o **áudio original** da partida.
-  final PlatformFile? music;
-
-  Selection copyWith({
-    ClipOptions? options,
-    PlatformFile? music,
-    bool clearMusic = false,
-  }) => Selection(
-    proposalId: proposalId,
-    options: options ?? this.options,
-    music: clearMusic ? null : (music ?? this.music),
-  );
-
-  Map<String, dynamic> toJson() => {
-    'proposal_id': proposalId,
-    'options': options.toJson(),
-  };
+  JobParams copyWith({double? ultNegateWindowS}) =>
+      JobParams(ultNegateWindowS: ultNegateWindowS ?? this.ultNegateWindowS);
 }
 
 /// Uma música enviada para a partida, já ouvida pelo sistema.
@@ -1251,17 +1158,33 @@ class DetectionEvent {
     required this.kind,
     required this.t,
     required this.confidence,
+    this.meta = const {},
   });
 
   factory DetectionEvent.fromJson(Map<String, dynamic> j) => DetectionEvent(
     kind: j['kind'] as String,
     t: (j['t'] as num).toDouble(),
     confidence: (j['confidence'] as num?)?.toDouble() ?? 1.0,
+    meta: (j['meta'] as Map?)?.cast<String, dynamic>() ?? const {},
   );
 
   final String kind;
   final double t;
   final double confidence;
+
+  /// O que o detector viu além do instante. Varia por tipo: um `ability_kill`
+  /// traz `ability` (`"orisa/energy_javelin"`), uma `ult_negated` traz de quem
+  /// era a ultimate e quanto demorou.
+  final Map<String, dynamic> meta;
+
+  /// A habilidade que matou, quando o evento é de habilidade.
+  ///
+  /// Vem no formato do arquivo do ícone — `heroi/habilidade` — porque é dali
+  /// que o detector a reconhece.
+  String? get ability {
+    final a = meta['ability'];
+    return a is String && a.isNotEmpty ? a : null;
+  }
 }
 
 class DetectorReport {
@@ -1285,53 +1208,6 @@ class DetectorReport {
   final String? error;
 }
 
-/// Um vídeo que o sistema **pode** gerar com os momentos encontrados.
-///
-/// Fica disponível para sempre: gerar um vídeo com um momento não o consome,
-/// então a mesma proposta pode virar quantos vídeos o usuário quiser.
-class Proposal {
-  Proposal({
-    required this.id,
-    required this.kind,
-    required this.title,
-    required this.startS,
-    required this.endS,
-    required this.score,
-    required this.nMoments,
-    required this.acceptsMusic,
-    this.moments = const [],
-  });
-
-  factory Proposal.fromJson(Map<String, dynamic> j) => Proposal(
-    id: j['id'] as String,
-    kind: j['kind'] as String,
-    title: j['title'] as String? ?? '',
-    startS: (j['start_s'] as num).toDouble(),
-    endS: (j['end_s'] as num).toDouble(),
-    score: (j['score'] as num).toDouble(),
-    nMoments: j['n_moments'] as int? ?? 0,
-    acceptsMusic: j['accepts_music'] as bool? ?? false,
-    moments: ((j['moments'] as List?) ?? [])
-        .map((e) => (e as num).toDouble())
-        .toList(),
-  );
-
-  final String id;
-  final String kind;
-  final String title;
-  final double startS;
-  final double endS;
-  final double score;
-  final int nMoments;
-
-  /// Montagens são cortadas no ritmo e aceitam trilha; um trecho corrido da
-  /// partida sai sempre com o áudio do jogo.
-  final bool acceptsMusic;
-  final List<double> moments;
-
-  double get durationS => endS - startS;
-}
-
 class Clip {
   Clip({
     required this.id,
@@ -1341,7 +1217,6 @@ class Clip {
     required this.endS,
     required this.score,
     this.renderId,
-    this.proposalId,
     this.videoUrl,
     this.thumbUrl,
     this.segmentsZipUrl,
@@ -1356,7 +1231,6 @@ class Clip {
     endS: (j['end_s'] as num).toDouble(),
     score: (j['score'] as num).toDouble(),
     renderId: j['render_id'] as String?,
-    proposalId: j['proposal_id'] as String?,
     videoUrl: j['video_url'] == null
         ? null
         : absoluteUrl('$kApiBase${j['video_url']}'),
@@ -1376,7 +1250,6 @@ class Clip {
   final double endS;
   final double score;
   final String? renderId;
-  final String? proposalId;
 
   /// Nulo quando a montagem falhou: sobraram só os cortes.
   final String? videoUrl;
@@ -1403,8 +1276,8 @@ class Clip {
   String? get renderError => meta['render_error'] as String?;
 }
 
-/// Um pedido de geração: as propostas escolhidas de uma vez, cada uma com a
-/// sua música. Uma partida acumula quantos pedidos o usuário quiser.
+/// Um pedido de geração: as montagens mandadas para o servidor de uma vez.
+/// Uma partida acumula quantos pedidos o usuário quiser.
 class Render {
   Render({
     required this.id,
@@ -1414,7 +1287,6 @@ class Render {
     required this.createdAt,
     this.error,
     this.clips = const [],
-    this.musicNames = const [],
   });
 
   factory Render.fromJson(Map<String, dynamic> j) => Render(
@@ -1427,11 +1299,6 @@ class Render {
     clips: ((j['clips'] as List?) ?? [])
         .map((e) => Clip.fromJson(e as Map<String, dynamic>))
         .toList(),
-    musicNames: ((j['selections'] as List?) ?? [])
-        .map((e) => (e as Map)['music_name'] as String?)
-        .whereType<String>()
-        .toSet()
-        .toList(),
   );
 
   final String id;
@@ -1443,7 +1310,16 @@ class Render {
   final List<Clip> clips;
 
   /// Nomes das músicas usadas neste pedido, sem repetir.
-  final List<String> musicNames;
+  ///
+  /// Saem dos **clipes gerados**, e não do pedido: a trilha de uma montagem é
+  /// um bloco na régua dela, e é o editor que sabe qual acabou tocando. Já
+  /// vinha das `selections` do pedido, quando a música era escolhida à parte
+  /// do vídeo — com aquele campo removido, ler dali dava sempre vazio, e todo
+  /// vídeo aparecia na lista como se tivesse saído com o áudio da partida.
+  List<String> get musicNames => {
+    for (final c in clips)
+      if (c.meta['music_name'] case final String nome) nome,
+  }.toList();
 
   bool get isActive => status == 'pending' || status == 'rendering';
   bool get isFailed => status == 'failed';
@@ -1465,14 +1341,12 @@ class Job {
     this.videoUrl,
     this.proxyUrl,
     this.waveform = const [],
-    this.nProposals = 0,
     this.nRenders = 0,
     this.zipUrl,
     this.hasCuts = false,
     this.hasActiveRender = false,
     this.error,
     this.events = const [],
-    this.proposals = const [],
     this.renders = const [],
     this.clips = const [],
     this.detectors = const [],
@@ -1503,7 +1377,6 @@ class Job {
     waveform: ((j['waveform'] as List?) ?? [])
         .map((e) => (e as num).toDouble())
         .toList(),
-    nProposals: j['n_proposals'] as int? ?? 0,
     nRenders: j['n_renders'] as int? ?? 0,
     zipUrl: j['zip_url'] == null
         ? null
@@ -1513,9 +1386,6 @@ class Job {
     error: j['error'] as String?,
     events: ((j['events'] as List?) ?? [])
         .map((e) => DetectionEvent.fromJson(e as Map<String, dynamic>))
-        .toList(),
-    proposals: ((j['proposals'] as List?) ?? [])
-        .map((e) => Proposal.fromJson(e as Map<String, dynamic>))
         .toList(),
     renders: ((j['renders'] as List?) ?? [])
         .map((e) => Render.fromJson(e as Map<String, dynamic>))
@@ -1577,7 +1447,6 @@ class Job {
 
   /// O que o monitor deve abrir.
   String? get monitorUrl => proxyUrl ?? videoUrl;
-  final int nProposals;
   final int nRenders;
 
   /// Pacote da partida inteira: vídeos finais e cortes avulsos.
@@ -1589,7 +1458,6 @@ class Job {
   final bool hasActiveRender;
   final String? error;
   final List<DetectionEvent> events;
-  final List<Proposal> proposals;
   final List<Render> renders;
   final List<Clip> clips;
   final List<DetectorReport> detectors;
@@ -1622,6 +1490,40 @@ class Job {
   /// Vale continuar consultando o servidor.
   bool get isActive =>
       isAnalyzing || hasActiveRender || renders.any((r) => r.isActive);
+
+  /// Quanto ainda falta para a análise terminar, ou nulo quando não dá para
+  /// dizer com honestidade.
+  ///
+  /// A conta é a mais simples que existe — o que já andou, na velocidade com
+  /// que andou — e ela só se sustenta porque a barra do servidor passou a ser
+  /// proporcional ao *tempo* de cada fase, e não ao número de fases. Enquanto
+  /// o recorte, que é três quartos do trabalho, ocupava um décimo da barra,
+  /// qualquer estimativa daqui mentiria por minutos.
+  ///
+  /// Nulo abaixo de 3%: com pouco andado, o erro da estimativa é maior que ela.
+  Duration? get restante {
+    if (!isAnalyzing || progress < 0.03) return null;
+    final decorrido = DateTime.now().toUtc().difference(createdAt.toUtc());
+    if (decorrido <= Duration.zero) return null;
+    final total = decorrido.inMilliseconds / progress;
+    final falta = total - decorrido.inMilliseconds;
+    if (falta <= 0 || falta > const Duration(hours: 3).inMilliseconds) {
+      return null;
+    }
+    return Duration(milliseconds: falta.round());
+  }
+}
+
+/// "~6 min", "~40 s" — grosso de propósito. Uma estimativa ao segundo daria
+/// uma precisão que ela não tem, e ficaria pulando a cada recarga.
+String? formatRestante(Duration? d) {
+  if (d == null) return null;
+  final s = d.inSeconds;
+  if (s < 45) return 'menos de 1 min';
+  final min = (s / 60).round();
+  if (min < 60) return '~$min min';
+  final h = d.inHours;
+  return '~${h}h${(d.inMinutes % 60).toString().padLeft(2, '0')}';
 }
 
 // ─────────────────────────────── cliente ────────────────────────────────────
@@ -1674,19 +1576,16 @@ class ApiClient {
     void Function(double sent)? onProgress,
   }) async {
     final total = await video.length();
-    var sent = 0;
-    void bump(int n) {
-      sent += n;
-      onProgress?.call(total == 0 ? 0 : sent / total);
-    }
-
-    final request =
-        http.MultipartRequest('POST', Uri.parse('$baseUrl/api/jobs'))
-          ..fields['params'] = jsonEncode(params.toJson())
-          ..files.add(_part('video', video, total, bump));
-
-    final streamed = await request.send();
-    final r = await http.Response.fromStream(streamed);
+    final r = await uploadFile(
+      url: Uri.parse('$baseUrl/api/jobs'),
+      field: 'video',
+      file: video,
+      length: total,
+      // o tamanho vai junto para o servidor conferir o que chegou: envio
+      // truncado nao se parece com erro nenhum do lado de la
+      fields: {'params': jsonEncode(params.toJson()), 'size': '$total'},
+      onProgress: onProgress,
+    );
     _check(r);
     return (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
   }
@@ -1702,19 +1601,14 @@ class ApiClient {
     void Function(double sent)? onProgress,
   }) async {
     final total = await audio.length();
-    var sent = 0;
-    void bump(int n) {
-      sent += n;
-      onProgress?.call(total == 0 ? 1 : sent / total);
-    }
-
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$baseUrl/api/jobs/$jobId/tracks'),
-    )..files.add(_part('audio', audio, total, bump));
-
-    final streamed = await request.send();
-    final r = await http.Response.fromStream(streamed);
+    final r = await uploadFile(
+      url: Uri.parse('$baseUrl/api/jobs/$jobId/tracks'),
+      field: 'audio',
+      file: audio,
+      length: total,
+      fields: {'size': '$total'},
+      onProgress: onProgress,
+    );
     _check(r);
     final id = (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
     return getTrack(id);
@@ -1890,19 +1784,14 @@ class ApiClient {
     void Function(double sent)? onProgress,
   }) async {
     final total = await file.length();
-    var sent = 0;
-    void bump(int n) {
-      sent += n;
-      onProgress?.call(total == 0 ? 1 : sent / total);
-    }
-
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$baseUrl/api/jobs/$jobId/media'),
-    )..files.add(_part('file', file, total, bump));
-
-    final streamed = await request.send();
-    final r = await http.Response.fromStream(streamed);
+    final r = await uploadFile(
+      url: Uri.parse('$baseUrl/api/jobs/$jobId/media'),
+      field: 'file',
+      file: file,
+      length: total,
+      fields: {'size': '$total'},
+      onProgress: onProgress,
+    );
     _check(r);
     final id = (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
     return getMedia(id);
@@ -1973,71 +1862,26 @@ class ApiClient {
     return track;
   }
 
-  /// Pede a geração dos vídeos escolhidos.
+  /// Pede a geração das montagens.
   ///
-  /// Cada escolha leva a sua própria música no campo `music_<proposal_id>` —
-  /// é assim que dois vídeos da mesma partida saem com trilhas diferentes.
-  /// Escolha sem música vira vídeo com o áudio original.
+  /// Elas já trazem os blocos posicionados e apontam para músicas que **já
+  /// subiram** pela biblioteca, então o pedido não leva arquivo nenhum.
   ///
-  /// [montages] são os vídeos montados à mão: eles já trazem os blocos
-  /// posicionados e apontam para uma música que **já subiu**, então não levam
-  /// arquivo nenhum. Os dois convivem no mesmo pedido.
+  /// Já houve um segundo caminho aqui: as propostas escolhidas, cada uma com a
+  /// sua música num campo `music_<proposal_id>`. Não há mais propostas.
   Future<String> createRender({
     required String jobId,
-    List<Selection> selections = const [],
-    List<Montage> montages = const [],
-    void Function(double sent)? onProgress,
+    required List<Montage> montages,
   }) async {
-    var total = 0;
-    for (final sel in selections) {
-      if (sel.music != null) total += await sel.music!.length();
-    }
-    var sent = 0;
-    void bump(int n) {
-      sent += n;
-      onProgress?.call(total == 0 ? 1 : sent / total);
-    }
-
-    final request =
-        http.MultipartRequest(
-            'POST',
-            Uri.parse('$baseUrl/api/jobs/$jobId/renders'),
-          )
-          ..fields['selections'] = jsonEncode([
-            for (final s in selections) s.toJson(),
-          ])
-          ..fields['timelines'] = jsonEncode([
-            for (final m in montages) m.toJson(),
-          ]);
-
-    for (final sel in selections) {
-      final music = sel.music;
-      if (music == null) continue;
-      request.files.add(
-        _part('music_${sel.proposalId}', music, await music.length(), bump),
-      );
-    }
-
-    final streamed = await request.send();
-    final r = await http.Response.fromStream(streamed);
+    final r = await http.post(
+      Uri.parse('$baseUrl/api/jobs/$jobId/renders'),
+      headers: {'content-type': 'application/x-www-form-urlencoded'},
+      body: {
+        'timelines': jsonEncode([for (final m in montages) m.toJson()]),
+      },
+    );
     _check(r);
     return (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
-  }
-
-  http.MultipartFile _part(
-    String field,
-    PlatformFile file,
-    int length,
-    void Function(int) onBytes,
-  ) {
-    Stream<List<int>> counting() async* {
-      await for (final chunk in file.readAsByteStream()) {
-        onBytes(chunk.length);
-        yield chunk;
-      }
-    }
-
-    return http.MultipartFile(field, counting(), length, filename: file.name);
   }
 
   void _check(http.Response r) {

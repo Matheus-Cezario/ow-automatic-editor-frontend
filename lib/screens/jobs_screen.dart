@@ -38,6 +38,16 @@ class _JobsScreenState extends State<JobsScreen> {
     super.dispose();
   }
 
+  /// Quantas recargas seguidas podem falhar antes de a tela reclamar.
+  ///
+  /// A lista recarrega a cada 2s durante uma análise que dura minutos, e uma
+  /// chamada perdida no meio disso não é notícia — é uma conexão que caiu e
+  /// volta na próxima. Trocar a lista inteira por um aviso de erro nessa hora
+  /// faz parecer que a análise morreu, quando ela segue correndo no servidor.
+  static const _falhasToleradas = 3;
+
+  int _falhasSeguidas = 0;
+
   Future<void> _refresh() async {
     try {
       final jobs = await _api.listJobs();
@@ -45,10 +55,14 @@ class _JobsScreenState extends State<JobsScreen> {
         setState(() {
           _jobs = jobs;
           _error = null;
+          _falhasSeguidas = 0;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      _falhasSeguidas++;
+      if (mounted && _falhasSeguidas >= _falhasToleradas) {
+        setState(() => _error = e.toString());
+      }
     }
   }
 
@@ -184,6 +198,15 @@ class _JobCard extends StatelessWidget {
                     minHeight: 6,
                   ),
                 ),
+                if (formatRestante(job.restante) case final falta?) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '${(job.progress * 100).toStringAsFixed(0)}% · falta $falta',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ],
               ],
               if (job.isFailed && job.error != null) ...[
                 const SizedBox(height: 8),
@@ -203,7 +226,7 @@ class _JobCard extends StatelessWidget {
                     Text(
                       job.nClips > 0
                           ? '${job.nClips} vídeo(s) gerados'
-                          : '${job.nProposals} para gerar',
+                          : 'pronta para editar',
                       style: theme.textTheme.bodySmall,
                     ),
                     const SizedBox(width: 14),

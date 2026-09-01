@@ -344,6 +344,61 @@ MontageState posicionarNoQuadro(
   );
 }
 
+/// Põe a **jogada** de um bloco em [alvoS] do vídeo, de um jeito ou de outro.
+///
+/// Não é o mesmo que mover o bloco para o cursor: o corte começa antes da
+/// jogada, para dar embalo, e é a jogada — a eliminação, o dardo, a pedrada —
+/// que precisa cair na batida. Alinhar pela borda deixaria o impacto meio
+/// segundo depois dela.
+///
+/// Há dois jeitos de conseguir isso, e eles mudam coisas diferentes:
+///
+/// * **andar com o bloco** muda *quando* a cena aparece, e mantém o
+///   enquadramento — quanto de embalo há antes da jogada. É o preferido;
+/// * **deslizar o conteúdo dentro do bloco** mantém o bloco no lugar e troca
+///   *qual* trecho da gravação aparece ali. É o que sobra quando os vizinhos
+///   não deixam o bloco andar — o caso comum numa montagem de blocos colados.
+///
+/// O resultado diz qual dos dois aconteceu, para a tela poder contar.
+({MontageState estado, bool deslizou})? alinharMomento(
+  MontageState s,
+  String id,
+  double alvoS, {
+  required double sourceDurationS,
+}) {
+  final onde = s.localizar(id);
+  if (onde == null) return null;
+  final (camada, i) = onde;
+  final c = s.layers[camada].clips[i];
+  final marca = momentoNoVideo(c);
+  if (marca == null) return null;
+
+  // 1) andar com o bloco
+  final destino = math.max(0.0, c.atS + (alvoS - marca));
+  final movido = mover(
+    s.layers[camada].clips,
+    i,
+    destino,
+    beats: const [],
+    snap: false,
+  );
+  // "moveu" é o bloco ter mudado de lugar, e não `mover` ter devolvido outro
+  // objeto: encostado no primeiro quadro, ele devolve o mesmo instante — e aí
+  // o alinhamento ainda não aconteceu
+  if ((movido.atS - c.atS).abs() > 1e-6) {
+    return (estado: s.comClipe(camada, i, movido), deslizou: false);
+  }
+
+  // 2) deslizar o conteúdo: a jogada vem até o cursor sem tocar em vizinho
+  final limite = math.max(0.0, sourceDurationS - c.durationS);
+  final inicio = (c.sourceT - (alvoS - c.atS)).clamp(0.0, limite);
+  final deslizado = c.copyWith(startS: inicio);
+  if ((inicio - c.startS).abs() < 1e-6 || marcaDoMomento(deslizado) == null) {
+    return null;
+  }
+  return (estado: s.comClipe(camada, i, deslizado), deslizou: true);
+}
+
 /// Troca a ordem das camadas — que é a ordem em que o servidor as desenha.
 ///
 /// A de baixo é o fundo, a de cima ganha de quem está embaixo no mesmo

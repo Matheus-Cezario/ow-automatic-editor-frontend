@@ -7,9 +7,9 @@ import '../widgets/file_tile.dart';
 
 /// Primeira fase: só a gravação.
 ///
-/// Nenhuma música entra aqui. O sistema analisa a partida, monta a lista de
-/// vídeos que dá para gerar, e só então — na tela da partida — o usuário
-/// escolhe quais quer e dá a trilha de cada um.
+/// Nenhuma música e nenhum ajuste entram aqui. O sistema assiste à partida e
+/// anota o que aconteceu — eliminação, tiro na cabeça, dardo, pedrada — e é no
+/// editor, com os momentos na mão, que se decide o que vira vídeo.
 class NewJobScreen extends StatefulWidget {
   const NewJobScreen({super.key});
 
@@ -22,7 +22,6 @@ class _NewJobScreenState extends State<NewJobScreen> {
 
   PlatformFile? _video;
   int _videoBytes = 0;
-  JobParams _params = const JobParams();
   bool _sending = false;
   double _sent = 0;
   String? _error;
@@ -51,7 +50,6 @@ class _NewJobScreenState extends State<NewJobScreen> {
     try {
       await _api.createJob(
         video: _video!,
-        params: _params,
         onProgress: (p) => setState(() => _sent = p),
       );
       if (mounted) Navigator.of(context).pop(true);
@@ -100,10 +98,10 @@ class _NewJobScreenState extends State<NewJobScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'A música vem depois: primeiro o sistema separa os '
-                      'momentos, aí você escolhe quais vídeos quer e dá uma '
-                      'trilha para cada um. Sem trilha, o vídeo fica com o '
-                      'áudio original da partida.',
+                      'A música vem depois: o sistema separa os momentos da '
+                      'partida e você monta o vídeo no editor, encaixando '
+                      'cada corte na trilha que quiser. Sem trilha, o vídeo '
+                      'fica com o áudio original da partida.',
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
@@ -112,62 +110,6 @@ class _NewJobScreenState extends State<NewJobScreen> {
             ),
 
             const SizedBox(height: 24),
-            Text(
-              'O que considerar um momento',
-              style: theme.textTheme.titleSmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Os padrões costumam funcionar; mexa se sua partida rende '
-              'muitos ou pouquíssimos vídeos.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.hintColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            _Stepper(
-              label: 'Eliminações para virar rajada',
-              value: _params.multikillMin,
-              min: 2,
-              max: 6,
-              enabled: !_sending,
-              onChanged: (v) =>
-                  setState(() => _params = _params.copyWith(multikillMin: v)),
-            ),
-            _Stepper(
-              label: 'Eliminações para "sozinho contra todos"',
-              value: _params.soloWipeMin,
-              min: 3,
-              max: 8,
-              enabled: !_sending,
-              onChanged: (v) =>
-                  setState(() => _params = _params.copyWith(soloWipeMin: v)),
-            ),
-            _SliderRow(
-              label: 'Janela da rajada',
-              value: _params.multikillWindowS,
-              min: 4,
-              max: 25,
-              suffix: 's',
-              enabled: !_sending,
-              onChanged: (v) => setState(
-                () => _params = _params.copyWith(multikillWindowS: v),
-              ),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _params.makeBeatMontage,
-              onChanged: _sending
-                  ? null
-                  : (v) => setState(
-                      () => _params = _params.copyWith(makeBeatMontage: v),
-                    ),
-              title: const Text('Propor montagens no ritmo'),
-              subtitle: const Text(
-                'junta os momentos avulsos num vídeo cortado na batida',
-              ),
-            ),
 
             if (_error != null) ...[
               const SizedBox(height: 16),
@@ -213,94 +155,4 @@ class _NewJobScreenState extends State<NewJobScreen> {
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
   }
-}
-
-class _Stepper extends StatelessWidget {
-  const _Stepper({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
-    this.enabled = true,
-  });
-
-  final String label;
-  final int value;
-  final int min;
-  final int max;
-  final bool enabled;
-  final ValueChanged<int> onChanged;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      children: [
-        Expanded(child: Text(label)),
-        IconButton(
-          onPressed: enabled && value > min ? () => onChanged(value - 1) : null,
-          icon: const Icon(Icons.remove_circle_outline),
-        ),
-        SizedBox(
-          width: 24,
-          child: Text(
-            '$value',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-        IconButton(
-          onPressed: enabled && value < max ? () => onChanged(value + 1) : null,
-          icon: const Icon(Icons.add_circle_outline),
-        ),
-      ],
-    ),
-  );
-}
-
-class _SliderRow extends StatelessWidget {
-  const _SliderRow({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
-    this.suffix = '',
-    this.enabled = true,
-  });
-
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final String suffix;
-  final bool enabled;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(child: Text(label)),
-            Text(
-              '${value.toStringAsFixed(0)}$suffix',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ],
-        ),
-        Slider(
-          value: value,
-          min: min,
-          max: max,
-          divisions: (max - min).round(),
-          onChanged: enabled ? onChanged : null,
-        ),
-      ],
-    ),
-  );
 }

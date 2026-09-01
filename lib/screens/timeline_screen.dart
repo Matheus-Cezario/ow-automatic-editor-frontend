@@ -40,7 +40,26 @@ class TimelineScreen extends StatefulWidget {
 
 /// Eventos que valem um bloco. `death` e `low_hp` ficam de fora: são o contexto
 /// que faz uma jogada valer, não a jogada.
-const _momentosUteis = {'kill', 'sleep', 'stun', 'ult_negated', 'escape'};
+///
+/// `headshot` e `ability_kill` entram porque são exatamente o que se procura
+/// numa montagem — o tiro na cabeça e a eliminação com habilidade são a jogada,
+/// não o contexto dela. Ficaram de fora enquanto o editor era só um plano B da
+/// geração automática, e o resultado era o pior dos dois mundos: o detector
+/// achava os momentos, a lista de propostas os anunciava, e quem abria a
+/// montagem manual não os encontrava em lugar nenhum.
+///
+/// Esta lista tem de casar com `THUMB_KINDS` no servidor: é ela que decide de
+/// que instantes se extrai miniatura. Um tipo aqui que falte lá vira cartão sem
+/// quadro.
+const _momentosUteis = {
+  'kill',
+  'headshot',
+  'ability_kill',
+  'sleep',
+  'stun',
+  'ult_negated',
+  'escape',
+};
 
 class _TimelineScreenState extends State<TimelineScreen> {
   final _api = ApiClient();
@@ -429,6 +448,42 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   void _duplicar() => _editar(duplicar(_estado, _estado.selecao));
+
+  /// Leva a jogada de um bloco para debaixo da cabeça de leitura.
+  ///
+  /// O bloco anda; a jogada é que fica onde se pediu. É o gesto de encaixar a
+  /// eliminação na batida sem contar de cabeça quanto embalo há antes dela.
+  void _alinharMomentoAoCursor([String? id]) {
+    final alvo =
+        id ?? (_estado.selecao.length == 1 ? _estado.selecao.first : null);
+    if (alvo == null) {
+      _avisar('Escolha um bloco para alinhar a jogada dele.');
+      return;
+    }
+    if (momentoNoVideo(_estado.clipe(alvo)!) == null) {
+      _avisar('Este bloco não tem jogada marcada.');
+      return;
+    }
+    final feito = alinharMomento(
+      _estado,
+      alvo,
+      _cursor,
+      sourceDurationS: widget.job.durationS,
+    );
+    if (feito == null) {
+      _avisar('A jogada não alcança este ponto: a gravação acaba antes.');
+      return;
+    }
+    _editar(feito.estado);
+    if (feito.deslizou) {
+      // o usuário precisa saber *o que* mudou: o bloco ficou onde estava e o
+      // trecho da gravação é que andou
+      _avisar(
+        'Os vizinhos não deixaram o bloco andar, então o trecho é que '
+        'deslizou dentro dele.',
+      );
+    }
+  }
 
   /// Corta em dois o bloco que estiver sob a cabeça de leitura.
   void _dividirNoCursor() {
@@ -1340,6 +1395,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SingleActivator(LogicalKeyboardKey.keyJ): () =>
           _irPara(_cursor - 2),
       const SingleActivator(LogicalKeyboardKey.keyS): _dividirNoCursor,
+      const SingleActivator(LogicalKeyboardKey.keyM): _alinharMomentoAoCursor,
       // vírgula e ponto andam um quadro, como em qualquer editor. As setas
       // ficam com o passo grosso, de um segundo — os dois têm uso.
       const SingleActivator(LogicalKeyboardKey.comma): () => _passoDeQuadro(-1),
@@ -1520,6 +1576,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Atalho(', / .', 'andar um quadro'),
               _Atalho('Shift + ← →', 'empurrar os cortes selecionados'),
               _Atalho('S', 'dividir o corte sob o cursor'),
+              _Atalho('M', 'alinhar a jogada do bloco escolhido ao cursor'),
               _Atalho('[ / ]', 'aparar o começo / o fim até o cursor'),
               _Atalho('Delete', 'tirar da montagem'),
               _Atalho('Ctrl+Z / Ctrl+Shift+Z', 'desfazer / refazer'),
@@ -1580,7 +1637,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _momentos({required bool encaixado}) => _Momentos(
     jobId: widget.job.id,
     momentos: _momentosDaPartida,
-    usados: {for (final c in _estado.clips) c.sourceT},
+    usados: {for (final c in _estado.clips) chaveDoMomento(c.kind, c.sourceT)},
     enabled: !_enviando,
     encaixado: encaixado,
     onAdicionar: _adicionar,
@@ -1818,6 +1875,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               onDuracao: (d) => _esticar(selecao.first, d),
               onDeslocar: (d) => _deslocar(selecao.first, d),
               onParaOCursor: () => _mover(selecao.first, _cursor),
+              onMomentoNoCursor: () => _alinharMomentoAoCursor(selecao.first),
               onApagar: _apagarSelecao,
               onDividir: _dividirNoCursor,
               onDuplicar: _duplicar,
@@ -2313,6 +2371,7 @@ class _BlocoSelecionado extends StatelessWidget {
     required this.onDuracao,
     required this.onDeslocar,
     required this.onParaOCursor,
+    required this.onMomentoNoCursor,
     required this.onApagar,
     required this.onDividir,
     required this.onDuplicar,
@@ -2336,6 +2395,9 @@ class _BlocoSelecionado extends StatelessWidget {
   final ValueChanged<double> onDuracao;
   final ValueChanged<double> onDeslocar;
   final VoidCallback onParaOCursor;
+
+  /// Leva a jogada deste bloco para debaixo da cabeça de leitura.
+  final VoidCallback onMomentoNoCursor;
   final VoidCallback onApagar;
   final VoidCallback onDividir;
   final VoidCallback onDuplicar;
@@ -2440,10 +2502,26 @@ class _BlocoSelecionado extends StatelessWidget {
             ),
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: onParaOCursor,
-                icon: const Icon(Icons.vertical_align_center, size: 18),
-                label: const Text('Mover para o cursor'),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  // Alinhar pela **jogada**, e não pela borda: o corte começa
+                  // antes dela para dar embalo, e é ela que precisa cair na
+                  // batida. Só aparece quando há jogada dentro do bloco.
+                  if (momentoNoVideo(cut) != null)
+                    TextButton.icon(
+                      key: const Key('alinhar-momento'),
+                      onPressed: onMomentoNoCursor,
+                      icon: const Icon(Icons.center_focus_strong, size: 18),
+                      label: const Text('Alinhar a jogada ao cursor'),
+                    ),
+                  TextButton.icon(
+                    onPressed: onParaOCursor,
+                    icon: const Icon(Icons.vertical_align_center, size: 18),
+                    label: const Text('Mover para o cursor'),
+                  ),
+                ],
               ),
             ),
             if (cut.isText)
@@ -2516,7 +2594,13 @@ class _Momentos extends StatelessWidget {
 
   final String jobId;
   final List<DetectionEvent> momentos;
-  final Set<double> usados;
+
+  /// Os momentos que já estão na régua, por [chaveDoMomento].
+  ///
+  /// Por tipo **e** instante, e não só pelo instante: uma eliminação na cabeça
+  /// acende os dois detectores quase junto, e marcar pelo tempo faria pôr a
+  /// eliminação riscar o headshot que ainda não entrou.
+  final Set<String> usados;
   final bool enabled;
 
   /// `true` quando a lista mora dentro da coluna principal (tela estreita) e
@@ -2557,11 +2641,12 @@ class _Momentos extends StatelessWidget {
     final itens = [
       for (final e in momentos)
         _MomentoTile(
-          // a chave é o instante: é o que identifica um momento sem ambiguidade
-          key: ValueKey('momento-${e.t}'),
+          // tipo + instante: dois detectores podem cair no mesmo tempo, e duas
+          // chaves iguais na mesma lista derrubam a tela
+          key: ValueKey('momento-${chaveDoMomento(e.kind, e.t)}'),
           jobId: jobId,
           evento: e,
-          usado: usados.contains(e.t),
+          usado: usados.contains(chaveDoMomento(e.kind, e.t)),
           enabled: enabled,
           onAdicionar: () => onAdicionar(e),
         ),
@@ -2636,6 +2721,17 @@ class _MomentoTile extends StatelessWidget {
   final bool enabled;
   final VoidCallback onAdicionar;
 
+  /// O nome que este momento leva no cartão e no fantasma.
+  ///
+  /// Uma eliminação com habilidade diz **qual** — "Orisa: Energy Javelin" e não
+  /// "Morte por habilidade". Numa partida com cinco habilidades diferentes, o
+  /// rótulo genérico daria cinco cartões idênticos, e escolher entre eles seria
+  /// escolher no escuro.
+  String get _rotulo {
+    final ability = evento.ability;
+    return ability != null ? nomeDaHabilidade(ability) : EventStyle.of(evento.kind).label;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -2651,7 +2747,7 @@ class _MomentoTile extends StatelessWidget {
       // o canto do fantasma
       dragAnchorStrategy: pointerDragAnchorStrategy,
       maxSimultaneousDrags: enabled ? 1 : 0,
-      feedback: _Fantasma(rotulo: style.label, cor: style.color),
+      feedback: _Fantasma(rotulo: _rotulo, cor: style.color),
       childWhenDragging: Opacity(
         opacity: 0.4,
         child: _cartao(context, theme, style),
@@ -2684,7 +2780,7 @@ class _MomentoTile extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      style.label,
+                      _rotulo,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelMedium?.copyWith(

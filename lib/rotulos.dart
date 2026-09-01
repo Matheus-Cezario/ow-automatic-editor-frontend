@@ -35,6 +35,17 @@ TimelineClip rotulo(
   fade: const ClipFade(inS: 0.15, outS: 0.25),
 );
 
+/// Os tipos de corte que o contador e as rajadas contam como uma eliminação.
+///
+/// `ability_kill` entra: uma lança da Orisa que mata é uma eliminação como
+/// outra qualquer — o detector só a lê num lugar diferente da tela (o killfeed,
+/// e não a mira). Deixá-la de fora dava um contador que pulava números na cara
+/// de quem tinha acabado de ver a morte acontecer.
+///
+/// `headshot` **não** entra: o marcador vermelho na mira é acerto crítico, não
+/// morte. Contá-lo inflaria o número com tiros que só machucaram.
+const _eliminacoes = {'kill', 'ability_kill'};
+
 /// O contador de eliminações, subindo a cada corte que veio de uma.
 ///
 /// Um rótulo por eliminação, cada um começando onde o corte dela começa e
@@ -47,7 +58,7 @@ List<TimelineClip> contadorDeEliminacoes(
 }) {
   final kills = [
     for (final c in clips)
-      if (c.kind == 'kill') c,
+      if (_eliminacoes.contains(c.kind)) c,
   ]..sort((a, b) => a.atS.compareTo(b.atS));
   if (kills.isEmpty) return const [];
 
@@ -94,7 +105,7 @@ List<TimelineClip> rotulosDeRajada(
 }) {
   final kills = [
     for (final c in clips)
-      if (c.kind == 'kill') c,
+      if (_eliminacoes.contains(c.kind)) c,
   ]..sort((a, b) => a.atS.compareTo(b.atS));
   if (kills.length < 2) return const [];
 

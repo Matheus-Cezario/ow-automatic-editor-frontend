@@ -7,7 +7,6 @@ import '../main.dart' show PhoneWidth;
 import '../widgets/download.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/timeline.dart';
-import 'generate_screen.dart';
 import 'player_screen.dart';
 import 'timeline_screen.dart';
 
@@ -53,13 +52,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
-  }
-
-  Future<void> _gerar(Job job) async {
-    final feito = await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => GenerateScreen(job: job)));
-    if (feito == true) await _refresh();
   }
 
   Future<void> _montar(Job job) async {
@@ -118,24 +110,23 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       const SizedBox(height: 20),
                     ],
 
-                    // ── o que dá para gerar ───────────────────────────────
-                    if (job.isReady && job.proposals.isNotEmpty) ...[
-                      _Propostas(job: job, onGerar: () => _gerar(job)),
-                      const SizedBox(height: 12),
-                    ] else if (job.isReady)
-                      const _NothingFound(),
-
-                    // Montar à mão não depende de proposta nenhuma: basta a
-                    // análise ter achado momentos. É o caminho de quem quer
-                    // escolher o ponto exato da música de cada corte.
+                    // ── o editor ──────────────────────────────────────────
+                    // Não há mais lista de vídeos prontos para escolher: a
+                    // análise entrega os momentos e o editor é o que se faz
+                    // com eles.
                     if (job.isReady && job.events.isNotEmpty) ...[
-                      OutlinedButton.icon(
+                      FilledButton.icon(
                         onPressed: () => _montar(job),
                         icon: const Icon(Icons.timeline),
-                        label: const Text('Montar vídeo eu mesmo'),
+                        label: Text(
+                          job.montages.isEmpty
+                              ? 'Abrir o editor'
+                              : 'Continuar editando',
+                        ),
                       ),
                       const SizedBox(height: 24),
-                    ],
+                    ] else if (job.isReady)
+                      const _NothingFound(),
 
                     // ── o que já foi gerado ───────────────────────────────
                     if (job.renders.isNotEmpty) ...[
@@ -173,88 +164,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 ),
               ),
       ),
-    );
-  }
-}
-
-/// A lista do que o sistema conseguiu separar, com o convite para escolher.
-class _Propostas extends StatelessWidget {
-  const _Propostas({required this.job, required this.onGerar});
-
-  final Job job;
-  final VoidCallback onGerar;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Dá para gerar', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 4),
-        Text(
-          'Escolha quais quer e dê uma música para cada um. Pode voltar aqui '
-          'quantas vezes quiser: usar um momento num vídeo não impede usá-lo '
-          'em outro.',
-          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-        ),
-        const SizedBox(height: 12),
-        for (final p in job.proposals)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                Builder(
-                  builder: (_) {
-                    final style = HighlightStyle.of(p.kind);
-                    return Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: style.color.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(style.icon, size: 18, color: style.color),
-                    );
-                  },
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        p.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      Text(
-                        p.acceptsMusic
-                            ? '${p.nMoments} momentos  ·  aceita música'
-                            : '${formatDuration(p.durationS)}  ·  '
-                                  'áudio da partida',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.hintColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: onGerar,
-          icon: const Icon(Icons.movie_creation_outlined),
-          label: Text(
-            job.renders.isEmpty
-                ? 'Escolher e gerar vídeos'
-                : 'Gerar mais vídeos',
-          ),
-        ),
-      ],
     );
   }
 }
@@ -371,11 +280,21 @@ class _Progress extends StatelessWidget {
                 style: theme.textTheme.titleMedium,
               ),
             ),
-            if (job.isAnalyzing)
+            if (job.isAnalyzing) ...[
+              if (formatRestante(job.restante) case final falta?) ...[
+                Text(
+                  'falta $falta',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.hintColor,
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
               Text(
                 '${(job.progress * 100).toStringAsFixed(0)}%',
                 style: theme.textTheme.titleMedium,
               ),
+            ],
           ],
         ),
         const SizedBox(height: 10),
@@ -395,11 +314,11 @@ class _Progress extends StatelessWidget {
           runSpacing: 6,
           children: [
             _Fact(icon: Icons.schedule, text: formatDuration(job.durationS)),
-            _Fact(icon: Icons.flash_on, text: '${job.events.length} eventos'),
-            if (job.proposals.isNotEmpty)
+            _Fact(icon: Icons.flash_on, text: '${job.events.length} momentos'),
+            if (job.montages.isNotEmpty)
               _Fact(
                 icon: Icons.playlist_add_check,
-                text: '${job.proposals.length} vídeos possíveis',
+                text: '${job.montages.length} montagem(ns)',
               ),
             if (job.renders.isNotEmpty)
               _Fact(

@@ -283,6 +283,25 @@ diz o nome do arquivo, e no caso da música de que ponto dela o pedaço saiu, ch
 o deslocamento de "trecho da música" e some com os efeitos — zoom, congelar e cor
 não têm sobre o que agir num bloco que não desenha nada.
 
+### A jogada dentro do bloco
+
+`momentoNoVideo` diz onde a jogada cai no vídeo: `atS + (sourceT - startS)`. É
+com ela que três coisas funcionam.
+
+`alinharMomento` põe essa jogada num instante pedido, e tem **dois caminhos**:
+andar com o bloco (preserva o embalo, muda quando a cena aparece) ou deslizar o
+trecho dentro dele (preserva a posição na régua, muda qual pedaço da gravação
+aparece). O segundo é o que sobra quando os vizinhos não deixam o bloco passar —
+o caso comum numa montagem de blocos colados —, e o resultado diz qual dos dois
+aconteceu, para a tela contar.
+
+O ímã de `mover` disputa entre três candidatos: começo, fim e jogada. Só entram
+os que grudaram em alguma batida, e vence o mais perto de onde o dedo largou.
+
+E a marca desenhada dentro do bloco acende quando a jogada está sob a cabeça de
+leitura — meio quadro de tolerância, porque alinhar é decisão de montagem e não
+medida de precisão infinita.
+
 ### O texto no monitor
 
 O texto existia na régua e no vídeo gerado, e em lugar nenhum entre os dois:

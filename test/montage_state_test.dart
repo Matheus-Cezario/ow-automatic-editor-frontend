@@ -847,4 +847,109 @@ void main() {
       expect(h.atual.layers[0].clips.first.id, debaixo);
     });
   });
+
+  group('alinhar a jogada', () {
+    /// Alinha e devolve o estado — a gravação é longa, e cabe deslizar.
+    MontageState alinhar(MontageState s, String id, double alvo) =>
+        alinharMomento(s, id, alvo, sourceDurationS: 600)!.estado;
+
+    test('o bloco anda para pôr a jogada no ponto pedido', () {
+      // é a razão de existir: o corte começa antes da jogada, e mover pela
+      // borda deixaria o impacto meio segundo depois da batida
+      final s = estadoCom([corte(0, 2, t: 90)]); // jogada a 1,4s do começo
+      final id = s.clips.first.id;
+
+      final depois = alinhar(s, id, 5);
+
+      expect(momentoNoVideo(depois.clips.first), closeTo(5, 1e-9));
+      expect(depois.clips.first.atS, closeTo(3.6, 1e-9));
+      expect(depois.clips.first.durationS, 2, reason: 'não estica nem apara');
+      expect(s.clips.first.atS, 0, reason: 'o estado anterior ficou');
+    });
+
+    test('encostado no primeiro quadro, o trecho é que desliza', () {
+      // pedir a jogada em 0,5s levaria o começo do bloco para -0,9; em vez de
+      // parar na borda e não alinhar nada, o trecho anda dentro do bloco
+      final s = estadoCom([corte(0, 2, t: 90)]);
+      final feito = alinharMomento(
+        s,
+        s.clips.first.id,
+        0.5,
+        sourceDurationS: 600,
+      )!;
+
+      expect(feito.deslizou, isTrue);
+      expect(feito.estado.clips.first.atS, 0);
+      expect(momentoNoVideo(feito.estado.clips.first), closeTo(0.5, 1e-9));
+    });
+
+    test('com o vizinho no caminho, o trecho desliza dentro do bloco', () {
+      // numa montagem de blocos colados o bloco não tem para onde andar; o que
+      // sobra é trocar *qual* pedaço da gravação aparece ali, e a jogada vem
+      // até o cursor sem tocar em vizinho nenhum
+      final s = estadoCom([corte(0, 2, t: 90), corte(2, 2, t: 200)]);
+      final id = s.clips.first.id;
+
+      final feito = alinharMomento(s, id, 0.5, sourceDurationS: 600)!;
+
+      expect(feito.deslizou, isTrue);
+      expect(feito.estado.clips.first.atS, 0, reason: 'o bloco ficou');
+      expect(momentoNoVideo(feito.estado.clips.first), closeTo(0.5, 1e-9));
+      expect(feito.estado.clips.first.startS, closeTo(89.5, 1e-9));
+      expect(feito.estado.clips[1].atS, 2, reason: 'o vizinho não se mexeu');
+    });
+
+    test('andar com o bloco é o caminho preferido', () {
+      // ele mantém o embalo: o mesmo trecho da gravação, noutro instante
+      final s = estadoCom([corte(0, 2, t: 90)]);
+      final feito = alinharMomento(
+        s,
+        s.clips.first.id,
+        5,
+        sourceDurationS: 600,
+      )!;
+
+      expect(feito.deslizou, isFalse);
+      expect(feito.estado.clips.first.startS, s.clips.first.startS);
+    });
+
+    test('sem gravação para deslizar, não há alinhamento a fazer', () {
+      // a jogada está a 1,4s do começo do bloco e a gravação acaba logo ali
+      final s = estadoCom([corte(0, 2, t: 1.4), corte(2, 2, t: 200)]);
+      expect(
+        alinharMomento(s, s.clips.first.id, 1.9, sourceDurationS: 2.0),
+        isNull,
+      );
+    });
+
+    test('bloco sem jogada não se alinha', () {
+      final s = porMusica(
+        estadoCom([corte(0, 2)]),
+        Track(
+          id: 'm1',
+          status: 'ready',
+          name: 'faixa.mp3',
+          durationS: 60,
+          bpm: 120,
+          beats: const [],
+          peaks: const [],
+          audioUrl: '',
+        ),
+        atS: 0,
+      );
+      final bloco = s.layers.last.clips.single.id;
+      expect(alinharMomento(s, bloco, 3, sourceDurationS: 600), isNull);
+    });
+
+    test('alinhar entra no desfazer', () {
+      final h = MontageHistory(estadoCom([corte(0, 2, t: 90)]));
+      final id = h.atual.clips.first.id;
+
+      h.aplicar(alinhar(h.atual, id, 5));
+      expect(h.atual.clips.first.atS, closeTo(3.6, 1e-9));
+
+      h.desfazer();
+      expect(h.atual.clips.first.atS, 0);
+    });
+  });
 }

@@ -98,6 +98,14 @@ List<double> gradeAjustada(
   return grade;
 }
 
+/// Como se identifica um momento da partida sem ambiguidade.
+///
+/// O instante sozinho não basta: uma eliminação na cabeça acende o detector de
+/// eliminações e o de acertos críticos quase no mesmo quadro, e os dois eventos
+/// podem cair no mesmo tempo arredondado. Com o tipo junto, cada cartão da
+/// prateleira tem chave própria e sabe sozinho se já foi para a régua.
+String chaveDoMomento(String kind, double t) => '$kind@${t.toStringAsFixed(3)}';
+
 /// O bloco que nasce quando o usuário joga um momento na linha do tempo.
 ///
 /// A duração sai de um número inteiro de batidas quando há batidas: assim o
@@ -227,19 +235,30 @@ TimelineClip mover(
     // grudou fica exatamente onde o dedo largou, distância zero, e ganhava
     // sempre — o ímã deixava de existir para qualquer bloco cuja duração não
     // fosse múltipla do compasso.
-    final porInicio = snapToBeat(destino, beats);
-    final porFim =
-        snapToBeat(destino + atual.durationS, beats) - atual.durationS;
-    final grudouInicio = (porInicio - destino).abs() > 1e-9;
-    final grudouFim = (porFim - destino).abs() > 1e-9;
-    if (grudouInicio && grudouFim) {
-      destino = (porInicio - destino).abs() <= (porFim - destino).abs()
-          ? porInicio
-          : porFim;
-    } else if (grudouInicio) {
-      destino = porInicio;
-    } else if (grudouFim) {
-      destino = porFim;
+    // Três candidatos: as duas bordas e a **jogada**. A jogada é o que se
+    // alinha com a percussão numa montagem — a borda pode estar meio segundo
+    // antes dela —, e sem ela na disputa encaixar a eliminação na batida era
+    // mirar de olho na marca desenhada dentro do bloco.
+    final daMarca = atual.sourceT > 0
+        ? atual.sourceT - atual.startS
+        : null;
+    final candidatos = <double>[
+      snapToBeat(destino, beats),
+      snapToBeat(destino + atual.durationS, beats) - atual.durationS,
+      if (daMarca != null && daMarca >= 0 && daMarca <= atual.durationS)
+        snapToBeat(destino + daMarca, beats) - daMarca,
+    ];
+
+    // só entram os que grudaram: quem não grudou fica exatamente onde o dedo
+    // largou, distância zero, e ganharia sempre
+    final grudaram = [
+      for (final c in candidatos)
+        if ((c - destino).abs() > 1e-9) c,
+    ];
+    if (grudaram.isNotEmpty) {
+      destino = grudaram.reduce(
+        (a, b) => (a - destino).abs() <= (b - destino).abs() ? a : b,
+      );
     }
     destino = math.max(0, destino);
   }
@@ -350,6 +369,15 @@ double? marcaDoMomento(TimelineClip cut) {
   if (cut.durationS <= 0) return null;
   final f = (cut.sourceT - cut.startS) / cut.durationS;
   return f < 0 || f > 1 ? null : f;
+}
+
+/// Onde o momento que originou o bloco cai no **vídeo**, em segundos.
+///
+/// `null` quando o momento ficou fora do bloco — dá para aparar até ele sair —
+/// ou quando o bloco não veio de momento nenhum (música, texto, mídia).
+double? momentoNoVideo(TimelineClip cut) {
+  if (cut.sourceT <= 0 || marcaDoMomento(cut) == null) return null;
+  return cut.atS + (cut.sourceT - cut.startS);
 }
 
 /// O bloco que está sob a cabeça de leitura em [atS], ou `null` se ali é buraco.
