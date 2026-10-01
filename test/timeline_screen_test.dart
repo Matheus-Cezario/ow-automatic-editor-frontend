@@ -1054,6 +1054,46 @@ void main() {
       expect(find.text('GG'), findsWidgets);
     });
 
+    /// O teclado está mesmo no campo? `enterText` escreve direto no
+    /// controlador e passaria mesmo com o foco em outro lugar — o defeito que
+    /// o usuário viu foi justamente esse: o campo aberto, e as teclas indo
+    /// para os atalhos da montagem.
+    bool tecladoNoCampo(WidgetTester tester, String id) {
+      final ctx = FocusManager.instance.primaryFocus?.context;
+      if (ctx == null) return false;
+      final campo = ctx.findAncestorWidgetOfExactType<TextField>();
+      return campo?.key == ValueKey('escrevendo-$id');
+    }
+
+    testWidgets('a escrita pega o teclado mesmo com a montagem em foco', (
+      tester,
+    ) async {
+      await comTexto(tester);
+      final id = texto(tester).id;
+      // o estado normal da tela: o foco está na montagem, para os atalhos
+      // valerem — e é com ele lá que o `autofocus` do campo não fazia nada
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'montagem');
+
+      await tester.tap(find.byKey(ValueKey('frase-$id')));
+      await tester.pump();
+      await tester.pump();
+      expect(tecladoNoCampo(tester, id), isTrue);
+
+      // e de novo, pelo botão do painel, depois de sair da escrita
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.pump();
+      await tester.pump();
+      expect(tecladoNoCampo(tester, id), isTrue);
+
+      // um atalho de uma tecla não pode roubar a letra: "s" dividiria o corte
+      final antes = cortes(tester).length;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+      await tester.pump();
+      expect(cortes(tester), hasLength(antes));
+    });
+
     testWidgets('o botão do painel abre a escrita no quadro', (tester) async {
       await comTexto(tester);
       final id = texto(tester).id;

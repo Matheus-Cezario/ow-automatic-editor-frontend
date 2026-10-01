@@ -420,6 +420,14 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
     text: widget.clip.text,
   );
 
+  /// O foco do campo, pedido à mão.
+  ///
+  /// `autofocus` não basta: ele só vale quando **nada** na tela tem foco, e o
+  /// editor mantém o foco no nó dos atalhos quase o tempo todo. O campo abria
+  /// sem teclado, e as letras iam para os atalhos — "s" dividia o corte.
+  late final FocusNode _foco = FocusNode(debugLabel: 'texto no quadro')
+    ..addListener(_focoMudou);
+
   /// O que estava escrito quando a edição abriu: apagar tudo e sair devolve
   /// isto, porque texto vazio não é um texto que o servidor desenhe.
   String _antes = '';
@@ -442,8 +450,15 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
 
   @override
   void dispose() {
+    _foco.dispose();
     _campo.dispose();
     super.dispose();
+  }
+
+  /// Perder o foco por qualquer caminho fecha a escrita: um campo aberto e sem
+  /// teclado é o pior dos dois mundos.
+  void _focoMudou() {
+    if (!_foco.hasFocus && widget.editando) _terminar();
   }
 
   void _abriu() {
@@ -455,6 +470,10 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
         extentOffset: widget.clip.text.length,
       ),
     );
+    // o campo só existe depois deste quadro
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.editando) _foco.requestFocus();
+    });
   }
 
   void _terminar() {
@@ -543,7 +562,7 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                       child: TextField(
                         key: ValueKey('escrevendo-${widget.clip.id}'),
                         controller: _campo,
-                        autofocus: true,
+                        focusNode: _foco,
                         textAlign: TextAlign.center,
                         cursorColor: cor,
                         onChanged: widget.onEscrever,
