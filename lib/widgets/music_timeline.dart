@@ -976,6 +976,43 @@ class _BlockState extends State<_Block> {
                     ),
                   ),
 
+                // ── a entrada, quando ela não é um corte seco ──────────────
+                // Do tamanho que ela dura: é o trecho do bloco em que o
+                // anterior ainda aparece, e encaixá-la na batida pede vê-lo.
+                if (widget.cut.transition case final tr?)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: math.min(largura, tr.durationS * widget.pxPerSecond),
+                    child: IgnorePointer(
+                      child: Container(
+                        key: ValueKey('transicao-no-bloco-${widget.cut.id}'),
+                        alignment: Alignment.topLeft,
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(6),
+                          ),
+                          gradient: LinearGradient(
+                            colors: [
+                              theme.colorScheme.onSurface.withValues(
+                                alpha: 0.45,
+                              ),
+                              theme.colorScheme.onSurface.withValues(alpha: 0),
+                            ],
+                          ),
+                        ),
+                        child: Icon(
+                          TipoDeTransicao.de(tr.kind)?.icone ??
+                              Icons.compare_arrows,
+                          size: 12,
+                          color: theme.colorScheme.surface,
+                        ),
+                      ),
+                    ),
+                  ),
+
                 // ── onde a jogada acontece ─────────────────────────────────
                 // O bloco é um trecho; o momento é um instante dentro dele. Sem
                 // esta marca, encaixar a eliminação na batida seria adivinhar:

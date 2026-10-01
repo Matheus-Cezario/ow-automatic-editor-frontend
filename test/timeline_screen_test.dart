@@ -2334,4 +2334,90 @@ void main() {
       expect(marcaAcesa(), isTrue);
     });
   });
+
+  group('transições', () {
+    testWidgets('a aba fica na lateral, com momentos e biblioteca', (
+      tester,
+    ) async {
+      await abrir(tester);
+
+      expect(find.widgetWithText(Tab, 'Momentos'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Biblioteca'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Transições'), findsOneWidget);
+    });
+
+    testWidgets('sem bloco escolhido, nada a aplicar', (tester) async {
+      await abrir(tester);
+      await aba(tester, 'Transições');
+
+      expect(find.textContaining('Escolha um bloco'), findsOneWidget);
+      final tile = tester.widget<ListTile>(
+        find.byKey(const ValueKey('transicao-dissolve')),
+      );
+      expect(tile.enabled, isFalse);
+    });
+
+    testWidgets('tocar numa transição a põe na entrada do bloco escolhido', (
+      tester,
+    ) async {
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      final id = primeiroCorte(tester).id;
+      await aba(tester, 'Transições');
+
+      await tester.tap(find.byKey(const ValueKey('transicao-fade_black')));
+      await tester.pump();
+
+      expect(primeiroCorte(tester).transition?.kind, 'fade_black');
+      expect(primeiroCorte(tester).transition?.durationS, 0.5);
+      expect(
+        find.byKey(ValueKey('transicao-no-bloco-$id')),
+        findsOneWidget,
+        reason: 'a régua mostra que o bloco tem entrada',
+      );
+
+      // e o corte seco tira
+      await tester.tap(find.byKey(const Key('sem-transicao')));
+      await tester.pump();
+      expect(primeiroCorte(tester).transition, isNull);
+      expect(find.byKey(ValueKey('transicao-no-bloco-$id')), findsNothing);
+    });
+
+    testWidgets('pôr a transição entra no desfazer', (tester) async {
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await aba(tester, 'Transições');
+      await tester.tap(find.byKey(const ValueKey('transicao-dissolve')));
+      await tester.pump();
+      expect(primeiroCorte(tester).transition, isNotNull);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+
+      expect(primeiroCorte(tester).transition, isNull);
+    });
+
+    testWidgets('o monitor marca a transição enquanto ela acontece', (
+      tester,
+    ) async {
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await aba(tester, 'Transições');
+      await tester.tap(find.byKey(const ValueKey('transicao-fade_white')));
+      await tester.pump();
+      final c = primeiroCorte(tester);
+
+      await cursorEm(tester, c.atS + 0.1);
+      expect(find.byKey(const Key('selo-da-transicao')), findsOneWidget);
+      expect(find.byKey(const Key('veu-da-transicao')), findsOneWidget);
+
+      await cursorEm(tester, c.atS + 2);
+      expect(find.byKey(const Key('selo-da-transicao')), findsNothing);
+    });
+  });
 }

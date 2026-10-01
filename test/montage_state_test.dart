@@ -988,4 +988,47 @@ void main() {
       expect(h.atual.clips.first.atS, 0);
     });
   });
+
+  group('transições', () {
+    const dissolver = ClipTransition(kind: 'dissolve', durationS: 0.5);
+
+    test('aplicar põe a entrada nos escolhidos, e só neles', () {
+      final s = estadoCom([corte(0, 2), corte(2, 2, t: 40)]);
+      final [a, b] = s.clips;
+
+      final depois = aplicarTransicao(s, [b.id], dissolver);
+
+      expect(depois.clipe(b.id)!.transition, dissolver);
+      expect(depois.clipe(a.id)!.transition, isNull);
+      expect(s.clipe(b.id)!.transition, isNull, reason: 'o anterior ficou');
+    });
+
+    test('null tira', () {
+      var s = estadoCom([corte(0, 2)]);
+      final id = s.clips.single.id;
+      s = aplicarTransicao(s, [id], dissolver);
+
+      expect(aplicarTransicao(s, [id], null).clipe(id)!.transition, isNull);
+    });
+
+    test('camada travada não muda', () {
+      var s = estadoCom([corte(0, 2)]);
+      final id = s.clips.single.id;
+      s = ajustarCamada(s, 0, locked: true);
+
+      expect(aplicarTransicao(s, [id], dissolver), same(s));
+    });
+
+    test('dividir deixa a entrada só na metade da esquerda', () {
+      // a da direita continua de onde a outra parou: uma transição ali
+      // apareceria no meio da cena
+      var s = estadoCom([corte(0, 4)]);
+      final id = s.clips.single.id;
+      s = aplicarTransicao(s, [id], dissolver);
+
+      final [esquerda, direita] = dividir(s, id, 2).clips;
+      expect(esquerda.transition, dissolver);
+      expect(direita.transition, isNull);
+    });
+  });
 }

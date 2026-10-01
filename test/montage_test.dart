@@ -633,4 +633,44 @@ void main() {
       expect(t.beats, isEmpty);
     });
   });
+
+  group('transição no monitor', () {
+    TimelineClip bloco(double at, double dur, {ClipTransition? tr}) =>
+        TimelineClip(atS: at, durationS: dur, startS: 10, transition: tr);
+
+    test('acontece no começo do bloco que entra, pelo tempo dela', () {
+      final cuts = [
+        bloco(0, 2),
+        bloco(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
+      ];
+
+      expect(transicaoEm(cuts, 1.9), isNull);
+      final meio = transicaoEm(cuts, 2.5)!;
+      expect(meio.kind, 'dissolve');
+      expect(meio.p, closeTo(0.5, 1e-9));
+      expect(meio.saindo, isFalse);
+      expect(transicaoEm(cuts, 3.1), isNull);
+    });
+
+    test('o mergulho começa antes do corte, no bloco que sai', () {
+      final cuts = [
+        bloco(0, 2),
+        bloco(2, 2, tr: const ClipTransition(kind: 'fade_black', durationS: 1)),
+      ];
+
+      expect(transicaoEm(cuts, 1.4), isNull);
+      final saindo = transicaoEm(cuts, 1.75)!;
+      expect(saindo.saindo, isTrue);
+      expect(saindo.p, closeTo(0.5, 1e-9));
+    });
+
+    test('o dissolver não começa antes do corte', () {
+      // nele o bloco de antes não muda nada: é o novo que aparece por cima
+      final cuts = [
+        bloco(0, 2),
+        bloco(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
+      ];
+      expect(transicaoEm(cuts, 1.75), isNull);
+    });
+  });
 }

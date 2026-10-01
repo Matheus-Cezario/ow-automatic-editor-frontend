@@ -388,6 +388,43 @@ int? blocoEm(List<TimelineClip> cuts, double atS) {
   return null;
 }
 
+/// A transição que está acontecendo em [t], para o monitor imitá-la.
+///
+/// `p` vai de 0 a 1 ao longo dela. `saindo` é o lado de quem sai num mergulho:
+/// o bloco de antes escurece (ou clareia) na metade final dele, e o de depois
+/// volta na metade inicial — como o servidor monta.
+({String kind, double p, bool saindo})? transicaoEm(
+  List<TimelineClip> cuts,
+  double t,
+) {
+  final i = blocoEm(cuts, t);
+  if (i == null) return null;
+  final c = cuts[i];
+  final tr = c.transition;
+  if (tr != null && t < c.atS + tr.durationS) {
+    return (
+      kind: tr.kind,
+      p: ((t - c.atS) / tr.durationS).clamp(0, 1),
+      saindo: false,
+    );
+  }
+  // o mergulho começa antes do corte, ainda no bloco que sai
+  for (final n in cuts) {
+    final nt = n.transition;
+    if (nt == null || (n.atS - c.untilS).abs() > 1e-3) continue;
+    if (nt.kind != 'fade_black' && nt.kind != 'fade_white') continue;
+    final meia = nt.durationS / 2;
+    if (t >= n.atS - meia) {
+      return (
+        kind: nt.kind,
+        p: ((t - (n.atS - meia)) / meia).clamp(0, 1),
+        saindo: true,
+      );
+    }
+  }
+  return null;
+}
+
 /// Que instante da **gravação** o preview deve mostrar em [atS] do vídeo.
 ///
 /// `null` quer dizer tela preta — o mesmo que o servidor vai gerar ali. É esta

@@ -117,6 +117,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// O clipe de texto sendo escrito no próprio monitor, se algum.
   String? _editandoTexto;
 
+  /// A duração que a próxima transição vai ter. Fica na tela, e não no bloco,
+  /// para quem põe a mesma transição em vários cortes não ajustá-la em cada um.
+  double _duracaoTransicao = 0.5;
+
   /// Altura do monitor, arrastável pela alça abaixo dele.
   double _monitorH = 200;
 
@@ -1621,13 +1625,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// A lateral: o que o sistema achou e o que o usuário trouxe, lado a lado —
   /// as duas respondem à mesma pergunta, "o que eu ponho agora?".
   Widget _lateral() => DefaultTabController(
-    length: 2,
+    length: 3,
     child: Column(
       children: [
         const TabBar(
+          // três abas em 300px: o rótulo inteiro não caberia lado a lado
+          labelPadding: EdgeInsets.symmetric(horizontal: 4),
           tabs: [
             Tab(text: 'Momentos'),
             Tab(text: 'Biblioteca'),
+            Tab(text: 'Transições'),
           ],
         ),
         Expanded(
@@ -1635,12 +1642,56 @@ class _TimelineScreenState extends State<TimelineScreen> {
             children: [
               _momentos(encaixado: false),
               _biblioteca_(encaixado: false),
+              _transicoes(encaixado: false),
             ],
           ),
         ),
       ],
     ),
   );
+
+  Widget _transicoes({required bool encaixado}) {
+    final escolhidos = [
+      for (final id in _estado.selecao)
+        if (_estado.clipe(id) case final c?)
+          if (!_ehSom(id)) c,
+    ];
+    return _Transicoes(
+      escolhidos: escolhidos,
+      duracao: _duracaoTransicao,
+      enabled: !_enviando,
+      encaixado: encaixado,
+      onAplicar: (kind) => _editar(
+        aplicarTransicao(_estado, [
+          for (final c in escolhidos) c.id,
+        ], ClipTransition(kind: kind, durationS: _duracaoTransicao)),
+      ),
+      onTirar: () => _editar(
+        aplicarTransicao(_estado, [for (final c in escolhidos) c.id], null),
+      ),
+      onDuracao: (d) {
+        setState(() => _duracaoTransicao = d);
+        // quem já tem transição acompanha o ajuste: é o bloco que se está
+        // olhando, e mexer no controle sem mudar nada nele seria estranho
+        var s = _estado;
+        for (final c in escolhidos) {
+          final t = c.transition;
+          if (t != null) {
+            s = aplicarTransicao(s, [c.id], t.copyWith(durationS: d));
+          }
+        }
+        _editar(s);
+      },
+      onGestoInicio: _historia.abrirGesto,
+      onGestoFim: _historia.fecharGesto,
+    );
+  }
+
+  /// O bloco mora numa camada de som?
+  bool _ehSom(String id) {
+    final onde = _estado.localizar(id);
+    return onde != null && _estado.layers[onde.$1].isAudio;
+  }
 
   Widget _biblioteca_({required bool encaixado}) => _Biblioteca(
     itens: _biblioteca,
@@ -1964,6 +2015,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _biblioteca_(encaixado: true),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _transicoes(encaixado: true),
         ),
       ],
 
@@ -2633,6 +2689,118 @@ class _Passo extends StatelessWidget {
 ///
 /// Um momento não se gasta ao ser usado: o item continua ali, marcado, porque
 /// o mesmo instante pode entrar duas vezes na mesma montagem.
+/// As transições: como o bloco escolhido entra sobre o anterior.
+class _Transicoes extends StatelessWidget {
+  const _Transicoes({
+    required this.escolhidos,
+    required this.duracao,
+    required this.enabled,
+    required this.encaixado,
+    required this.onAplicar,
+    required this.onTirar,
+    required this.onDuracao,
+    required this.onGestoInicio,
+    required this.onGestoFim,
+  });
+
+  /// Os blocos de imagem escolhidos na régua — é neles que a transição entra.
+  final List<TimelineClip> escolhidos;
+  final double duracao;
+  final bool enabled;
+  final bool encaixado;
+  final ValueChanged<String> onAplicar;
+  final VoidCallback onTirar;
+  final ValueChanged<double> onDuracao;
+  final VoidCallback onGestoInicio;
+  final VoidCallback onGestoFim;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pode = enabled && escolhidos.isNotEmpty;
+    // a que todos os escolhidos têm em comum, para acender na lista
+    final kinds = {for (final c in escolhidos) c.transition?.kind};
+    final atual = kinds.length == 1 ? kinds.single : null;
+    final algumaTem = escolhidos.any((c) => c.transition != null);
+
+    final cabecalho = Padding(
+      padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 12, 14, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Transições', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            escolhidos.isEmpty
+                ? 'Escolha um bloco na régua: a transição vale para a '
+                      'entrada dele, na emenda com o bloco anterior.'
+                : escolhidos.length == 1
+                ? 'Toque numa transição para a entrada do bloco escolhido.'
+                : 'Toque numa transição para a entrada dos '
+                      '${escolhidos.length} blocos escolhidos.',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+          ),
+        ],
+      ),
+    );
+
+    final controles = Padding(
+      padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 0, 14, 0),
+      child: Row(
+        children: [
+          const Text('Duração'),
+          Expanded(
+            child: Slider(
+              key: const Key('duracao-da-transicao'),
+              value: duracao,
+              min: ClipTransition.minS,
+              max: 2,
+              divisions: 19,
+              label: '${duracao.toStringAsFixed(1)}s',
+              onChangeStart: (_) => onGestoInicio(),
+              onChangeEnd: (_) => onGestoFim(),
+              onChanged: enabled ? onDuracao : null,
+            ),
+          ),
+          Text('${duracao.toStringAsFixed(1)}s'),
+        ],
+      ),
+    );
+
+    final itens = [
+      for (final t in TipoDeTransicao.todos)
+        ListTile(
+          key: ValueKey('transicao-${t.kind}'),
+          dense: true,
+          enabled: pode,
+          selected: atual == t.kind,
+          contentPadding: EdgeInsets.symmetric(horizontal: encaixado ? 0 : 14),
+          leading: Icon(t.icone),
+          title: Text(t.nome),
+          subtitle: Text(t.descricao),
+          onTap: () => onAplicar(t.kind),
+        ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(encaixado ? 0 : 8, 4, 8, 12),
+        child: TextButton.icon(
+          key: const Key('sem-transicao'),
+          onPressed: pode && algumaTem ? onTirar : null,
+          icon: const Icon(Icons.content_cut, size: 18),
+          label: const Text('Corte seco (sem transição)'),
+        ),
+      ),
+    ];
+
+    if (encaixado) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [cabecalho, controles, ...itens],
+      );
+    }
+    return ListView(children: [cabecalho, controles, ...itens]);
+  }
+}
+
 class _Momentos extends StatelessWidget {
   const _Momentos({
     required this.jobId,

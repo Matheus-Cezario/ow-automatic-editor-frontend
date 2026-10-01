@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../api.dart';
 import '../montage.dart';
+import 'highlight_style.dart';
 
 /// O monitor da montagem: mostra o que o vídeo vai ser, antes de pedi-lo.
 ///
@@ -251,6 +253,46 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
     if (mounted) setState(() {});
   }
 
+  /// A imagem do bloco que entra, como a transição a traz.
+  ///
+  /// O monitor tem **um** vídeo: não dá para mostrar o anterior por baixo do
+  /// novo. O dissolver vira o novo surgindo do preto e o deslizar, o novo
+  /// chegando pelo lado — o bastante para ver o tempo e o sentido dela. A
+  /// mistura de verdade é a do vídeo gerado.
+  Widget _comTransicao(Widget imagem) {
+    final tr = transicaoEm(widget.cuts, widget.atS);
+    if (tr == null || tr.saindo) return imagem;
+    final falta = 1 - tr.p;
+    return switch (tr.kind) {
+      'dissolve' => Opacity(opacity: tr.p, child: imagem),
+      'slide_left' => _desliza(imagem, Offset(falta, 0)),
+      'slide_right' => _desliza(imagem, Offset(-falta, 0)),
+      'slide_up' => _desliza(imagem, Offset(0, falta)),
+      'slide_down' => _desliza(imagem, Offset(0, -falta)),
+      _ => imagem,
+    };
+  }
+
+  Widget _desliza(Widget imagem, Offset fracao) => ClipRect(
+    child: FractionalTranslation(translation: fracao, child: imagem),
+  );
+
+  /// A cor por cima da imagem num mergulho, ou `null` fora dele.
+  Color? _veu() {
+    final tr = transicaoEm(widget.cuts, widget.atS);
+    if (tr == null) return null;
+    final cor = switch (tr.kind) {
+      'fade_black' => Colors.black,
+      'fade_white' => Colors.white,
+      _ => null,
+    };
+    if (cor == null) return null;
+    // saindo, a cor sobe na metade final; entrando, desce na metade inicial
+    final opacidade = tr.saindo ? tr.p : math.max(0.0, 1 - tr.p * 2);
+    if (opacidade <= 0) return null;
+    return cor.withValues(alpha: opacidade);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -268,7 +310,40 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
             // No buraco o quadro anterior não pode ficar à mostra: ali o vídeo
             // vai ser preto de verdade, e mostrar a imagem velha mentiria sobre
             // o que vai sair.
-            if (vivo && !naTelaPreta) VideoPlayer(c),
+            if (vivo && !naTelaPreta) _comTransicao(VideoPlayer(c)),
+            if (_veu() case final veu?)
+              IgnorePointer(
+                child: ColoredBox(
+                  key: const Key('veu-da-transicao'),
+                  color: veu,
+                ),
+              ),
+            if (transicaoEm(widget.cuts, widget.atS) case final tr?)
+              Positioned(
+                left: 8,
+                top: 8,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        TipoDeTransicao.de(tr.kind)?.nome ?? tr.kind,
+                        key: const Key('selo-da-transicao'),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
             // O aviso de tela preta não pega toque: ele fica no meio do
             // quadro, que é justamente onde o texto costuma estar, e um aviso

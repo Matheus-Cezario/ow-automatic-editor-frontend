@@ -82,3 +82,61 @@ String formatClock(double seconds) {
   return '${(s ~/ 60).toString().padLeft(2, '0')}:'
       '${(s % 60).toString().padLeft(2, '0')}';
 }
+
+/// O que cada transição é, para a tela.
+class TipoDeTransicao {
+  const TipoDeTransicao(this.kind, this.nome, this.descricao, this.icone);
+
+  final String kind;
+  final String nome;
+  final String descricao;
+  final IconData icone;
+
+  static const todos = [
+    TipoDeTransicao(
+      'dissolve',
+      'Dissolver',
+      'o novo aparece por cima do anterior',
+      Icons.blur_on,
+    ),
+    TipoDeTransicao(
+      'fade_black',
+      'Mergulho no preto',
+      'escurece e volta já no novo',
+      Icons.brightness_3,
+    ),
+    TipoDeTransicao(
+      'fade_white',
+      'Mergulho no branco',
+      'um clarão no corte',
+      Icons.flare,
+    ),
+    TipoDeTransicao(
+      'slide_left',
+      'Deslizar para a esquerda',
+      'entra pela direita',
+      Icons.west,
+    ),
+    TipoDeTransicao(
+      'slide_right',
+      'Deslizar para a direita',
+      'entra pela esquerda',
+      Icons.east,
+    ),
+    TipoDeTransicao(
+      'slide_up',
+      'Deslizar para cima',
+      'entra por baixo',
+      Icons.north,
+    ),
+    TipoDeTransicao(
+      'slide_down',
+      'Deslizar para baixo',
+      'entra por cima',
+      Icons.south,
+    ),
+  ];
+
+  static TipoDeTransicao? de(String kind) =>
+      todos.where((t) => t.kind == kind).firstOrNull;
+}

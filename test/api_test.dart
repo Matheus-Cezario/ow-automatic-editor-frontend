@@ -76,4 +76,38 @@ void main() {
       expect(c.musicName, isNull);
     });
   });
+
+  group('ClipTransition', () {
+    test('vai e volta do servidor', () {
+      const c = TimelineClip(
+        atS: 0,
+        durationS: 2,
+        startS: 1,
+        transition: ClipTransition(kind: 'dissolve', durationS: 0.8),
+      );
+      final volta = TimelineClip.fromJson(c.toJson());
+
+      expect(volta.transition, c.transition);
+      expect(volta.simples, isFalse, reason: 'transição pede o grafo');
+    });
+
+    test('nunca sai mais longa que o bloco', () {
+      // aparar o bloco depois de pôr a transição não pode deixar a montagem
+      // impossível de gerar: o servidor recusaria
+      const c = TimelineClip(
+        atS: 0,
+        durationS: 0.4,
+        startS: 1,
+        transition: ClipTransition(kind: 'fade_black', durationS: 1.5),
+      );
+
+      expect((c.toJson()['transition'] as Map)['duration_s'], 0.4);
+    });
+
+    test('sem transição, o campo nem vai', () {
+      const c = TimelineClip(atS: 0, durationS: 1, startS: 0);
+      expect(c.toJson().containsKey('transition'), isFalse);
+      expect(TimelineClip.fromJson(c.toJson()).transition, isNull);
+    });
+  });
 }

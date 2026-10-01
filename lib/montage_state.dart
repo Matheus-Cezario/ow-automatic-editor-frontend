@@ -112,6 +112,7 @@ class MontageState {
         v.copyWith(
           atS: c.untilS,
           durationS: v.untilS - c.untilS,
+          semTransicao: true,
           // o pedaço de depois começa mais adiante na fonte, na proporção da
           // velocidade — senão a imagem pularia para trás ao reaparecer. Quadro
           // congelado não anda: é o mesmo quadro dos dois lados
@@ -505,6 +506,35 @@ MontageState trocarTexto(
   return s.comClipe(camada, i, c.copyWith(text: novo, textStyle: estilo));
 }
 
+/// Põe (ou tira, com `null`) a transição de entrada dos blocos [ids].
+///
+/// Bloco de música não entra: transição é coisa de imagem. Camada travada
+/// também não, como em qualquer outra edição.
+MontageState aplicarTransicao(
+  MontageState s,
+  Iterable<String> ids,
+  ClipTransition? transicao,
+) {
+  var novo = s;
+  for (final id in ids) {
+    final onde = novo.localizar(id);
+    if (onde == null) continue;
+    final (camada, i) = onde;
+    final l = novo.layers[camada];
+    if (l.isAudio || l.locked) continue;
+    final c = l.clips[i];
+    if (c.transition == transicao) continue;
+    novo = novo.comClipe(
+      camada,
+      i,
+      transicao == null
+          ? c.copyWith(semTransicao: true)
+          : c.copyWith(transition: transicao),
+    );
+  }
+  return novo;
+}
+
 /// O *punch*: a lente fecha rápido e afrouxa até o fim do clipe.
 ///
 /// Dois movimentos resolvem o efeito mais usado numa montagem de gameplay, e é
@@ -619,6 +649,9 @@ MontageState dividir(MontageState s, String id, double atS) {
     atS: atS,
     durationS: direita,
     startS: c.startS + esquerda,
+    // a entrada é do bloco original; a metade da direita continua de onde a
+    // outra parou, e uma transição ali apareceria do nada no meio da cena
+    semTransicao: true,
   );
   final lista = [...s.layers[camada].clips]
     ..[i] = a
