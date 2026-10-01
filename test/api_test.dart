@@ -66,7 +66,7 @@ void main() {
     test('sem trilha o clipe declara o áudio original', () {
       final c = Clip.fromJson({
         'id': 'c1',
-        'kind': 'beat_montage',
+        'kind': 'custom',
         'start_s': 0,
         'end_s': 5,
         'score': 1,

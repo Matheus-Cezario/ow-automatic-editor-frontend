@@ -49,22 +49,20 @@ flutter test
 | Arquivo | Tela |
 |---|---|
 | `screens/jobs_screen.dart` | lista de partidas, com status ao vivo enquanto houver job em andamento |
-| `screens/new_job_screen.dart` | **fase 1**: escolher a gravação e ajustar as regras da análise. Nada de música aqui |
-| `screens/job_detail_screen.dart` | progresso da análise, linha do tempo, o que dá para gerar, e o histórico de pedidos com os vídeos de cada um |
-| `screens/generate_screen.dart` | **fase 2**: marcar as propostas, dar uma música **por vídeo** e recortar o trecho de cada uma |
-| `screens/timeline_screen.dart` | **montagem manual**: pôr música e momentos na régua, cada um onde se quiser e do tamanho que se quiser |
+| `screens/new_job_screen.dart` | **fase 1**: escolher a gravação e ajustar os parâmetros da análise. Nada de música aqui |
+| `screens/job_detail_screen.dart` | progresso da análise, linha do tempo com os momentos detectados e o histórico de pedidos com os vídeos de cada um |
+| `screens/timeline_screen.dart` | **fase 2, o editor**: pôr música e momentos na régua, cada um onde se quiser e do tamanho que se quiser |
 | `screens/player_screen.dart` | player do clipe |
 
-O app segue a divisão em duas fases do backend: primeiro a partida é analisada
-e o job para em `ready`; a partir daí a tela de detalhe oferece *Gerar vídeos*
-quantas vezes o usuário quiser, e cada pedido aparece no histórico com os seus
-clipes. Proposta escolhida não se gasta: dá para gerar a mesma montagem de novo
-com outra música.
+O app segue a divisão em duas fases do backend. Primeiro a partida é analisada:
+os detectores marcam os momentos (eliminações, dardo da Ana, pedrada do Sigma,
+ultimates, vida baixa…) e o job para em `ready`. O sistema **não monta vídeo
+sozinho**: a partir daí quem edita abre o editor, monta e manda gerar, quantas
+vezes quiser. Cada pedido aparece no histórico com os seus clipes, e usar um
+momento numa montagem não o gasta para as outras.
 
-`widgets/music_window.dart` opera sobre `ClipOptions`, que é **por vídeo** — é
-o que permite músicas e durações diferentes no mesmo pedido. Proposta sem
-música vira vídeo com o áudio original da partida, e a interface diz isso em
-vez de deixar o usuário adivinhar.
+Montagem sem música vira vídeo com o áudio original da partida, e a interface
+diz isso em vez de deixar o usuário adivinhar.
 
 ### Texto que o sistema escreve
 

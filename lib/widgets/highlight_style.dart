@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Cada tipo de highlight ganha um ícone, uma cor e um nome em português.
+/// Cada tipo de vídeo gerado ganha um ícone, uma cor e um nome em português.
 /// Concentrado aqui para a lista, o detalhe e o player falarem a mesma língua.
 class HighlightStyle {
   const HighlightStyle(this.label, this.icon, this.color);
@@ -10,56 +10,8 @@ class HighlightStyle {
   final Color color;
 
   static const _map = <String, HighlightStyle>{
-    'solo_wipe': HighlightStyle(
-      'Sozinho contra todos',
-      Icons.local_fire_department,
-      Color(0xFFFF5252),
-    ),
-    'multikill': HighlightStyle(
-      'Rajada de eliminações',
-      Icons.bolt,
-      Color(0xFFFFB300),
-    ),
-    'escape': HighlightStyle(
-      'Fuga por pouco',
-      Icons.directions_run,
-      Color(0xFF4FC3F7),
-    ),
-    'beat_montage': HighlightStyle(
-      'Montagem no ritmo',
-      Icons.graphic_eq,
-      Color(0xFFAB47BC),
-    ),
-    'ult_montage': HighlightStyle(
-      'Ultimates anuladas',
-      Icons.shield_moon,
-      Color(0xFF66BB6A),
-    ),
-    'sleep_montage': HighlightStyle(
-      'Dardos no alvo',
-      Icons.bedtime,
-      Color(0xFF29B6F6),
-    ),
-    'stun_montage': HighlightStyle(
-      'Pedradas certeiras',
-      Icons.landslide,
-      Color(0xFF8D6E63),
-    ),
-    'headshot_montage': HighlightStyle(
-      'Só na cabeça',
-      Icons.gps_fixed,
-      Color(0xFFEF5350),
-    ),
-    // o título desta vem com o nome da habilidade ("Orisa: Energy Javelin"),
-    // então o rótulo genérico só aparece onde o título não cabe
-    'ability_montage': HighlightStyle(
-      'Eliminações com habilidade',
-      Icons.auto_awesome,
-      Color(0xFF7E57C2),
-    ),
-    // tudo o que sai do editor. Os tipos acima são de vídeos gerados por regra,
-    // que o sistema não faz mais — ficam para os vídeos já gerados não
-    // perderem o ícone que tinham.
+    // tudo o que sai do editor. Os tipos por regra (rajada, dardos no alvo…)
+    // eram dos vídeos que o sistema montava sozinho, que não existem mais.
     'custom': HighlightStyle('Montagem', Icons.timeline, Color(0xFF7E57C2)),
   };
 
