@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Cada tipo de highlight ganha um ícone, uma cor e um nome em português.
+/// Each kind of generated video gets an icon, a colour and a display name.
 /// Concentrado aqui para a lista, o detalhe e o player falarem a mesma língua.
 class HighlightStyle {
   const HighlightStyle(this.label, this.icon, this.color);
@@ -10,56 +10,9 @@ class HighlightStyle {
   final Color color;
 
   static const _map = <String, HighlightStyle>{
-    'solo_wipe': HighlightStyle(
-      'Sozinho contra todos',
-      Icons.local_fire_department,
-      Color(0xFFFF5252),
-    ),
-    'multikill': HighlightStyle(
-      'Rajada de eliminações',
-      Icons.bolt,
-      Color(0xFFFFB300),
-    ),
-    'escape': HighlightStyle(
-      'Fuga por pouco',
-      Icons.directions_run,
-      Color(0xFF4FC3F7),
-    ),
-    'beat_montage': HighlightStyle(
-      'Montagem no ritmo',
-      Icons.graphic_eq,
-      Color(0xFFAB47BC),
-    ),
-    'ult_montage': HighlightStyle(
-      'Ultimates anuladas',
-      Icons.shield_moon,
-      Color(0xFF66BB6A),
-    ),
-    'sleep_montage': HighlightStyle(
-      'Dardos no alvo',
-      Icons.bedtime,
-      Color(0xFF29B6F6),
-    ),
-    'stun_montage': HighlightStyle(
-      'Pedradas certeiras',
-      Icons.landslide,
-      Color(0xFF8D6E63),
-    ),
-    'headshot_montage': HighlightStyle(
-      'Só na cabeça',
-      Icons.gps_fixed,
-      Color(0xFFEF5350),
-    ),
-    // o título desta vem com o nome da habilidade ("Orisa: Energy Javelin"),
-    // então o rótulo genérico só aparece onde o título não cabe
-    'ability_montage': HighlightStyle(
-      'Eliminações com habilidade',
-      Icons.auto_awesome,
-      Color(0xFF7E57C2),
-    ),
-    // tudo o que sai do editor. Os tipos acima são de vídeos gerados por regra,
-    // que o sistema não faz mais — ficam para os vídeos já gerados não
-    // perderem o ícone que tinham.
+    // everything that comes out of the editor. The rule-based kinds (kill
+    // streak, sleep darts…) belonged to videos the system assembled on its
+    // own, which no longer exist.
     'custom': HighlightStyle('Montagem', Icons.timeline, Color(0xFF7E57C2)),
   };
 
@@ -108,7 +61,8 @@ String nomeDaHabilidade(String ability) {
   final heroi = barra < 0 ? '' : ability.substring(0, barra);
   final nome = barra < 0 ? ability : ability.substring(barra + 1);
   String bonito(String s) => [
-    for (final palavra in s.replaceAll('-', ' ').replaceAll('_', ' ').split(' '))
+    for (final palavra
+        in s.replaceAll('-', ' ').replaceAll('_', ' ').split(' '))
       if (palavra.isNotEmpty)
         '${palavra[0].toUpperCase()}${palavra.substring(1)}',
   ].join(' ');
@@ -129,4 +83,57 @@ String formatClock(double seconds) {
   final s = seconds.round();
   return '${(s ~/ 60).toString().padLeft(2, '0')}:'
       '${(s % 60).toString().padLeft(2, '0')}';
+}
+
+/// What each transition is, for the screen.
+class TransitionType {
+  const TransitionType(this.kind, this.name, this.description, this.icon);
+
+  final String kind;
+  final String name;
+  final String description;
+  final IconData icon;
+
+  static const all = [
+    TransitionType(
+      'dissolve',
+      'Dissolve',
+      'the new clip appears over the previous one',
+      Icons.blur_on,
+    ),
+    TransitionType(
+      'fade_black',
+      'Dip to black',
+      'goes dark and comes back on the new clip',
+      Icons.brightness_3,
+    ),
+    TransitionType(
+      'fade_white',
+      'Dip to white',
+      'a flash at the cut',
+      Icons.flare,
+    ),
+    TransitionType(
+      'slide_left',
+      'Slide left',
+      'comes in from the right',
+      Icons.west,
+    ),
+    TransitionType(
+      'slide_right',
+      'Slide right',
+      'comes in from the left',
+      Icons.east,
+    ),
+    TransitionType('slide_up', 'Slide up', 'comes in from below', Icons.north),
+    TransitionType(
+      'slide_down',
+      'Slide down',
+      'comes in from above',
+      Icons.south,
+    ),
+  ];
+
+  static TransitionType? of(String kind) =>
+      all.where((t) => t.kind == kind).firstOrNull;
 }

@@ -306,10 +306,47 @@ void main() {
       // o preview não compõe: ele mostra um quadro, e o que vale é o que o
       // servidor vai desenhar por último
       final s = estadoEmCamadas([corte(0, 4, t: 10)], [corte(1, 1, t: 50)]);
+      final below = s.layers[0].clips.single;
 
-      final visiveis = s.clipesVisiveis;
-      expect(visiveis, hasLength(1));
-      expect(visiveis.first.sourceT, 50, reason: 'a de baixo foi coberta');
+      final visible = s.clipesVisiveis;
+      expect(visible, hasLength(3));
+      expect(visible[1].sourceT, 50, reason: 'where they overlap, upper wins');
+      expect(
+        origemEm(visible, 1.5),
+        closeTo(50 - 1 * kMomentAnchor + 0.5, 1e-9),
+      );
+      // before and after, the lower one carries on: it was only covered in
+      // the middle
+      expect(origemEm(visible, 0.5), closeTo(below.startS + 0.5, 1e-9));
+      expect(
+        origemEm(visible, 3),
+        closeTo(below.startS + 3, 1e-9),
+        reason: 'the piece after follows the recording where it would be',
+      );
+      expect({for (final v in visible) v.id}, hasLength(2));
+    });
+
+    test('text on top does not erase the video below', () {
+      // text is drawn over the picture; when it ended, the monitor went black
+      // even with the video clip still running underneath
+      final s = estadoEmCamadas(
+        [corte(0, 6, t: 10)],
+        [
+          const TimelineClip(
+            atS: 1,
+            durationS: 2,
+            startS: 0,
+            source: 'text',
+            text: 'TRIPLE KILL',
+          ),
+        ],
+      );
+
+      final visible = s.clipesVisiveis;
+      expect(visible.single.isText, isFalse);
+      for (final t in [0.5, 2.0, 4.0, 5.5]) {
+        expect(origemEm(visible, t), isNotNull, reason: 'black at $t s');
+      }
     });
 
     test('camada escondida não aparece no monitor', () {
@@ -950,6 +987,49 @@ void main() {
 
       h.desfazer();
       expect(h.atual.clips.first.atS, 0);
+    });
+  });
+
+  group('transitions', () {
+    const dissolve = ClipTransition(kind: 'dissolve', durationS: 0.5);
+
+    test('applying sets the entrance on the given clips, and only them', () {
+      final s = estadoCom([corte(0, 2), corte(2, 2, t: 40)]);
+      final [a, b] = s.clips;
+
+      final after = applyTransition(s, [b.id], dissolve);
+
+      expect(after.clipe(b.id)!.transition, dissolve);
+      expect(after.clipe(a.id)!.transition, isNull);
+      expect(s.clipe(b.id)!.transition, isNull, reason: 'the old state stays');
+    });
+
+    test('null clears it', () {
+      var s = estadoCom([corte(0, 2)]);
+      final id = s.clips.single.id;
+      s = applyTransition(s, [id], dissolve);
+
+      expect(applyTransition(s, [id], null).clipe(id)!.transition, isNull);
+    });
+
+    test('a locked layer does not change', () {
+      var s = estadoCom([corte(0, 2)]);
+      final id = s.clips.single.id;
+      s = ajustarCamada(s, 0, locked: true);
+
+      expect(applyTransition(s, [id], dissolve), same(s));
+    });
+
+    test('splitting keeps the entrance on the left half only', () {
+      // the right half carries on where the other stopped: a transition there
+      // would show up mid-scene
+      var s = estadoCom([corte(0, 4)]);
+      final id = s.clips.single.id;
+      s = applyTransition(s, [id], dissolve);
+
+      final [left, right] = dividir(s, id, 2).clips;
+      expect(left.transition, dissolve);
+      expect(right.transition, isNull);
     });
   });
 }

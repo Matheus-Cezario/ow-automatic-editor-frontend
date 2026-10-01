@@ -348,6 +348,49 @@ class ClipFade {
   Map<String, dynamic> toJson() => {'in_s': inS, 'out_s': outS};
 }
 
+/// How a clip enters, at the cut with the previous clip on the same layer.
+///
+/// It belongs to the clip that **enters**, not to the cut: moving the clip
+/// takes its entrance along, and a clip with nothing before it (the first one,
+/// or one after a gap) still has an entrance — out of the background.
+class ClipTransition {
+  const ClipTransition({required this.kind, this.durationS = 0.5});
+
+  factory ClipTransition.fromJson(Map<String, dynamic> j) => ClipTransition(
+    kind: j['kind'] as String,
+    durationS: (j['duration_s'] as num?)?.toDouble() ?? 0.5,
+  );
+
+  /// `dissolve`, `fade_black`, `fade_white` or `slide_*` — the server's names.
+  /// What each one is for the screen lives in `TransitionType`.
+  final String kind;
+  final double durationS;
+
+  static const minS = 0.1;
+  static const maxS = 3.0;
+
+  ClipTransition copyWith({String? kind, double? durationS}) => ClipTransition(
+    kind: kind ?? this.kind,
+    durationS: durationS ?? this.durationS,
+  );
+
+  /// Never longer than the clip: the server would refuse it, and trimming the
+  /// clip must not leave the montage impossible to render.
+  Map<String, dynamic> toJsonFor(double clipDuration) => {
+    'kind': kind,
+    'duration_s': durationS.clamp(minS, math.max(minS, clipDuration)),
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is ClipTransition &&
+      other.kind == kind &&
+      other.durationS == durationS;
+
+  @override
+  int get hashCode => Object.hash(kind, durationS);
+}
+
 /// Como o texto aparece.
 ///
 /// Chama-se `ClipTextStyle` e não `TextStyle` porque o Flutter já tem uma
@@ -549,6 +592,7 @@ class TimelineClip {
     this.reverse = false,
     this.text = '',
     this.textStyle = const ClipTextStyle(),
+    this.transition,
   });
 
   /// Identidade do bloco **dentro do editor**. Não vai para o servidor e não
@@ -600,6 +644,9 @@ class TimelineClip {
   final String text;
   final ClipTextStyle textStyle;
 
+  /// How it enters over the previous clip. `null` = a hard cut.
+  final ClipTransition? transition;
+
   bool get isText => source == 'text';
 
   /// Quanto da gravação este clipe come. A 2×, dois segundos de vídeo comem
@@ -614,6 +661,7 @@ class TimelineClip {
       audio.neutro &&
       color.neutra &&
       fade.neutro &&
+      transition == null &&
       speed == 1 &&
       zoom.isEmpty &&
       !freeze &&
@@ -644,6 +692,8 @@ class TimelineClip {
     bool? reverse,
     String? text,
     ClipTextStyle? textStyle,
+    ClipTransition? transition,
+    bool clearTransition = false,
   }) => TimelineClip(
     sourceT: sourceT ?? this.sourceT,
     startS: startS ?? this.startS,
@@ -663,6 +713,7 @@ class TimelineClip {
     reverse: reverse ?? this.reverse,
     text: text ?? this.text,
     textStyle: textStyle ?? this.textStyle,
+    transition: clearTransition ? null : transition ?? this.transition,
   );
 
   /// O `id` não vem do servidor: ele é atribuído ao carregar, por
@@ -697,6 +748,11 @@ class TimelineClip {
     textStyle: ClipTextStyle.fromJson(
       (j['text_style'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
+    transition: j['transition'] == null
+        ? null
+        : ClipTransition.fromJson(
+            (j['transition'] as Map).cast<String, dynamic>(),
+          ),
   );
 
   Map<String, dynamic> toJson() => {
@@ -717,6 +773,7 @@ class TimelineClip {
     if (reverse) 'reverse': true,
     if (isText) 'text': text,
     if (isText) 'text_style': textStyle.toJson(),
+    if (transition != null) 'transition': transition!.toJsonFor(durationS),
   };
 }
 

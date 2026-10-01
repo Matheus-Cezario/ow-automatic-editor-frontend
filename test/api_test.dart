@@ -66,7 +66,7 @@ void main() {
     test('sem trilha o clipe declara o áudio original', () {
       final c = Clip.fromJson({
         'id': 'c1',
-        'kind': 'beat_montage',
+        'kind': 'custom',
         'start_s': 0,
         'end_s': 5,
         'score': 1,
@@ -74,6 +74,40 @@ void main() {
       });
       expect(c.keepsOriginalAudio, isTrue);
       expect(c.musicName, isNull);
+    });
+  });
+
+  group('ClipTransition', () {
+    test('round-trips through the server format', () {
+      const c = TimelineClip(
+        atS: 0,
+        durationS: 2,
+        startS: 1,
+        transition: ClipTransition(kind: 'dissolve', durationS: 0.8),
+      );
+      final back = TimelineClip.fromJson(c.toJson());
+
+      expect(back.transition, c.transition);
+      expect(back.simples, isFalse, reason: 'a transition needs the graph');
+    });
+
+    test('is never sent longer than the clip', () {
+      // trimming the clip after setting the transition must not leave the
+      // montage impossible to render: the server would refuse it
+      const c = TimelineClip(
+        atS: 0,
+        durationS: 0.4,
+        startS: 1,
+        transition: ClipTransition(kind: 'fade_black', durationS: 1.5),
+      );
+
+      expect((c.toJson()['transition'] as Map)['duration_s'], 0.4);
+    });
+
+    test('without a transition, the field is not sent', () {
+      const c = TimelineClip(atS: 0, durationS: 1, startS: 0);
+      expect(c.toJson().containsKey('transition'), isFalse);
+      expect(TimelineClip.fromJson(c.toJson()).transition, isNull);
     });
   });
 }

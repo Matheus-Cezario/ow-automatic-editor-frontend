@@ -114,6 +114,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// arrasto está fazendo em pixels.
   String? _arrastando;
 
+  /// The text clip being typed on the monitor itself, if any.
+  String? _editingTextId;
+
+  /// The duration the next transition gets. It lives on the screen, not on the
+  /// clip, so applying the same transition to several cuts needs no
+  /// adjustment on each one.
+  double _transitionDuration = 0.5;
+
   /// Altura do monitor, arrastável pela alça abaixo dele.
   double _monitorH = 200;
 
@@ -1384,6 +1392,22 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (mounted) _foco.requestFocus();
   }
 
+  /// Opens (id) or closes (`null`) typing on the monitor.
+  ///
+  /// Everything typed in one opening becomes **one** undo step: keystroke by
+  /// keystroke, Ctrl+Z would erase one letter at a time.
+  void _typeOnFrame(String? id) {
+    if (id == _editingTextId) return;
+    if (_editingTextId != null) _historia.fecharGesto();
+    if (id != null) {
+      _historia.abrirGesto();
+      _pausar();
+    }
+    setState(() => _editingTextId = id);
+    if (id != null) _semHistorico(_estado.copyWith(selecao: {id}));
+    if (id == null) _devolverOFoco();
+  }
+
   /// Os atalhos, com Ctrl e Cmd valendo igual.
   Map<ShortcutActivator, VoidCallback> get _atalhos {
     final b = <ShortcutActivator, VoidCallback>{
@@ -1602,13 +1626,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// A lateral: o que o sistema achou e o que o usuário trouxe, lado a lado —
   /// as duas respondem à mesma pergunta, "o que eu ponho agora?".
   Widget _lateral() => DefaultTabController(
-    length: 2,
+    length: 3,
     child: Column(
       children: [
         const TabBar(
+          // three tabs in 300px: full labels would not fit side by side
+          labelPadding: EdgeInsets.symmetric(horizontal: 4),
           tabs: [
             Tab(text: 'Momentos'),
             Tab(text: 'Biblioteca'),
+            Tab(text: 'Transitions'),
           ],
         ),
         Expanded(
@@ -1616,12 +1643,57 @@ class _TimelineScreenState extends State<TimelineScreen> {
             children: [
               _momentos(encaixado: false),
               _biblioteca_(encaixado: false),
+              _transitions(docked: false),
             ],
           ),
         ),
       ],
     ),
   );
+
+  Widget _transitions({required bool docked}) {
+    final selected = [
+      for (final id in _estado.selecao)
+        if (_estado.clipe(id) case final c?)
+          if (!_isAudioClip(id)) c,
+    ];
+    return _Transitions(
+      selected: selected,
+      duration: _transitionDuration,
+      enabled: !_enviando,
+      docked: docked,
+      onApply: (kind) => _editar(
+        applyTransition(_estado, [
+          for (final c in selected) c.id,
+        ], ClipTransition(kind: kind, durationS: _transitionDuration)),
+      ),
+      onClear: () => _editar(
+        applyTransition(_estado, [for (final c in selected) c.id], null),
+      ),
+      onDuration: (d) {
+        setState(() => _transitionDuration = d);
+        // clips that already have a transition follow the adjustment: it is
+        // the clip being looked at, and moving the control without changing
+        // it would be odd
+        var s = _estado;
+        for (final c in selected) {
+          final t = c.transition;
+          if (t != null) {
+            s = applyTransition(s, [c.id], t.copyWith(durationS: d));
+          }
+        }
+        _editar(s);
+      },
+      onGestureStart: _historia.abrirGesto,
+      onGestureEnd: _historia.fecharGesto,
+    );
+  }
+
+  /// Does the clip live on an audio layer?
+  bool _isAudioClip(String id) {
+    final where = _estado.localizar(id);
+    return where != null && _estado.layers[where.$1].isAudio;
+  }
 
   Widget _biblioteca_({required bool encaixado}) => _Biblioteca(
     itens: _biblioteca,
@@ -1649,393 +1721,433 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final preto = duracaoEmPreto(_estado.clips);
     final selecao = _estado.selecao;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 8, 0, 32),
-      children: [
-        // ── o monitor, com a alça de altura ─────────────────────────────────
-        if (widget.job.monitorUrl != null) ...[
-          SizedBox(
-            height: _monitorH,
-            child: Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: PreviewPlayer(
-                  // o proxy quando houver; nas partidas antigas, a gravação
-                  videoUrl: widget.job.monitorUrl!,
-                  cuts: _estado.clipesVisiveis,
-                  atS: _cursor,
-                  playing: _tocando,
-                  // o texto é desenhado por cima da imagem, e arrastá-lo ali é
-                  // como se decide onde ele fica: a alternativa era digitar
-                  // dois números e gerar o vídeo para conferir
-                  textos: _textosVisiveis,
-                  selecao: _estado.selecao,
-                  onSelecionarTexto: _selecionar,
-                  onMoverTexto: (id, x, y) =>
-                      _editar(posicionarNoQuadro(_estado, id, x: x, y: y)),
-                  onArrastando: (t) => setState(() => _arrastando = t),
-                ),
+    // The monitor, transport and ruler stay pinned at the top; only the panels
+    // below scroll. Scrolling to the bottom to adjust an effect and losing
+    // sight of the video and the ruler was editing blind.
+    //
+    // In a short window the pinned part would take the whole screen: past 70%
+    // of the height it scrolls by itself, and the panels stay within reach.
+    final pinned = <Widget>[
+      const SizedBox(height: 8),
+      // ── o monitor, com a alça de altura ─────────────────────────────────
+      if (widget.job.monitorUrl != null) ...[
+        SizedBox(
+          height: _monitorH,
+          child: Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: PreviewPlayer(
+                // o proxy quando houver; nas partidas antigas, a gravação
+                videoUrl: widget.job.monitorUrl!,
+                cuts: _estado.clipesVisiveis,
+                atS: _cursor,
+                playing: _tocando,
+                // o texto é desenhado por cima da imagem, e arrastá-lo ali é
+                // como se decide onde ele fica: a alternativa era digitar
+                // dois números e gerar o vídeo para conferir
+                textos: _textosVisiveis,
+                selecao: _estado.selecao,
+                onSelecionarTexto: _selecionar,
+                onMoverTexto: (id, x, y) =>
+                    _editar(posicionarNoQuadro(_estado, id, x: x, y: y)),
+                onArrastando: (t) => setState(() => _arrastando = t),
+                editingId: _editingTextId,
+                onEditing: _typeOnFrame,
+                onTextChanged: (id, v) =>
+                    _editar(trocarTexto(_estado, id, texto: v)),
+                onGestureStart: _historia.abrirGesto,
+                onGestureEnd: _historia.fecharGesto,
               ),
-            ),
-          ),
-          _AlcaDeAltura(
-            key: const Key('alca-monitor'),
-            onArrastar: (dy) => setState(
-              () => _monitorH = (_monitorH + dy).clamp(120.0, 560.0),
-            ),
-          ),
-        ],
-
-        // ── transporte ──────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-          child: Row(
-            children: [
-              IconButton.filledTonal(
-                // depende de haver o que tocar, e não de haver música: um
-                // vídeo sem trilha nenhuma continua sendo um vídeo a rever
-                onPressed: _estado.vazia ? null : _tocarOuPausar,
-                icon: Icon(_tocando ? Icons.pause : Icons.play_arrow),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    formatClock(_cursor),
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  // a régua é o tempo do vídeo que vai sair, e nada mais: a
-                  // música mora nele, e não ele nela
-                  Text(
-                    'de ${formatClock(duracaoDoVideo(_estado.clips))}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.hintColor,
-                    ),
-                  ),
-                ],
-              ),
-              // Numa tela estreita estes controles não cabem ao lado do
-              // relógio. `reverse` os mantém encostados à direita quando cabem,
-              // e rolando quando não — em vez de estourar o layout.
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  reverse: true,
-                  child: Row(
-                    children: [
-                      IconButton(
-                        tooltip: 'Dividir no cursor (S)',
-                        onPressed: _estado.vazia ? null : _dividirNoCursor,
-                        icon: const Icon(Icons.content_cut),
-                      ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Escrever na tela',
-                        icon: const Icon(Icons.title),
-                        onSelected: (v) => switch (v) {
-                          'livre' => _texto('TEXTO'),
-                          'contador' => _gerarRotulos(
-                            contadorDeEliminacoes(_estado.clips),
-                            'eliminações',
-                          ),
-                          'rajada' => _gerarRotulos(
-                            rotulosDeRajada(_estado.clips),
-                            'rajadas',
-                          ),
-                          _ => null,
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: 'livre',
-                            child: Text('Texto livre'),
-                          ),
-                          PopupMenuDivider(),
-                          PopupMenuItem(
-                            value: 'contador',
-                            child: Text('Contador de eliminações'),
-                          ),
-                          PopupMenuItem(
-                            value: 'rajada',
-                            child: Text('Rótulos de rajada'),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        tooltip: 'Nova camada',
-                        onPressed: () => _editar(adicionarCamada(_estado)),
-                        icon: const Icon(Icons.layers_outlined),
-                      ),
-                      IconButton(
-                        key: const Key('nova-camada-de-musica'),
-                        tooltip: 'Nova camada de música',
-                        onPressed: _novaCamadaDeMusica,
-                        icon: const Icon(Icons.queue_music_outlined),
-                      ),
-                      IconButton(
-                        tooltip: _estado.layers.length > 1
-                            ? 'Tirar a camada ativa'
-                            : 'A última camada não sai',
-                        onPressed: _estado.layers.length > 1
-                            ? () => _editar(
-                                removerCamada(_estado, _estado.camadaAtiva),
-                              )
-                            : null,
-                        icon: const Icon(Icons.layers_clear_outlined),
-                      ),
-                      const Icon(Icons.zoom_out, size: 18),
-                      SizedBox(
-                        width: 120,
-                        child: Slider(
-                          value: _px,
-                          min: 20,
-                          max: 220,
-                          onChanged: (v) => setState(() => _px = v),
-                        ),
-                      ),
-                      const Icon(Icons.zoom_in, size: 18),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // ── a régua da música com os blocos ─────────────────────────────────
-        MusicTimeline(
-          musicas: _musicas,
-          batidas: _batidas,
-          layers: _estado.layers,
-          camadaAtiva: _estado.camadaAtiva,
-          selecao: selecao,
-          pxPerSecond: _px,
-          playheadS: _cursor,
-          scroll: _scroll,
-          onSeek: _irPara,
-          onSelect: _selecionar,
-          onMove: _mover,
-          onTrim: _aparar,
-          onStretch: _esticar,
-          onDragLabel: (texto) => setState(() => _arrastando = texto),
-          onGestoInicio: _historia.abrirGesto,
-          onGestoFim: _historia.fecharGesto,
-          onTrocarDeCamada: _trocarDeCamada,
-          onCamadaAtiva: (i) => _semHistorico(_estado.copyWith(camadaAtiva: i)),
-          onReordenarCamadas: (de, para) =>
-              _editar(reordenarCamadas(_estado, de, para)),
-          onAjustarCamada: (i, {muted, hidden, locked}) => _editar(
-            ajustarCamada(
-              _estado,
-              i,
-              muted: muted,
-              hidden: hidden,
-              locked: locked,
-            ),
-          ),
-          ondaDaPartida: widget.job.waveform,
-          duracaoDaPartida: widget.job.durationS,
-          onSoltar: _soltarNaRegua,
-        ),
-
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-          child: Text(
-            _arrastando ??
-                (_erroMusica ??
-                    'Arraste um momento ou um item da Biblioteca para a régua.'),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: _arrastando != null
-                  ? theme.colorScheme.primary
-                  : _erroMusica != null
-                  ? theme.colorScheme.error
-                  : theme.hintColor,
             ),
           ),
         ),
-
-        if (selecao.length == 1) ...[
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _BlocoSelecionado(
-              cut: _estado.clipe(selecao.first)!,
-              midia: _midiaDoBloco(selecao.first),
-              onSpeed: (v) => _efeito(selecao.first, speed: v),
-              onColor: (v) => _efeito(selecao.first, color: v),
-              onFade: (v) => _efeito(selecao.first, fade: v),
-              onZoom: (v) => _efeito(selecao.first, zoom: v),
-              onFreeze: (v) => _efeito(selecao.first, freeze: v),
-              onReverse: (v) => _efeito(selecao.first, reverse: v),
-              onTexto: (v) =>
-                  _editar(trocarTexto(_estado, selecao.first, texto: v)),
-              onEstilo: (v) =>
-                  _editar(trocarTexto(_estado, selecao.first, estilo: v)),
-              onSairDoCampo: _devolverOFoco,
-              onDuracao: (d) => _esticar(selecao.first, d),
-              onDeslocar: (d) => _deslocar(selecao.first, d),
-              onParaOCursor: () => _mover(selecao.first, _cursor),
-              onMomentoNoCursor: () => _alinharMomentoAoCursor(selecao.first),
-              onApagar: _apagarSelecao,
-              onDividir: _dividirNoCursor,
-              onDuplicar: _duplicar,
-            ),
-          ),
-        ] else if (selecao.length > 1) ...[
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _SelecaoMultipla(
-              quantos: selecao.length,
-              onApagar: _apagarSelecao,
-              onDuplicar: _duplicar,
-              onLimpar: () => _selecionar(null),
-            ),
-          ),
-        ],
-
-        if (_temMusica) ...[
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _Mistura(
-              musicVolume: _estado.musicVolume,
-              gameVolume: _estado.gameVolume,
-              temMusica: true,
-              onMudou: (musica, jogo) => _editar(
-                _estado.copyWith(musicVolume: musica, gameVolume: jogo),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _GradeDeBatidas(
-              offsetS: _estado.beatOffsetS,
-              multiplicador: _estado.beatMultiplier,
-              compasso: _estado.beatBar,
-              quantas: _batidas.length,
-              onMudou: (offset, mult, compasso) => _editar(
-                _estado.copyWith(
-                  beatOffsetS: offset,
-                  beatMultiplier: mult,
-                  beatBar: compasso,
-                ),
-              ),
-            ),
-          ),
-        ],
-
-        if (encaixarMomentos) ...[
-          const SizedBox(height: 18),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _momentos(encaixado: true),
-          ),
-          const SizedBox(height: 18),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _biblioteca_(encaixado: true),
-          ),
-        ],
-
-        const SizedBox(height: 14),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _Exportacao(
-            spec: _estado.export,
-            duracaoS: duracao,
-            largura: widget.job.width,
-            altura: widget.job.height,
-            temSelecao: selecao.isNotEmpty,
-            imagens: [
-              for (final m in _biblioteca)
-                if (m.kind == 'image' && m.isReady) m,
-            ],
-            enabled: !_enviando,
-            onMudou: (e) => _editar(_estado.copyWith(export: e)),
-            onExportarSelecao: () => _editar(exportarSelecao(_estado)),
-            onExportarTudo: () => _editar(exportarTudo(_estado)),
-          ),
+        _AlcaDeAltura(
+          key: const Key('alca-monitor'),
+          onArrastar: (dy) =>
+              setState(() => _monitorH = (_monitorH + dy).clamp(120.0, 560.0)),
         ),
+      ],
 
-        const SizedBox(height: 20),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _titulo,
-                enabled: !_enviando,
-                // Tocar fora devolve o foco à montagem, e com ele os atalhos.
-                // Nada tira o foco de um `TextField` por conta própria: sem
-                // isto, um toque aqui matava o "S" e o Delete para sempre.
-                onTapOutside: (_) => _devolverOFoco(),
-                onChanged: (v) => _semHistorico(_estado.copyWith(title: v)),
-                decoration: const InputDecoration(
-                  labelText: 'Nome do vídeo',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _estado.vazia
-                    ? 'Escolha um momento para pôr o primeiro corte onde a '
-                          'cabeça de leitura estiver.'
-                    // um bloco de música não é um corte: quem conta cortes
-                    // quer saber quantas cenas o vídeo tem
-                    : '${_estado.clipesVisiveis.length} corte(s)'
-                          '${_temMusica ? '  ·  com música' : ''}'
-                          '  ·  vídeo de ${formatDuration(duracao)}'
-                          '${preto > 0.05 ? '  ·  ${formatDuration(preto)} de tela preta' : ''}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.hintColor,
-                ),
-              ),
-              if (preto > 0.05)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Os espaços vazios entre os blocos ficam pretos, com a '
-                    'música tocando.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.hintColor,
-                    ),
-                  ),
-                ),
-              if (_erro != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.error.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _erro!,
-                    style: TextStyle(color: theme.colorScheme.error),
+      // ── transporte ──────────────────────────────────────────────────────
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+        child: Row(
+          children: [
+            IconButton.filledTonal(
+              // depende de haver o que tocar, e não de haver música: um
+              // vídeo sem trilha nenhuma continua sendo um vídeo a rever
+              onPressed: _estado.vazia ? null : _tocarOuPausar,
+              icon: Icon(_tocando ? Icons.pause : Icons.play_arrow),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(formatClock(_cursor), style: theme.textTheme.titleMedium),
+                // a régua é o tempo do vídeo que vai sair, e nada mais: a
+                // música mora nele, e não ele nela
+                Text(
+                  'de ${formatClock(duracaoDoVideo(_estado.clips))}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.hintColor,
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
-              if (_enviando)
-                const Center(child: CircularProgressIndicator())
-              else
-                FilledButton.icon(
-                  onPressed: _estado.vazia ? null : _gerar,
-                  icon: const Icon(Icons.movie_creation_outlined),
-                  label: Text(
-                    _estado.vazia
-                        ? 'Ponha ao menos um corte'
-                        : 'Gerar este vídeo',
-                  ),
+            ),
+            // Numa tela estreita estes controles não cabem ao lado do
+            // relógio. `reverse` os mantém encostados à direita quando cabem,
+            // e rolando quando não — em vez de estourar o layout.
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                reverse: true,
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Dividir no cursor (S)',
+                      onPressed: _estado.vazia ? null : _dividirNoCursor,
+                      icon: const Icon(Icons.content_cut),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Escrever na tela',
+                      icon: const Icon(Icons.title),
+                      onSelected: (v) => switch (v) {
+                        'livre' => _texto('TEXTO'),
+                        'contador' => _gerarRotulos(
+                          contadorDeEliminacoes(_estado.clips),
+                          'eliminações',
+                        ),
+                        'rajada' => _gerarRotulos(
+                          rotulosDeRajada(_estado.clips),
+                          'rajadas',
+                        ),
+                        _ => null,
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'livre',
+                          child: Text('Texto livre'),
+                        ),
+                        PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'contador',
+                          child: Text('Contador de eliminações'),
+                        ),
+                        PopupMenuItem(
+                          value: 'rajada',
+                          child: Text('Rótulos de rajada'),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      tooltip: 'Nova camada',
+                      onPressed: () => _editar(adicionarCamada(_estado)),
+                      icon: const Icon(Icons.layers_outlined),
+                    ),
+                    IconButton(
+                      key: const Key('nova-camada-de-musica'),
+                      tooltip: 'Nova camada de música',
+                      onPressed: _novaCamadaDeMusica,
+                      icon: const Icon(Icons.queue_music_outlined),
+                    ),
+                    IconButton(
+                      tooltip: _estado.layers.length > 1
+                          ? 'Tirar a camada ativa'
+                          : 'A última camada não sai',
+                      onPressed: _estado.layers.length > 1
+                          ? () => _editar(
+                              removerCamada(_estado, _estado.camadaAtiva),
+                            )
+                          : null,
+                      icon: const Icon(Icons.layers_clear_outlined),
+                    ),
+                    const Icon(Icons.zoom_out, size: 18),
+                    SizedBox(
+                      width: 120,
+                      child: Slider(
+                        value: _px,
+                        min: 20,
+                        max: 220,
+                        onChanged: (v) => setState(() => _px = v),
+                      ),
+                    ),
+                    const Icon(Icons.zoom_in, size: 18),
+                  ],
                 ),
-            ],
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      // ── a régua da música com os blocos ─────────────────────────────────
+      MusicTimeline(
+        musicas: _musicas,
+        batidas: _batidas,
+        layers: _estado.layers,
+        camadaAtiva: _estado.camadaAtiva,
+        selecao: selecao,
+        pxPerSecond: _px,
+        playheadS: _cursor,
+        scroll: _scroll,
+        onSeek: _irPara,
+        onSelect: _selecionar,
+        onMove: _mover,
+        onTrim: _aparar,
+        onStretch: _esticar,
+        onDragLabel: (texto) => setState(() => _arrastando = texto),
+        onGestoInicio: _historia.abrirGesto,
+        onGestoFim: _historia.fecharGesto,
+        onTrocarDeCamada: _trocarDeCamada,
+        onCamadaAtiva: (i) => _semHistorico(_estado.copyWith(camadaAtiva: i)),
+        onReordenarCamadas: (de, para) =>
+            _editar(reordenarCamadas(_estado, de, para)),
+        onAjustarCamada: (i, {muted, hidden, locked}) => _editar(
+          ajustarCamada(
+            _estado,
+            i,
+            muted: muted,
+            hidden: hidden,
+            locked: locked,
+          ),
+        ),
+        ondaDaPartida: widget.job.waveform,
+        duracaoDaPartida: widget.job.durationS,
+        onSoltar: _soltarNaRegua,
+      ),
+
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+        child: Text(
+          _arrastando ??
+              (_erroMusica ??
+                  'Arraste um momento ou um item da Biblioteca para a régua.'),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: _arrastando != null
+                ? theme.colorScheme.primary
+                : _erroMusica != null
+                ? theme.colorScheme.error
+                : theme.hintColor,
+          ),
+        ),
+      ),
+
+      const SizedBox(height: 4),
+    ];
+
+    final scrolling = <Widget>[
+      if (selecao.length == 1) ...[
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _BlocoSelecionado(
+            cut: _estado.clipe(selecao.first)!,
+            midia: _midiaDoBloco(selecao.first),
+            onSpeed: (v) => _efeito(selecao.first, speed: v),
+            onColor: (v) => _efeito(selecao.first, color: v),
+            onFade: (v) => _efeito(selecao.first, fade: v),
+            onZoom: (v) => _efeito(selecao.first, zoom: v),
+            onFreeze: (v) => _efeito(selecao.first, freeze: v),
+            onReverse: (v) => _efeito(selecao.first, reverse: v),
+            onEstilo: (v) =>
+                _editar(trocarTexto(_estado, selecao.first, estilo: v)),
+            onTypeOnFrame: () => _typeOnFrame(selecao.first),
+            onDuracao: (d) => _esticar(selecao.first, d),
+            onDeslocar: (d) => _deslocar(selecao.first, d),
+            onParaOCursor: () => _mover(selecao.first, _cursor),
+            onMomentoNoCursor: () => _alinharMomentoAoCursor(selecao.first),
+            onApagar: _apagarSelecao,
+            onDividir: _dividirNoCursor,
+            onDuplicar: _duplicar,
+          ),
+        ),
+      ] else if (selecao.length > 1) ...[
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _SelecaoMultipla(
+            quantos: selecao.length,
+            onApagar: _apagarSelecao,
+            onDuplicar: _duplicar,
+            onLimpar: () => _selecionar(null),
           ),
         ),
       ],
+
+      if (_temMusica) ...[
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _Mistura(
+            musicVolume: _estado.musicVolume,
+            gameVolume: _estado.gameVolume,
+            temMusica: true,
+            onMudou: (musica, jogo) => _editar(
+              _estado.copyWith(musicVolume: musica, gameVolume: jogo),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _GradeDeBatidas(
+            offsetS: _estado.beatOffsetS,
+            multiplicador: _estado.beatMultiplier,
+            compasso: _estado.beatBar,
+            quantas: _batidas.length,
+            onMudou: (offset, mult, compasso) => _editar(
+              _estado.copyWith(
+                beatOffsetS: offset,
+                beatMultiplier: mult,
+                beatBar: compasso,
+              ),
+            ),
+          ),
+        ),
+      ],
+
+      if (encaixarMomentos) ...[
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _momentos(encaixado: true),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _biblioteca_(encaixado: true),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _transitions(docked: true),
+        ),
+      ],
+
+      const SizedBox(height: 14),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _Exportacao(
+          spec: _estado.export,
+          duracaoS: duracao,
+          largura: widget.job.width,
+          altura: widget.job.height,
+          temSelecao: selecao.isNotEmpty,
+          imagens: [
+            for (final m in _biblioteca)
+              if (m.kind == 'image' && m.isReady) m,
+          ],
+          enabled: !_enviando,
+          onMudou: (e) => _editar(_estado.copyWith(export: e)),
+          onExportarSelecao: () => _editar(exportarSelecao(_estado)),
+          onExportarTudo: () => _editar(exportarTudo(_estado)),
+        ),
+      ),
+
+      const SizedBox(height: 20),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _titulo,
+              enabled: !_enviando,
+              // Tocar fora devolve o foco à montagem, e com ele os atalhos.
+              // Nada tira o foco de um `TextField` por conta própria: sem
+              // isto, um toque aqui matava o "S" e o Delete para sempre.
+              onTapOutside: (_) => _devolverOFoco(),
+              onChanged: (v) => _semHistorico(_estado.copyWith(title: v)),
+              decoration: const InputDecoration(
+                labelText: 'Nome do vídeo',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _estado.vazia
+                  ? 'Escolha um momento para pôr o primeiro corte onde a '
+                        'cabeça de leitura estiver.'
+                  // um bloco de música não é um corte: quem conta cortes
+                  // quer saber quantas cenas o vídeo tem
+                  // a clip covered in the middle becomes two pieces on the
+                  // monitor, but it is still one cut
+                  : '${{for (final c in _estado.clipesVisiveis) c.id}.length} corte(s)'
+                        '${_temMusica ? '  ·  com música' : ''}'
+                        '  ·  vídeo de ${formatDuration(duracao)}'
+                        '${preto > 0.05 ? '  ·  ${formatDuration(preto)} de tela preta' : ''}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
+            ),
+            if (preto > 0.05)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Os espaços vazios entre os blocos ficam pretos, com a '
+                  'música tocando.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.hintColor,
+                  ),
+                ),
+              ),
+            if (_erro != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.error.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _erro!,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (_enviando)
+              const Center(child: CircularProgressIndicator())
+            else
+              FilledButton.icon(
+                onPressed: _estado.vazia ? null : _gerar,
+                icon: const Icon(Icons.movie_creation_outlined),
+                label: Text(
+                  _estado.vazia
+                      ? 'Ponha ao menos um corte'
+                      : 'Gerar este vídeo',
+                ),
+              ),
+          ],
+        ),
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, box) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: box.maxHeight * 0.7),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: pinned,
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView(
+              key: const Key('montage-panels'),
+              padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
+              children: scrolling,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2381,9 +2493,8 @@ class _BlocoSelecionado extends StatelessWidget {
     required this.onZoom,
     required this.onFreeze,
     required this.onReverse,
-    required this.onTexto,
     required this.onEstilo,
-    this.onSairDoCampo,
+    required this.onTypeOnFrame,
   });
 
   final TimelineClip cut;
@@ -2407,11 +2518,10 @@ class _BlocoSelecionado extends StatelessWidget {
   final ValueChanged<List<ZoomKey>> onZoom;
   final ValueChanged<bool> onFreeze;
   final ValueChanged<bool> onReverse;
-  final ValueChanged<String> onTexto;
   final ValueChanged<ClipTextStyle> onEstilo;
 
-  /// Repassado ao campo de texto: toque fora dele devolve os atalhos.
-  final VoidCallback? onSairDoCampo;
+  /// Opens typing on the monitor, over the video.
+  final VoidCallback onTypeOnFrame;
 
   @override
   Widget build(BuildContext context) {
@@ -2527,9 +2637,8 @@ class _BlocoSelecionado extends StatelessWidget {
             if (cut.isText)
               _TextoDoClipe(
                 cut: cut,
-                onTexto: onTexto,
                 onEstilo: onEstilo,
-                onSairDoCampo: onSairDoCampo,
+                onTypeOnFrame: onTypeOnFrame,
               ),
             // um bloco de música não desenha nada: zoom, cor e congelar não
             // teriam sobre o que agir
@@ -2582,6 +2691,121 @@ class _Passo extends StatelessWidget {
 ///
 /// Um momento não se gasta ao ser usado: o item continua ali, marcado, porque
 /// o mesmo instante pode entrar duas vezes na mesma montagem.
+/// Transitions: how the selected clip enters over the previous one.
+class _Transitions extends StatelessWidget {
+  const _Transitions({
+    required this.selected,
+    required this.duration,
+    required this.enabled,
+    required this.docked,
+    required this.onApply,
+    required this.onClear,
+    required this.onDuration,
+    required this.onGestureStart,
+    required this.onGestureEnd,
+  });
+
+  /// The picture clips selected on the ruler — the transition goes on them.
+  final List<TimelineClip> selected;
+  final double duration;
+  final bool enabled;
+
+  /// `true` when the list lives inside the main column (narrow screen) and so
+  /// cannot scroll on its own.
+  final bool docked;
+  final ValueChanged<String> onApply;
+  final VoidCallback onClear;
+  final ValueChanged<double> onDuration;
+  final VoidCallback onGestureStart;
+  final VoidCallback onGestureEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final canApply = enabled && selected.isNotEmpty;
+    // the one all selected clips share, to highlight in the list
+    final kinds = {for (final c in selected) c.transition?.kind};
+    final current = kinds.length == 1 ? kinds.single : null;
+    final anyHasOne = selected.any((c) => c.transition != null);
+
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 12, 14, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Transitions', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            selected.isEmpty
+                ? 'Pick a clip on the ruler: the transition applies to its '
+                      'entrance, at the cut with the previous clip.'
+                : selected.length == 1
+                ? 'Tap a transition for the selected clip\'s entrance.'
+                : 'Tap a transition for the entrance of the '
+                      '${selected.length} selected clips.',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+          ),
+        ],
+      ),
+    );
+
+    final controls = Padding(
+      padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 0, 14, 0),
+      child: Row(
+        children: [
+          const Text('Duration'),
+          Expanded(
+            child: Slider(
+              key: const Key('transition-duration'),
+              value: duration,
+              min: ClipTransition.minS,
+              max: 2,
+              divisions: 19,
+              label: '${duration.toStringAsFixed(1)}s',
+              onChangeStart: (_) => onGestureStart(),
+              onChangeEnd: (_) => onGestureEnd(),
+              onChanged: enabled ? onDuration : null,
+            ),
+          ),
+          Text('${duration.toStringAsFixed(1)}s'),
+        ],
+      ),
+    );
+
+    final items = [
+      for (final t in TransitionType.all)
+        ListTile(
+          key: ValueKey('transition-${t.kind}'),
+          dense: true,
+          enabled: canApply,
+          selected: current == t.kind,
+          contentPadding: EdgeInsets.symmetric(horizontal: docked ? 0 : 14),
+          leading: Icon(t.icon),
+          title: Text(t.name),
+          subtitle: Text(t.description),
+          onTap: () => onApply(t.kind),
+        ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(docked ? 0 : 8, 4, 8, 12),
+        child: TextButton.icon(
+          key: const Key('no-transition'),
+          onPressed: canApply && anyHasOne ? onClear : null,
+          icon: const Icon(Icons.content_cut, size: 18),
+          label: const Text('Hard cut (no transition)'),
+        ),
+      ),
+    ];
+
+    if (docked) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [header, controls, ...items],
+      );
+    }
+    return ListView(children: [header, controls, ...items]);
+  }
+}
+
 class _Momentos extends StatelessWidget {
   const _Momentos({
     required this.jobId,
@@ -2729,7 +2953,9 @@ class _MomentoTile extends StatelessWidget {
   /// escolher no escuro.
   String get _rotulo {
     final ability = evento.ability;
-    return ability != null ? nomeDaHabilidade(ability) : EventStyle.of(evento.kind).label;
+    return ability != null
+        ? nomeDaHabilidade(ability)
+        : EventStyle.of(evento.kind).label;
   }
 
   @override
@@ -3786,44 +4012,18 @@ class _LinhaDeOpcoes extends StatelessWidget {
   }
 }
 
-/// O que está escrito num clipe de texto, e como.
-class _TextoDoClipe extends StatefulWidget {
+/// How a text clip looks. **What** it says is edited on the monitor itself,
+/// over the video: that is where the real size, colour and position show.
+class _TextoDoClipe extends StatelessWidget {
   const _TextoDoClipe({
     required this.cut,
-    required this.onTexto,
     required this.onEstilo,
-    this.onSairDoCampo,
+    required this.onTypeOnFrame,
   });
 
   final TimelineClip cut;
-  final ValueChanged<String> onTexto;
   final ValueChanged<ClipTextStyle> onEstilo;
-
-  /// Avisa que o toque caiu fora do campo — é o sinal de que os atalhos da
-  /// montagem podem voltar a valer.
-  final VoidCallback? onSairDoCampo;
-
-  @override
-  State<_TextoDoClipe> createState() => _TextoDoClipeState();
-}
-
-class _TextoDoClipeState extends State<_TextoDoClipe> {
-  late final TextEditingController _c = TextEditingController(
-    text: widget.cut.text,
-  );
-
-  @override
-  void didUpdateWidget(_TextoDoClipe old) {
-    super.didUpdateWidget(old);
-    // trocar de clipe tem de trocar o que está no campo; digitar, não
-    if (old.cut.id != widget.cut.id) _c.text = widget.cut.text;
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
+  final VoidCallback onTypeOnFrame;
 
   /// As cores que servem a um rótulo sobre gameplay. Uma paleta pequena vale
   /// mais que um seletor: o que importa é o texto aparecer.
@@ -3840,19 +4040,21 @@ class _TextoDoClipeState extends State<_TextoDoClipe> {
 
   @override
   Widget build(BuildContext context) {
-    final estilo = widget.cut.textStyle;
+    final estilo = cut.textStyle;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
-          controller: _c,
-          onTapOutside: (_) => widget.onSairDoCampo?.call(),
-          onChanged: widget.onTexto,
-          decoration: const InputDecoration(
-            labelText: 'O que está escrito',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
+        TextButton.icon(
+          key: const Key('type-on-frame'),
+          onPressed: onTypeOnFrame,
+          icon: const Icon(Icons.edit, size: 18),
+          label: const Text('Type on the video'),
+        ),
+        Text(
+          'Or tap the text on the video once it is selected.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
         ),
         const SizedBox(height: 8),
         Row(
@@ -3864,7 +4066,7 @@ class _TextoDoClipeState extends State<_TextoDoClipe> {
                 children: [
                   for (final cor in _cores)
                     GestureDetector(
-                      onTap: () => widget.onEstilo(estilo.copyWith(color: cor)),
+                      onTap: () => onEstilo(estilo.copyWith(color: cor)),
                       child: Container(
                         width: 26,
                         height: 26,
@@ -3891,10 +4093,10 @@ class _TextoDoClipeState extends State<_TextoDoClipe> {
           minimo: 0.03,
           maximo: 0.3,
           legenda: '${(estilo.size * 100).round()}% da altura',
-          onChanged: (v) => widget.onEstilo(estilo.copyWith(size: v)),
+          onChanged: (v) => onEstilo(estilo.copyWith(size: v)),
           onZerar: estilo.size == 0.08
               ? null
-              : () => widget.onEstilo(estilo.copyWith(size: 0.08)),
+              : () => onEstilo(estilo.copyWith(size: 0.08)),
         ),
         _Deslizante(
           rotulo: 'Contorno',
@@ -3904,10 +4106,10 @@ class _TextoDoClipeState extends State<_TextoDoClipe> {
           legenda: estilo.outline == 0
               ? 'sem contorno — some em cena clara'
               : null,
-          onChanged: (v) => widget.onEstilo(estilo.copyWith(outline: v)),
+          onChanged: (v) => onEstilo(estilo.copyWith(outline: v)),
           onZerar: estilo.outline == 0.12
               ? null
-              : () => widget.onEstilo(estilo.copyWith(outline: 0.12)),
+              : () => onEstilo(estilo.copyWith(outline: 0.12)),
         ),
       ],
     );

@@ -388,6 +388,43 @@ int? blocoEm(List<TimelineClip> cuts, double atS) {
   return null;
 }
 
+/// The transition happening at [t], for the monitor to imitate.
+///
+/// `p` runs from 0 to 1 across it. `leaving` is the outgoing side of a dip:
+/// the clip before darkens (or brightens) over its last half, and the clip
+/// after comes back over its first half — the way the server renders it.
+({String kind, double p, bool leaving})? transitionAt(
+  List<TimelineClip> cuts,
+  double t,
+) {
+  final i = blocoEm(cuts, t);
+  if (i == null) return null;
+  final c = cuts[i];
+  final tr = c.transition;
+  if (tr != null && t < c.atS + tr.durationS) {
+    return (
+      kind: tr.kind,
+      p: ((t - c.atS) / tr.durationS).clamp(0, 1),
+      leaving: false,
+    );
+  }
+  // a dip starts before the cut, still on the outgoing clip
+  for (final n in cuts) {
+    final nt = n.transition;
+    if (nt == null || (n.atS - c.untilS).abs() > 1e-3) continue;
+    if (nt.kind != 'fade_black' && nt.kind != 'fade_white') continue;
+    final half = nt.durationS / 2;
+    if (t >= n.atS - half) {
+      return (
+        kind: nt.kind,
+        p: ((t - (n.atS - half)) / half).clamp(0, 1),
+        leaving: true,
+      );
+    }
+  }
+  return null;
+}
+
 /// Que instante da **gravação** o preview deve mostrar em [atS] do vídeo.
 ///
 /// `null` quer dizer tela preta — o mesmo que o servidor vai gerar ali. É esta

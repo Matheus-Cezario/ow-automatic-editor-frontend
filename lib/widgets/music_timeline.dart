@@ -976,6 +976,44 @@ class _BlockState extends State<_Block> {
                     ),
                   ),
 
+                // ── the entrance, when it is not a hard cut ────────────────
+                // As long as it lasts: it is the part of the clip where the
+                // previous one still shows, and fitting it to the beat means
+                // seeing it.
+                if (widget.cut.transition case final tr?)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: math.min(largura, tr.durationS * widget.pxPerSecond),
+                    child: IgnorePointer(
+                      child: Container(
+                        key: ValueKey('transition-on-clip-${widget.cut.id}'),
+                        alignment: Alignment.topLeft,
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(6),
+                          ),
+                          gradient: LinearGradient(
+                            colors: [
+                              theme.colorScheme.onSurface.withValues(
+                                alpha: 0.45,
+                              ),
+                              theme.colorScheme.onSurface.withValues(alpha: 0),
+                            ],
+                          ),
+                        ),
+                        child: Icon(
+                          TransitionType.of(tr.kind)?.icon ??
+                              Icons.compare_arrows,
+                          size: 12,
+                          color: theme.colorScheme.surface,
+                        ),
+                      ),
+                    ),
+                  ),
+
                 // ── onde a jogada acontece ─────────────────────────────────
                 // O bloco é um trecho; o momento é um instante dentro dele. Sem
                 // esta marca, encaixar a eliminação na batida seria adivinhar:

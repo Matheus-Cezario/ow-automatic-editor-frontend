@@ -633,4 +633,44 @@ void main() {
       expect(t.beats, isEmpty);
     });
   });
+
+  group('transition on the monitor', () {
+    TimelineClip clip(double at, double dur, {ClipTransition? tr}) =>
+        TimelineClip(atS: at, durationS: dur, startS: 10, transition: tr);
+
+    test('happens at the start of the incoming clip, for its duration', () {
+      final cuts = [
+        clip(0, 2),
+        clip(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
+      ];
+
+      expect(transitionAt(cuts, 1.9), isNull);
+      final middle = transitionAt(cuts, 2.5)!;
+      expect(middle.kind, 'dissolve');
+      expect(middle.p, closeTo(0.5, 1e-9));
+      expect(middle.leaving, isFalse);
+      expect(transitionAt(cuts, 3.1), isNull);
+    });
+
+    test('a dip starts before the cut, on the outgoing clip', () {
+      final cuts = [
+        clip(0, 2),
+        clip(2, 2, tr: const ClipTransition(kind: 'fade_black', durationS: 1)),
+      ];
+
+      expect(transitionAt(cuts, 1.4), isNull);
+      final leaving = transitionAt(cuts, 1.75)!;
+      expect(leaving.leaving, isTrue);
+      expect(leaving.p, closeTo(0.5, 1e-9));
+    });
+
+    test('a dissolve does not start before the cut', () {
+      // the previous clip does not change in it: the new one shows over it
+      final cuts = [
+        clip(0, 2),
+        clip(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
+      ];
+      expect(transitionAt(cuts, 1.75), isNull);
+    });
+  });
 }

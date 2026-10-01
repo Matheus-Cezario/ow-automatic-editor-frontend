@@ -79,20 +79,46 @@ class MontageState {
   /// O preview não compõe — ele mostra um quadro. Então quando duas camadas se
   /// cobrem, o que vale é a de cima, que é o que o servidor vai desenhar por
   /// último.
+  ///
+  /// The upper clip only hides the lower one **where the two overlap**: before
+  /// and after that, the lower one shows again, as in the final video. The
+  /// leftover pieces keep the `id` of the clip they came from.
+  ///
+  /// Text is left out: it is a transparent canvas the monitor draws over the
+  /// picture, and treating it as a clip erased the video underneath.
   List<TimelineClip> get clipesVisiveis {
-    final visiveis = <TimelineClip>[];
+    var visiveis = <TimelineClip>[];
     for (final l in layers) {
       // uma camada de som não desenha nada: o monitor não tem o que mostrar de
       // um bloco de música, e considerá-lo apagaria o vídeo que está por baixo
       if (l.hidden || l.isAudio) continue;
       for (final c in l.clips) {
-        visiveis.removeWhere(
-          (v) => c.atS < v.untilS - 1e-6 && v.atS < c.untilS - 1e-6,
-        );
+        if (c.isText) continue;
+        visiveis = [for (final v in visiveis) ..._outside(v, c)];
         visiveis.add(c);
       }
     }
     return visiveis..sort((a, b) => a.atS.compareTo(b.atS));
+  }
+
+  /// What is left of [v] outside the interval [c] covers: nothing, all of it,
+  /// or one piece on each side.
+  static List<TimelineClip> _outside(TimelineClip v, TimelineClip c) {
+    const eps = 1e-6;
+    if (c.atS >= v.untilS - eps || v.atS >= c.untilS - eps) return [v];
+    return [
+      if (c.atS > v.atS + eps) v.copyWith(durationS: c.atS - v.atS),
+      if (c.untilS < v.untilS - eps)
+        v.copyWith(
+          atS: c.untilS,
+          durationS: v.untilS - c.untilS,
+          clearTransition: true,
+          // the piece after starts further into the source, in proportion to
+          // the speed — otherwise the picture would jump back when it shows
+          // again. A frozen frame does not move: same frame on both sides
+          startS: v.freeze ? v.startS : v.startS + (c.untilS - v.atS) * v.speed,
+        ),
+    ];
   }
 
   bool get vazia => clips.isEmpty;
@@ -480,6 +506,35 @@ MontageState trocarTexto(
   return s.comClipe(camada, i, c.copyWith(text: novo, textStyle: estilo));
 }
 
+/// Sets (or clears, with `null`) the entrance transition of clips [ids].
+///
+/// Music clips are skipped: a transition is about the picture. Locked layers
+/// are skipped too, as with any other edit.
+MontageState applyTransition(
+  MontageState s,
+  Iterable<String> ids,
+  ClipTransition? transition,
+) {
+  var result = s;
+  for (final id in ids) {
+    final where = result.localizar(id);
+    if (where == null) continue;
+    final (layer, i) = where;
+    final l = result.layers[layer];
+    if (l.isAudio || l.locked) continue;
+    final c = l.clips[i];
+    if (c.transition == transition) continue;
+    result = result.comClipe(
+      layer,
+      i,
+      transition == null
+          ? c.copyWith(clearTransition: true)
+          : c.copyWith(transition: transition),
+    );
+  }
+  return result;
+}
+
 /// O *punch*: a lente fecha rápido e afrouxa até o fim do clipe.
 ///
 /// Dois movimentos resolvem o efeito mais usado numa montagem de gameplay, e é
@@ -594,6 +649,10 @@ MontageState dividir(MontageState s, String id, double atS) {
     atS: atS,
     durationS: direita,
     startS: c.startS + esquerda,
+    // the entrance belongs to the original clip; the right half carries on
+    // where the other stopped, and a transition there would come out of
+    // nowhere mid-scene
+    clearTransition: true,
   );
   final lista = [...s.layers[camada].clips]
     ..[i] = a
