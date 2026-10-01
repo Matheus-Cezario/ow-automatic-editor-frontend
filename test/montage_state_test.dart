@@ -306,10 +306,46 @@ void main() {
       // o preview não compõe: ele mostra um quadro, e o que vale é o que o
       // servidor vai desenhar por último
       final s = estadoEmCamadas([corte(0, 4, t: 10)], [corte(1, 1, t: 50)]);
+      final debaixo = s.layers[0].clips.single;
 
       final visiveis = s.clipesVisiveis;
-      expect(visiveis, hasLength(1));
-      expect(visiveis.first.sourceT, 50, reason: 'a de baixo foi coberta');
+      expect(visiveis, hasLength(3));
+      expect(visiveis[1].sourceT, 50, reason: 'onde se cobrem, vale a de cima');
+      expect(
+        origemEm(visiveis, 1.5),
+        closeTo(50 - 1 * kMomentAnchor + 0.5, 1e-9),
+      );
+      // antes e depois, a de baixo continua: ela só foi coberta no meio
+      expect(origemEm(visiveis, 0.5), closeTo(debaixo.startS + 0.5, 1e-9));
+      expect(
+        origemEm(visiveis, 3),
+        closeTo(debaixo.startS + 3, 1e-9),
+        reason: 'o pedaço de depois segue a gravação de onde ela estaria',
+      );
+      expect({for (final v in visiveis) v.id}, hasLength(2));
+    });
+
+    test('texto por cima não apaga o vídeo de baixo', () {
+      // o texto é desenhado por cima da imagem; quando ele acabava, o monitor
+      // ficava preto mesmo com o bloco de vídeo ainda correndo embaixo
+      final s = estadoEmCamadas(
+        [corte(0, 6, t: 10)],
+        [
+          const TimelineClip(
+            atS: 1,
+            durationS: 2,
+            startS: 0,
+            source: 'text',
+            text: 'TRIPLE KILL',
+          ),
+        ],
+      );
+
+      final visiveis = s.clipesVisiveis;
+      expect(visiveis.single.isText, isFalse);
+      for (final t in [0.5, 2.0, 4.0, 5.5]) {
+        expect(origemEm(visiveis, t), isNotNull, reason: 'preto em $t s');
+      }
     });
 
     test('camada escondida não aparece no monitor', () {

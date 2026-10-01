@@ -79,20 +79,45 @@ class MontageState {
   /// O preview não compõe — ele mostra um quadro. Então quando duas camadas se
   /// cobrem, o que vale é a de cima, que é o que o servidor vai desenhar por
   /// último.
+  ///
+  /// O de cima só esconde o de baixo **no trecho em que os dois se cobrem**:
+  /// antes e depois dele, o de baixo volta a aparecer, como no vídeo final. Os
+  /// pedaços que sobram guardam o `id` do bloco de onde saíram.
+  ///
+  /// Texto não entra: ele é uma tela transparente que o monitor desenha por
+  /// cima da imagem, e tratá-lo como bloco apagava o vídeo que está embaixo.
   List<TimelineClip> get clipesVisiveis {
-    final visiveis = <TimelineClip>[];
+    var visiveis = <TimelineClip>[];
     for (final l in layers) {
       // uma camada de som não desenha nada: o monitor não tem o que mostrar de
       // um bloco de música, e considerá-lo apagaria o vídeo que está por baixo
       if (l.hidden || l.isAudio) continue;
       for (final c in l.clips) {
-        visiveis.removeWhere(
-          (v) => c.atS < v.untilS - 1e-6 && v.atS < c.untilS - 1e-6,
-        );
+        if (c.isText) continue;
+        visiveis = [for (final v in visiveis) ..._foraDe(v, c)];
         visiveis.add(c);
       }
     }
     return visiveis..sort((a, b) => a.atS.compareTo(b.atS));
+  }
+
+  /// O que sobra de [v] fora do intervalo que [c] cobre: nada, ele inteiro, ou
+  /// um pedaço de cada lado.
+  static List<TimelineClip> _foraDe(TimelineClip v, TimelineClip c) {
+    const eps = 1e-6;
+    if (c.atS >= v.untilS - eps || v.atS >= c.untilS - eps) return [v];
+    return [
+      if (c.atS > v.atS + eps) v.copyWith(durationS: c.atS - v.atS),
+      if (c.untilS < v.untilS - eps)
+        v.copyWith(
+          atS: c.untilS,
+          durationS: v.untilS - c.untilS,
+          // o pedaço de depois começa mais adiante na fonte, na proporção da
+          // velocidade — senão a imagem pularia para trás ao reaparecer. Quadro
+          // congelado não anda: é o mesmo quadro dos dois lados
+          startS: v.freeze ? v.startS : v.startS + (c.untilS - v.atS) * v.speed,
+        ),
+    ];
   }
 
   bool get vazia => clips.isEmpty;

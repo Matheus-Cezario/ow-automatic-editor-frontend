@@ -1986,7 +1986,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           'cabeça de leitura estiver.'
                     // um bloco de música não é um corte: quem conta cortes
                     // quer saber quantas cenas o vídeo tem
-                    : '${_estado.clipesVisiveis.length} corte(s)'
+                    // um bloco coberto no meio vira dois pedaços no monitor,
+                    // mas continua sendo um corte
+                    : '${{for (final c in _estado.clipesVisiveis) c.id}.length} corte(s)'
                           '${_temMusica ? '  ·  com música' : ''}'
                           '  ·  vídeo de ${formatDuration(duracao)}'
                           '${preto > 0.05 ? '  ·  ${formatDuration(preto)} de tela preta' : ''}',
@@ -2729,7 +2731,9 @@ class _MomentoTile extends StatelessWidget {
   /// escolher no escuro.
   String get _rotulo {
     final ability = evento.ability;
-    return ability != null ? nomeDaHabilidade(ability) : EventStyle.of(evento.kind).label;
+    return ability != null
+        ? nomeDaHabilidade(ability)
+        : EventStyle.of(evento.kind).label;
   }
 
   @override
