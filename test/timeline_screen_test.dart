@@ -1010,19 +1010,137 @@ void main() {
     expect(find.textContaining('Não há'), findsOneWidget);
   });
 
-  testWidgets('o clipe de texto se edita pelo inspetor', (tester) async {
-    await abrir(tester, comMusica: true);
-    await escrever(tester, 'Texto livre');
+  group('escrever no vídeo', () {
+    TimelineClip texto(WidgetTester tester) => tester
+        .widget<MusicTimeline>(find.byType(MusicTimeline))
+        .layers
+        .last
+        .clips
+        .single;
 
-    expect(find.text('O que está escrito'), findsOneWidget);
-    await tester.enterText(
-      find.widgetWithText(TextField, 'O que está escrito'),
-      'GG',
+    Future<void> comTexto(WidgetTester tester) async {
+      await abrir(tester);
+      await tester.tap(momento(30.0));
+      await tester.pump();
+      await escrever(tester, 'Texto livre');
+    }
+
+    testWidgets('o painel não tem mais campo para o texto', (tester) async {
+      await comTexto(tester);
+
+      expect(find.text('O que está escrito'), findsNothing);
+      expect(find.byKey(const Key('escrever-no-quadro')), findsOneWidget);
+    });
+
+    testWidgets('tocar na frase escolhida escreve no próprio quadro', (
+      tester,
+    ) async {
+      await comTexto(tester);
+      final id = texto(tester).id;
+
+      // ela nasce escolhida: um toque já abre a escrita
+      await tester.tap(find.byKey(ValueKey('frase-$id')));
+      await tester.pump();
+      final campo = find.byKey(ValueKey('escrevendo-$id'));
+      expect(campo, findsOneWidget);
+
+      await tester.enterText(campo, 'GG');
+      await tester.pump();
+      expect(texto(tester).text, 'GG');
+
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(campo, findsNothing);
+      expect(find.text('GG'), findsWidgets);
+    });
+
+    testWidgets('o botão do painel abre a escrita no quadro', (tester) async {
+      await comTexto(tester);
+      final id = texto(tester).id;
+
+      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.pump();
+
+      expect(find.byKey(ValueKey('escrevendo-$id')), findsOneWidget);
+    });
+
+    testWidgets('apagar tudo e sair devolve o que estava escrito', (
+      tester,
+    ) async {
+      // texto vazio não é texto que o servidor desenhe
+      await comTexto(tester);
+      final id = texto(tester).id;
+      final antes = texto(tester).text;
+
+      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.pump();
+      await tester.enterText(find.byKey(ValueKey('escrevendo-$id')), '  ');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(texto(tester).text, antes);
+    });
+
+    testWidgets('uma escrita inteira é um passo só do desfazer', (
+      tester,
+    ) async {
+      await comTexto(tester);
+      final id = texto(tester).id;
+      final antes = texto(tester).text;
+
+      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.pump();
+      final campo = find.byKey(ValueKey('escrevendo-$id'));
+      for (final parcial in ['G', 'GG', 'GG W', 'GG WP']) {
+        await tester.enterText(campo, parcial);
+        await tester.pump();
+      }
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(texto(tester).text, 'GG WP');
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+
+      expect(texto(tester).text, antes);
+    });
+  });
+
+  testWidgets('rolar os painéis não tira o monitor nem a régua da tela', (
+    tester,
+  ) async {
+    await abrir(tester);
+    // uma janela baixa, em que os painéis não cabem e a tela tem de rolar
+    await tester.binding.setSurfaceSize(const Size(1000, 900));
+    await tester.pump();
+    await tester.tap(momento(30.0));
+    await tester.pump();
+
+    final monitor = tester.getRect(find.byType(PreviewPlayer));
+    final regua = tester.getRect(find.byType(MusicTimeline));
+
+    await tester.drag(
+      find.byKey(const Key('paineis-da-montagem')),
+      const Offset(0, -600),
     );
     await tester.pump();
 
-    final regua = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
-    expect(regua.layers.last.clips.single.text, 'GG');
+    final rolou = tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byKey(const Key('paineis-da-montagem')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position
+        .pixels;
+    expect(rolou, greaterThan(100), reason: 'os painéis rolaram de verdade');
+    expect(tester.getRect(find.byType(PreviewPlayer)), monitor);
+    expect(tester.getRect(find.byType(MusicTimeline)), regua);
   });
 
   group('painel de saída', () {

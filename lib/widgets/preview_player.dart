@@ -35,6 +35,11 @@ class PreviewPlayer extends StatefulWidget {
     this.onSelecionarTexto,
     this.onMoverTexto,
     this.onArrastando,
+    this.editando,
+    this.onEditar,
+    this.onEscrever,
+    this.onGestoInicio,
+    this.onGestoFim,
   });
 
   final String videoUrl;
@@ -57,6 +62,20 @@ class PreviewPlayer extends StatefulWidget {
   /// (id, x, y) — a posição nova, em fração da metade do quadro, como o
   /// servidor a entende.
   final void Function(String id, double x, double y)? onMoverTexto;
+
+  /// O texto que está sendo escrito ali mesmo, no quadro; `null` se nenhum.
+  final String? editando;
+
+  /// Pede para começar (id) ou terminar (`null`) de escrever no quadro.
+  final ValueChanged<String?>? onEditar;
+
+  /// (id, texto) — o que está escrito agora, a cada tecla.
+  final void Function(String id, String texto)? onEscrever;
+
+  /// Começo e fim de um arrasto da frase: tudo o que acontece entre os dois é
+  /// **um** passo do desfazer, e não um por movimento do ponteiro.
+  final VoidCallback? onGestoInicio;
+  final VoidCallback? onGestoFim;
 
   /// Texto para a tela mostrar enquanto o dedo arrasta a frase; `null` ao
   /// soltar. Serve ao mesmo propósito do rótulo de arrasto da régua.
@@ -294,6 +313,15 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                       ? null
                       : (x, y) => widget.onMoverTexto!(t.id, x, y),
                   onArrastando: widget.onArrastando,
+                  editando: widget.editando == t.id,
+                  onEditar: widget.onEditar == null
+                      ? null
+                      : (sim) => widget.onEditar!(sim ? t.id : null),
+                  onEscrever: widget.onEscrever == null
+                      ? null
+                      : (v) => widget.onEscrever!(t.id, v),
+                  onGestoInicio: widget.onGestoInicio,
+                  onGestoFim: widget.onGestoFim,
                 ),
 
             if (_erro != null)
@@ -343,7 +371,9 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
 /// Uma frase desenhada sobre o monitor, e arrastável.
 ///
 /// Arrastar aqui é o jeito natural de dizer onde o texto fica: a alternativa
-/// era digitar dois números e gerar o vídeo para conferir.
+/// era digitar dois números e gerar o vídeo para conferir. E é aqui também que
+/// se escreve: tocar na frase já escolhida abre a edição no próprio quadro, no
+/// tamanho e na cor em que ela vai sair.
 class _TextoNoQuadro extends StatefulWidget {
   const _TextoNoQuadro({
     super.key,
@@ -352,6 +382,11 @@ class _TextoNoQuadro extends StatefulWidget {
     required this.onEscolher,
     required this.onMover,
     required this.onArrastando,
+    this.editando = false,
+    this.onEditar,
+    this.onEscrever,
+    this.onGestoInicio,
+    this.onGestoFim,
   });
 
   final TimelineClip clip;
@@ -359,6 +394,11 @@ class _TextoNoQuadro extends StatefulWidget {
   final VoidCallback onEscolher;
   final void Function(double x, double y)? onMover;
   final ValueChanged<String?>? onArrastando;
+  final bool editando;
+  final ValueChanged<bool>? onEditar;
+  final ValueChanged<String>? onEscrever;
+  final VoidCallback? onGestoInicio;
+  final VoidCallback? onGestoFim;
 
   @override
   State<_TextoNoQuadro> createState() => _TextoNoQuadroState();
@@ -375,6 +415,53 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
   Offset _andou = Offset.zero;
   double _x0 = 0;
   double _y0 = 0;
+
+  late final TextEditingController _campo = TextEditingController(
+    text: widget.clip.text,
+  );
+
+  /// O que estava escrito quando a edição abriu: apagar tudo e sair devolve
+  /// isto, porque texto vazio não é um texto que o servidor desenhe.
+  String _antes = '';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.editando) _abriu();
+  }
+
+  @override
+  void didUpdateWidget(_TextoNoQuadro old) {
+    super.didUpdateWidget(old);
+    if (widget.editando && !old.editando) _abriu();
+    // desfazer, ou outra tela, mudou o texto por fora: o campo acompanha
+    if (!widget.editando && _campo.text != widget.clip.text) {
+      _campo.text = widget.clip.text;
+    }
+  }
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    super.dispose();
+  }
+
+  void _abriu() {
+    _antes = widget.clip.text;
+    _campo.value = TextEditingValue(
+      text: widget.clip.text,
+      selection: TextSelection(
+        baseOffset: 0,
+        extentOffset: widget.clip.text.length,
+      ),
+    );
+  }
+
+  void _terminar() {
+    if (!widget.editando) return;
+    if (_campo.text.trim().isEmpty) widget.onEscrever?.call(_antes);
+    widget.onEditar?.call(false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -399,16 +486,21 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
             // (dedo rápido, ou um teste) não produz update nenhum — a frase
             // não saía do lugar
             dragStartBehavior: DragStartBehavior.down,
-            onTap: widget.onEscolher,
-            onPanStart: widget.onMover == null
+            onTap: widget.editando
+                ? null
+                : widget.escolhido && widget.onEditar != null
+                ? () => widget.onEditar!(true)
+                : widget.onEscolher,
+            onPanStart: widget.onMover == null || widget.editando
                 ? null
                 : (_) {
                     widget.onEscolher();
+                    widget.onGestoInicio?.call();
                     _andou = Offset.zero;
                     _x0 = t.x;
                     _y0 = t.y;
                   },
-            onPanUpdate: widget.onMover == null
+            onPanUpdate: widget.onMover == null || widget.editando
                 ? null
                 : (d) {
                     _andou += d.delta;
@@ -426,10 +518,13 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                     );
                     widget.onMover!(x, y);
                   },
-            onPanEnd: (_) {
-              _andou = Offset.zero;
-              widget.onArrastando?.call(null);
-            },
+            onPanEnd: widget.onMover == null || widget.editando
+                ? null
+                : (_) {
+                    _andou = Offset.zero;
+                    widget.onArrastando?.call(null);
+                    widget.onGestoFim?.call();
+                  },
             child: Container(
               // a chave fica na frase, e não na área do quadro: é nela que se
               // toca, e é dela que o arrasto parte
@@ -443,36 +538,75 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                       ),
                     )
                   : null,
-              child: Stack(
-                children: [
-                  // o contorno é o que faz texto branco sobreviver a cena
-                  // clara; sem ele o preview mentiria sobre a legibilidade
-                  if (contorno > 0)
-                    Text(
-                      widget.clip.text,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: corpo,
-                        fontWeight: FontWeight.bold,
-                        height: 1.1,
-                        foreground: Paint()
-                          ..style = PaintingStyle.stroke
-                          ..strokeWidth = contorno
-                          ..color = corDoContorno,
+              child: widget.editando
+                  ? IntrinsicWidth(
+                      child: TextField(
+                        key: ValueKey('escrevendo-${widget.clip.id}'),
+                        controller: _campo,
+                        autofocus: true,
+                        textAlign: TextAlign.center,
+                        cursorColor: cor,
+                        onChanged: widget.onEscrever,
+                        onSubmitted: (_) => _terminar(),
+                        onTapOutside: (_) => _terminar(),
+                        decoration: const InputDecoration.collapsed(
+                          hintText: '',
+                        ),
+                        style: TextStyle(
+                          fontSize: corpo,
+                          fontWeight: FontWeight.bold,
+                          height: 1.1,
+                          color: cor,
+                          // o contorno de verdade é um segundo texto por
+                          // baixo, e um campo não tem como desenhar dois; a
+                          // sombra o imita o bastante para ler o que se digita
+                          shadows: contorno > 0
+                              ? [
+                                  for (final d in const [
+                                    Offset(1, 1),
+                                    Offset(-1, 1),
+                                    Offset(1, -1),
+                                    Offset(-1, -1),
+                                  ])
+                                    Shadow(
+                                      color: corDoContorno,
+                                      offset: d * (contorno / 2),
+                                    ),
+                                ]
+                              : null,
+                        ),
                       ),
+                    )
+                  : Stack(
+                      children: [
+                        // o contorno é o que faz texto branco sobreviver a cena
+                        // clara; sem ele o preview mentiria sobre a legibilidade
+                        if (contorno > 0)
+                          Text(
+                            widget.clip.text,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: corpo,
+                              fontWeight: FontWeight.bold,
+                              height: 1.1,
+                              foreground: Paint()
+                                ..style = PaintingStyle.stroke
+                                ..strokeWidth = contorno
+                                ..color = corDoContorno,
+                            ),
+                          ),
+                        Text(
+                          widget.clip.text,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: corpo,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                            color: cor,
+                          ),
+                        ),
+                      ],
                     ),
-                  Text(
-                    widget.clip.text,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: corpo,
-                      fontWeight: FontWeight.bold,
-                      height: 1.1,
-                      color: cor,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ),
         );
