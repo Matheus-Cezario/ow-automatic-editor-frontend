@@ -2,12 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ow_editor/api.dart';
 import 'package:ow_editor/montage.dart';
 
-/// As contas da montagem manual.
+/// The maths of the manual montage.
 ///
-/// O que se verifica aqui é a promessa da tela: o bloco vai parar onde o
-/// usuário mandou, com a duração que ele pediu, e nunca por cima de outro.
+/// What is checked here is the screen's promise: the block lands where the
+/// user sent it, with the duration they asked for, and never on top of another.
 void main() {
-  TimelineClip corte(
+  TimelineClip cut(
     double at,
     double dur, {
     double t = 10,
@@ -20,62 +20,62 @@ void main() {
     kind: kind,
   );
 
-  group('ímã', () {
-    const batidas = [0.0, 0.5, 1.0, 1.5, 2.0];
+  group('magnet', () {
+    const beatTimes = [0.0, 0.5, 1.0, 1.5, 2.0];
 
-    test('gruda na batida perto', () {
-      expect(snapToBeat(0.53, batidas), 0.5);
-      expect(snapToBeat(0.96, batidas), 1.0);
+    test('snaps to a nearby beat', () {
+      expect(snapToBeat(0.53, beatTimes), 0.5);
+      expect(snapToBeat(0.96, beatTimes), 1.0);
     });
 
-    test('deixa em paz o que está longe de qualquer batida', () {
-      // no meio de duas batidas o usuário quis mesmo aquele ponto
-      expect(snapToBeat(0.75, batidas), 0.75);
+    test('leaves alone what is far from any beat', () {
+      // halfway between two beats the user really meant that point
+      expect(snapToBeat(0.75, beatTimes), 0.75);
     });
 
-    test('sem batidas não faz nada', () {
+    test('without beats it does nothing', () {
       expect(snapToBeat(1.234, const []), 1.234);
     });
 
-    test('a borda que não gruda não ganha da que grudou', () {
-      // efeito escondido de comparar as duas distâncias direto: a borda que não
-      // grudou fica onde o dedo largou, distância zero, e ganhava sempre — o
-      // ímã sumia para todo bloco cuja duração não fosse múltipla do compasso
-      final cortes = [corte(0, 1.2, t: 10)];
-      final movido = mover(cortes, 0, 1.55, beats: batidas, snap: true);
+    test('the edge that does not snap does not beat the one that did', () {
+      // hidden effect of comparing both distances directly: the edge that did not
+      // snap stays where the finger dropped it, distance zero, and always won — the
+      // magnet vanished for every block whose duration was not a multiple of the bar
+      final cutList = [cut(0, 1.2, t: 10)];
+      final movedClip = move(cutList, 0, 1.55, beats: beatTimes, snap: true);
 
-      expect(movido.atS, closeTo(1.5, 1e-9));
+      expect(movedClip.atS, closeTo(1.5, 1e-9));
     });
 
-    test('quando as duas bordas grudam, vale a mais perto', () {
-      // um bloco de duração redonda tem as duas na mesma batida; o desempate só
-      // aparece quando elas discordam
-      final cortes = [corte(0, 1.0, t: 10)];
-      final movido = mover(cortes, 0, 0.94, beats: batidas, snap: true);
+    test('when both edges snap, the closer one wins', () {
+      // a block with a round duration has both on the same beat; the tie-break only
+      // shows up when they disagree
+      final cutList = [cut(0, 1.0, t: 10)];
+      final movedClip = move(cutList, 0, 0.94, beats: beatTimes, snap: true);
 
-      expect(movido.atS, closeTo(1.0, 1e-9));
+      expect(movedClip.atS, closeTo(1.0, 1e-9));
     });
 
-    test('o intervalo entre batidas sai da mediana', () {
-      // uma batida perdida no começo esticaria a média e faria todo bloco
-      // sugerido nascer com o tamanho errado
+    test('the beat interval comes from the median', () {
+      // a beat missed at the start would stretch the mean and make every
+      // suggested block be born with the wrong length
       expect(beatIntervalS(const [0.0, 3.0, 3.5, 4.0, 4.5]), 0.5);
     });
   });
 
-  group('a jogada dentro do bloco', () {
-    test('o instante da jogada em tempo de vídeo', () {
-      // o corte começa antes dela, para dar embalo: a conta é onde o bloco
-      // entra mais o quanto se consumiu de gravação até a jogada
-      final c = corte(3, 2, t: 90); // começa em 90 - 2*0.7 = 88.6
-      expect(momentoNoVideo(c), closeTo(3 + 1.4, 1e-9));
+  group('the play inside the block', () {
+    test('the instant of the play in video time', () {
+      // the cut starts before it, for the run-up: the maths is where the block
+      // enters plus how much recording was consumed up to the play
+      final c = cut(3, 2, t: 90); // starts at 90 - 2*0.7 = 88.6
+      expect(momentInVideo(c), closeTo(3 + 1.4, 1e-9));
     });
 
-    test('sem jogada dentro do bloco, não há o que alinhar', () {
-      // aparar até a jogada sair é permitido; marcar o que não está lá, não
-      final c = corte(0, 2, t: 90).copyWith(startS: 200);
-      expect(momentoNoVideo(c), isNull);
-      // e um bloco que não veio de momento nenhum também não tem marca
+    test('without a play inside the block, there is nothing to align', () {
+      // trimming until the play is gone is allowed; marking what is not there is not
+      final c = cut(0, 2, t: 90).copyWith(startS: 200);
+      expect(momentInVideo(c), isNull);
+      // and a block that did not come from any moment has no mark either
       const media = TimelineClip(
         atS: 0,
         durationS: 2,
@@ -83,35 +83,35 @@ void main() {
         source: 'media',
         mediaId: 'm1',
       );
-      expect(momentoNoVideo(media), isNull);
+      expect(momentInVideo(media), isNull);
     });
   });
 
-  group('o ímã e a jogada', () {
-    // batidas de meio em meio segundo
-    const batidas = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+  group('the magnet and the play', () {
+    // beats every half second
+    const beatTimes = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
 
-    test('a jogada gruda na batida, e não só as bordas', () {
-      // é o que uma montagem no ritmo quer dizer: o impacto cai no tempo, e a
-      // borda do corte cai onde tiver de cair
-      final cortes = [corte(0, 1.0, t: 10)]; // jogada a 0,7s do começo
-      // solto em 0,85: a jogada cairia em 1,55 — 0,05 depois da batida de 1,5
-      final movido = mover(cortes, 0, 0.85, beats: batidas, snap: true);
+    test('the play snaps to the beat, not only the edges', () {
+      // that is what a montage on the beat means: the impact lands on the beat, and
+      // the cut edge lands wherever it has to
+      final cutList = [cut(0, 1.0, t: 10)]; // play 0.7s from the start
+      // dropped at 0.85: the play would land at 1.55 — 0.05 after the 1.5 beat
+      final movedClip = move(cutList, 0, 0.85, beats: beatTimes, snap: true);
 
-      expect(movido.atS, closeTo(0.8, 1e-9));
-      expect(momentoNoVideo(movido), closeTo(1.5, 1e-9));
+      expect(movedClip.atS, closeTo(0.8, 1e-9));
+      expect(momentInVideo(movedClip), closeTo(1.5, 1e-9));
     });
 
-    test('entre a borda e a jogada, ganha quem estiver mais perto', () {
-      // o ímã segue sendo previsível: quem se vê grudar é o que estava perto
-      final cortes = [corte(0, 1.0, t: 10)];
-      final movido = mover(cortes, 0, 0.98, beats: batidas, snap: true);
+    test('between the edge and the play, the closer one wins', () {
+      // the magnet stays predictable: what you see snap is what was close
+      final cutList = [cut(0, 1.0, t: 10)];
+      final movedClip = move(cutList, 0, 0.98, beats: beatTimes, snap: true);
 
-      // o começo está a 0,02 da batida de 1,0; a jogada, a 0,18 da de 1,5
-      expect(movido.atS, closeTo(1.0, 1e-9));
+      // the start is 0.02 from the 1.0 beat; the play, 0.18 from the 1.5 one
+      expect(movedClip.atS, closeTo(1.0, 1e-9));
     });
 
-    test('bloco sem jogada continua grudando pelas bordas', () {
+    test('a block without a play keeps snapping by its edges', () {
       const media = TimelineClip(
         atS: 0,
         durationS: 1.0,
@@ -119,21 +119,21 @@ void main() {
         source: 'media',
         mediaId: 'm1',
       );
-      final movido = mover([media], 0, 0.96, beats: batidas, snap: true);
-      expect(movido.atS, closeTo(1.0, 1e-9));
+      final movedClip = move([media], 0, 0.96, beats: beatTimes, snap: true);
+      expect(movedClip.atS, closeTo(1.0, 1e-9));
     });
   });
 
-  group('grade de batidas ajustável', () {
-    const grade = [0.0, 0.5, 1.0, 1.5, 2.0];
+  group('adjustable beat grid', () {
+    const grid = [0.0, 0.5, 1.0, 1.5, 2.0];
 
-    test('sem ajuste, é a grade que veio do servidor', () {
-      expect(gradeAjustada(grade), grade);
+    test('without adjustment, it is the grid that came from the server', () {
+      expect(adjustedGrid(grid), grid);
     });
 
-    test('dobrar a densidade põe uma batida entre cada par', () {
-      // o detector às vezes conta metade das batidas de uma música rápida
-      expect(gradeAjustada(grade, multiplicador: 2), [
+    test('doubling the density puts a beat between each pair', () {
+      // the detector sometimes counts half the beats of a fast song
+      expect(adjustedGrid(grid, multiplier: 2), [
         0.0,
         0.25,
         0.5,
@@ -146,14 +146,14 @@ void main() {
       ]);
     });
 
-    test('reduzir à metade fica de duas em duas', () {
-      expect(gradeAjustada(grade, multiplicador: 0.5), [0.0, 1.0, 2.0]);
+    test('halving keeps every other one', () {
+      expect(adjustedGrid(grid, multiplier: 0.5), [0.0, 1.0, 2.0]);
     });
 
-    test('o deslocamento conserta o contratempo de uma vez', () {
-      // meio tempo adiantada é o erro clássico, e não se conserta arrastando
-      // bloco por bloco: quem está errada é a régua
-      expect(gradeAjustada(grade, offsetS: 0.25), [
+    test('the offset fixes the off-beat at once', () {
+      // half a beat early is the classic error, and it is not fixed by dragging
+      // block by block: what is wrong is the ruler
+      expect(adjustedGrid(grid, offsetS: 0.25), [
         0.25,
         0.75,
         1.25,
@@ -162,34 +162,34 @@ void main() {
       ]);
     });
 
-    test('deslocar para trás não inventa batida antes do começo', () {
-      // 0.0 e 0.5 saem (virariam -0.7 e -0.2); 1.0 vira 0.3 e fica
-      final atrasada = gradeAjustada(grade, offsetS: -0.7);
-      expect(atrasada, hasLength(3));
-      expect(atrasada.first, closeTo(0.3, 1e-9));
-      expect(atrasada.every((b) => b >= 0), isTrue);
+    test('shifting back does not invent a beat before the start', () {
+      // 0.0 and 0.5 go away (they would become -0.7 and -0.2); 1.0 becomes 0.3 and stays
+      final late = adjustedGrid(grid, offsetS: -0.7);
+      expect(late, hasLength(3));
+      expect(late.first, closeTo(0.3, 1e-9));
+      expect(late.every((b) => b >= 0), isTrue);
     });
 
-    test('o compasso deixa só o tempo forte', () {
-      expect(gradeAjustada(grade, compasso: 4), [0.0, 2.0]);
+    test('the bar keeps only the downbeat', () {
+      expect(adjustedGrid(grid, bar: 4), [0.0, 2.0]);
     });
 
-    test('os ajustes se somam, na ordem que importa', () {
-      // densidade primeiro, depois compasso, depois deslocamento: pedir o tempo
-      // forte de uma grade dobrada tem de dar o mesmo lugar de antes
+    test('the adjustments add up, in the order that matters', () {
+      // density first, then bar, then offset: asking for the downbeat of a
+      // doubled grid has to give the same place as before
       expect(
-        gradeAjustada(grade, multiplicador: 2, compasso: 2, offsetS: 0.1),
+        adjustedGrid(grid, multiplier: 2, bar: 2, offsetS: 0.1),
         [0.1, 0.6, 1.1, 1.6, 2.1],
       );
     });
 
-    test('grade vazia continua vazia', () {
-      expect(gradeAjustada(const [], multiplicador: 2), isEmpty);
+    test('an empty grid stays empty', () {
+      expect(adjustedGrid(const [], multiplier: 2), isEmpty);
     });
   });
 
-  group('enquadramento', () {
-    test('o instante cai a 70% do corte', () {
+  group('framing', () {
+    test('the instant lands at 70% of the cut', () {
       final c = cutForMoment(
         DetectionEvent(kind: 'kill', t: 100, confidence: 1),
         atS: 0,
@@ -198,12 +198,12 @@ void main() {
       );
 
       expect(c.durationS, closeTo(1.0, 1e-9));
-      // 1s de corte com a kill aos 100s => começa aos 99.3
+      // 1s cut with the kill at 100s => starts at 99.3
       expect(c.startS, closeTo(99.3, 1e-9));
       expect(c.sourceT, 100);
     });
 
-    test('a duração nasce em batidas inteiras quando há música', () {
+    test('the duration is born in whole beats when there is music', () {
       final c = cutForMoment(
         DetectionEvent(kind: 'sleep', t: 30, confidence: 1),
         atS: 0,
@@ -213,98 +213,98 @@ void main() {
       expect(c.durationS, closeTo(2.4, 1e-9));
     });
 
-    test('um corte não começa antes do início da gravação', () {
+    test('a cut does not start before the start of the recording', () {
       expect(sourceStartFor(0.3, 2.0), 0);
     });
 
-    test('nem passa do fim dela', () {
-      // 2s de corte numa gravação de 60s só cabe se começar aos 58
+    test('nor goes past its end', () {
+      // a 2s cut in a 60s recording only fits if it starts at 58
       expect(sourceStartFor(59.9, 2.0, sourceDurationS: 60), closeTo(58, 1e-9));
     });
   });
 
-  group('posicionar sem atropelar', () {
-    test('bloco não entra por cima de outro', () {
-      final cuts = [corte(0, 2), corte(5, 1)];
+  group('placing without running over', () {
+    test('a block does not go on top of another', () {
+      final cuts = [cut(0, 2), cut(5, 1)];
 
-      expect(cabe(cuts, 2.0, 1.0), isTrue);
-      expect(cabe(cuts, 1.5, 1.0), isFalse);
-      expect(cabe(cuts, 4.5, 1.0), isFalse);
-      expect(cabe(cuts, -0.1, 1.0), isFalse);
+      expect(fits(cuts, 2.0, 1.0), isTrue);
+      expect(fits(cuts, 1.5, 1.0), isFalse);
+      expect(fits(cuts, 4.5, 1.0), isFalse);
+      expect(fits(cuts, -0.1, 1.0), isFalse);
     });
 
-    test('arrastando, o bloco não colide consigo mesmo', () {
-      final cuts = [corte(0, 2), corte(5, 1)];
-      expect(cabe(cuts, 0.5, 2.0, ignore: 0), isTrue);
+    test('while dragging, the block does not collide with itself', () {
+      final cuts = [cut(0, 2), cut(5, 1)];
+      expect(fits(cuts, 0.5, 2.0, ignore: 0), isTrue);
     });
 
-    test('mover para lugar ocupado deixa o bloco onde estava', () {
-      // empurrar o vizinho moveria um corte que o usuário já tinha encaixado
-      final cuts = [corte(0, 2), corte(5, 1)];
-      final movido = mover(cuts, 1, 1.0, beats: const [], snap: false);
-      expect(movido.atS, 5);
+    test('moving to an occupied place leaves the block where it was', () {
+      // pushing the neighbour would move a cut the user had already fitted
+      final cuts = [cut(0, 2), cut(5, 1)];
+      final movedClip = move(cuts, 1, 1.0, beats: const [], snap: false);
+      expect(movedClip.atS, 5);
     });
 
-    test('mover com ímã gruda na batida', () {
-      final cuts = [corte(0, 1)];
-      final movido = mover(
+    test('moving with the magnet snaps to the beat', () {
+      final cuts = [cut(0, 1)];
+      final movedClip = move(
         cuts,
         0,
         2.05,
         beats: const [0.0, 1.0, 2.0, 3.0],
         snap: true,
       );
-      expect(movido.atS, 2.0);
+      expect(movedClip.atS, 2.0);
     });
 
-    test('quando é o fim que está perto da batida, é ele que manda', () {
-      // numa montagem o que se ouve é a troca de cena, e ela acontece no fim
-      final cuts = [corte(0, 1.0)];
-      final movido = mover(
+    test('when it is the end that is near the beat, the end rules', () {
+      // in a montage what you hear is the scene change, and it happens at the end
+      final cuts = [cut(0, 1.0)];
+      final movedClip = move(
         cuts,
         0,
-        1.9, // fim em 2.9; o começo está a 0.1 da batida 2.0, o fim a 0.1 da 3.0
+        1.9, // end at 2.9; the start is 0.1 from the 2.0 beat, the end 0.1 from 3.0
         beats: const [0.0, 1.0, 2.0, 3.0],
         snap: true,
       );
-      expect(movido.untilS, closeTo(3.0, 1e-9));
+      expect(movedClip.untilS, closeTo(3.0, 1e-9));
     });
 
-    test('a próxima vaga é depois do último bloco', () {
-      final cuts = [corte(0, 2), corte(2, 1)];
-      expect(proximaVaga(cuts, 0.5, 1.0), 3.0);
-      expect(proximaVaga(cuts, 4.0, 1.0), 4.0);
+    test('the next free slot is after the last block', () {
+      final cuts = [cut(0, 2), cut(2, 1)];
+      expect(nextSlot(cuts, 0.5, 1.0), 3.0);
+      expect(nextSlot(cuts, 4.0, 1.0), 4.0);
     });
   });
 
-  group('esticar pela borda direita', () {
-    test('cresce o rabo: o começo do corte não se move', () {
-      // se o conteúdo se reenquadrasse a cada pixel, a imagem escorregaria
-      // debaixo do dedo — o reenquadramento é outro controle
-      final cuts = [corte(0, 1, t: 10)];
-      final maior = esticar(cuts, 0, 2.0, beats: const [], snap: false);
+  group('stretching by the right edge', () {
+    test('grows the tail: the start of the cut does not move', () {
+      // if the content reframed on every pixel, the picture would slide
+      // under the finger — reframing is another control
+      final cuts = [cut(0, 1, t: 10)];
+      final larger = stretchRight(cuts, 0, 2.0, beats: const [], snap: false);
 
-      expect(maior.durationS, 2.0);
-      expect(maior.startS, cuts[0].startS);
-      expect(maior.atS, 0);
+      expect(larger.durationS, 2.0);
+      expect(larger.startS, cuts[0].startS);
+      expect(larger.atS, 0);
     });
 
-    test('encosta no vizinho em vez de recusar', () {
-      final cuts = [corte(0, 1), corte(3, 1)];
-      final maior = esticar(cuts, 0, 5.0, beats: const [], snap: false);
-      expect(maior.durationS, closeTo(3.0, 1e-9));
+    test('stops at the neighbour instead of refusing', () {
+      final cuts = [cut(0, 1), cut(3, 1)];
+      final larger = stretchRight(cuts, 0, 5.0, beats: const [], snap: false);
+      expect(larger.durationS, closeTo(3.0, 1e-9));
     });
 
-    test('não encolhe abaixo do mínimo visível', () {
-      final cuts = [corte(0, 1)];
-      final menor = esticar(cuts, 0, 0.01, beats: const [], snap: false);
-      expect(menor.durationS, kMinCutS);
+    test('does not shrink below the visible minimum', () {
+      final cuts = [cut(0, 1)];
+      final smaller = stretchRight(cuts, 0, 0.01, beats: const [], snap: false);
+      expect(smaller.durationS, kMinCutS);
     });
 
-    test('não estica além do que foi gravado', () {
-      // o corte começa aos 9.3s de uma gravação de 10s: sobram 0.7s
-      final cuts = [corte(0, 1, t: 10)];
-      final maior = esticar(
+    test('does not stretch beyond what was recorded', () {
+      // the cut starts at 9.3s of a 10s recording: 0.7s are left
+      final cuts = [cut(0, 1, t: 10)];
+      final larger = stretchRight(
         cuts,
         0,
         5.0,
@@ -312,105 +312,105 @@ void main() {
         snap: false,
         sourceDurationS: 10,
       );
-      expect(maior.endS, lessThanOrEqualTo(10.0 + 1e-9));
+      expect(larger.endS, lessThanOrEqualTo(10.0 + 1e-9));
     });
 
-    test('com ímã, a borda direita gruda na batida', () {
-      final cuts = [corte(0, 1)];
-      final ajustado = esticar(
+    test('with the magnet, the right edge snaps to the beat', () {
+      final cuts = [cut(0, 1)];
+      final adjusted = stretchRight(
         cuts,
         0,
         1.45,
         beats: const [0.0, 0.5, 1.0, 1.5],
         snap: true,
       );
-      expect(ajustado.durationS, closeTo(1.5, 1e-9));
+      expect(adjusted.durationS, closeTo(1.5, 1e-9));
     });
   });
 
-  group('aparar pela borda esquerda', () {
-    test('come o começo sem mover o que já está enquadrado', () {
-      // a borda anda, o conteúdo fica: por isso o início na gravação anda
-      // junto, na mesma medida. É o que distingue aparar de mover.
-      final cuts = [corte(0, 2, t: 10)];
-      final aparado = aparar(cuts, 0, 0.5, beats: const [], snap: false);
+  group('trimming by the left edge', () {
+    test('eats the start without moving what is already framed', () {
+      // the edge moves, the content stays: so the start in the recording moves
+      // along, by the same amount. That is what tells trimming from moving.
+      final cuts = [cut(0, 2, t: 10)];
+      final trimmed = trimLeft(cuts, 0, 0.5, beats: const [], snap: false);
 
-      expect(aparado.atS, 0.5);
-      expect(aparado.durationS, closeTo(1.5, 1e-9));
-      expect(aparado.startS, closeTo(cuts[0].startS + 0.5, 1e-9));
-      // o fim, nas duas escalas, não se mexeu
-      expect(aparado.untilS, closeTo(2.0, 1e-9));
-      expect(aparado.endS, closeTo(cuts[0].endS, 1e-9));
+      expect(trimmed.atS, 0.5);
+      expect(trimmed.durationS, closeTo(1.5, 1e-9));
+      expect(trimmed.startS, closeTo(cuts[0].startS + 0.5, 1e-9));
+      // the end, on both scales, did not move
+      expect(trimmed.untilS, closeTo(2.0, 1e-9));
+      expect(trimmed.endS, closeTo(cuts[0].endS, 1e-9));
     });
 
-    test('não invade o bloco de trás', () {
-      final cuts = [corte(0, 2), corte(2, 2)];
-      final aparado = aparar(cuts, 1, 0.5, beats: const [], snap: false);
-      expect(aparado.atS, 2.0, reason: 'parou encostado no vizinho');
+    test('does not invade the block behind', () {
+      final cuts = [cut(0, 2), cut(2, 2)];
+      final trimmed = trimLeft(cuts, 1, 0.5, beats: const [], snap: false);
+      expect(trimmed.atS, 2.0, reason: 'stopped against the neighbour');
     });
 
-    test('não puxa o corte para antes do começo da gravação', () {
-      // um bloco que começa aos 0.3s da gravação só pode ser aparado 0.3s
+    test('does not pull the cut before the start of the recording', () {
+      // a block that starts at 0.3s of the recording can only be trimmed 0.3s
       final cuts = [
         TimelineClip(atS: 5, durationS: 2, startS: 0.3, sourceT: 1),
       ];
-      final aparado = aparar(cuts, 0, 3.0, beats: const [], snap: false);
-      expect(aparado.startS, greaterThanOrEqualTo(0));
-      expect(aparado.atS, closeTo(4.7, 1e-9));
+      final trimmed = trimLeft(cuts, 0, 3.0, beats: const [], snap: false);
+      expect(trimmed.startS, greaterThanOrEqualTo(0));
+      expect(trimmed.atS, closeTo(4.7, 1e-9));
     });
 
-    test('sobrar menos que o mínimo não apara nada', () {
-      final cuts = [corte(0, 1)];
-      final aparado = aparar(cuts, 0, 0.95, beats: const [], snap: false);
-      expect(aparado.durationS, 1.0);
+    test('leaving less than the minimum trims nothing', () {
+      final cuts = [cut(0, 1)];
+      final trimmed = trimLeft(cuts, 0, 0.95, beats: const [], snap: false);
+      expect(trimmed.durationS, 1.0);
     });
   });
 
-  group('a marca do momento dentro do bloco', () {
-    test('sai onde a jogada acontece', () {
-      // o bloco começa aos 99.3s e a kill é aos 100s: 70% de 1s de corte
-      final c = corte(0, 1, t: 100);
-      expect(marcaDoMomento(c), closeTo(kMomentAnchor, 1e-9));
+  group('the moment mark inside the block', () {
+    test('sits where the play happens', () {
+      // the block starts at 99.3s and the kill is at 100s: 70% of a 1s cut
+      final c = cut(0, 1, t: 100);
+      expect(momentMark(c), closeTo(kMomentAnchor, 1e-9));
     });
 
-    test('anda quando o bloco é aparado pela esquerda', () {
-      // Aparar come material *antes* da jogada, então ela fica proporcional-
-      // mente mais perto do começo do bloco. O corte de 8,6→10,6 com a kill aos
-      // 10s a tem a 70%; aparado um segundo, ele vai de 9,6→10,6 e ela cai a
-      // 40%. É por isso que a marca precisa ser desenhada, e não deduzida.
-      final cuts = [corte(0, 2, t: 10)];
-      final aparado = aparar(cuts, 0, 1.0, beats: const [], snap: false);
+    test('moves when the block is trimmed from the left', () {
+      // Trimming eats material *before* the play, so it ends up proportionally
+      // closer to the start of the block. The 8.6→10.6 cut with the kill at
+      // 10s has it at 70%; trimmed by a second, it goes 9.6→10.6 and it lands at
+      // 40%. That is why the mark has to be drawn, not deduced.
+      final cuts = [cut(0, 2, t: 10)];
+      final trimmed = trimLeft(cuts, 0, 1.0, beats: const [], snap: false);
 
-      expect(marcaDoMomento(cuts[0]), closeTo(0.7, 1e-9));
-      expect(marcaDoMomento(aparado), closeTo(0.4, 1e-9));
+      expect(momentMark(cuts[0]), closeTo(0.7, 1e-9));
+      expect(momentMark(trimmed), closeTo(0.4, 1e-9));
     });
 
-    test('some quando o momento fica fora do corte', () {
-      // um bloco que não contém o instante não tem o que marcar
+    test('vanishes when the moment falls outside the cut', () {
+      // a block that does not contain the instant has nothing to mark
       final c = TimelineClip(atS: 0, durationS: 1, startS: 50, sourceT: 10);
-      expect(marcaDoMomento(c), isNull);
+      expect(momentMark(c), isNull);
     });
   });
 
-  group('clipes de mídia', () {
-    Media midia({String kind = 'video', double dur = 10}) =>
+  group('media clips', () {
+    Media mediaItem({String kind = 'video', double dur = 10}) =>
         Media(id: 'm1', kind: kind, status: 'ready', name: 'x', durationS: dur);
 
-    test('um vídeo longo entra por um pedaço, não inteiro', () {
-      final c = clipeDeMidia(midia(dur: 300), atS: 0, beats: const []);
+    test('a long video comes in as a piece, not whole', () {
+      final c = mediaClip(mediaItem(dur: 300), atS: 0, beats: const []);
       expect(c.durationS, lessThanOrEqualTo(3.0));
       expect(c.source, 'media');
-      expect(c.startS, 0, reason: 'o arquivo começa onde começa');
+      expect(c.startS, 0, reason: 'the file starts where it starts');
     });
 
-    test('um item curto manda na duração', () {
-      final c = clipeDeMidia(midia(dur: 1.2), atS: 0, beats: const []);
+    test('a short item rules the duration', () {
+      final c = mediaClip(mediaItem(dur: 1.2), atS: 0, beats: const []);
       expect(c.durationS, closeTo(1.2, 1e-9));
     });
 
-    test('com música, a duração cai num número inteiro de batidas', () {
-      final c = clipeDeMidia(
-        midia(dur: 300),
+    test('with music, the duration lands on a whole number of beats', () {
+      final c = mediaClip(
+        mediaItem(dur: 300),
         atS: 0,
         beats: const [0, 0.5, 1.0, 1.5],
         beatsPerCut: 4,
@@ -418,9 +418,9 @@ void main() {
       expect(c.durationS, closeTo(2.0, 1e-9));
     });
 
-    test('imagem não tem duração própria: a montagem escolhe', () {
-      final c = clipeDeMidia(
-        midia(kind: 'image', dur: 0),
+    test('an image has no duration of its own: the montage chooses', () {
+      final c = mediaClip(
+        mediaItem(kind: 'image', dur: 0),
         atS: 0,
         beats: const [],
       );
@@ -428,9 +428,9 @@ void main() {
       expect(c.kind, 'image');
     });
 
-    test('copyWith não perde a fonte nem a transformação', () {
-      // o copyWith é usado em toda operação de estado; perder a fonte aqui
-      // transformaria um clipe de mídia num trecho da gravação, em silêncio
+    test('copyWith does not lose the source or the transform', () {
+      // copyWith is used in every state operation; losing the source here
+      // would silently turn a media clip into a piece of the recording
       const c = TimelineClip(
         atS: 0,
         durationS: 1,
@@ -440,14 +440,14 @@ void main() {
         transform: ClipTransform(scale: 0.5),
       );
 
-      final movido = c.copyWith(atS: 5);
+      final movedClip = c.copyWith(atS: 5);
 
-      expect(movido.source, 'media');
-      expect(movido.mediaId, 'm1');
-      expect(movido.transform.scale, 0.5);
+      expect(movedClip.source, 'media');
+      expect(movedClip.mediaId, 'm1');
+      expect(movedClip.transform.scale, 0.5);
     });
 
-    test('o que vai para o servidor traz o id da mídia', () {
+    test('what goes to the server carries the media id', () {
       const c = TimelineClip(
         atS: 0,
         durationS: 1,
@@ -456,7 +456,7 @@ void main() {
         mediaId: 'm1',
       );
       expect(c.toJson()['media_id'], 'm1');
-      // e um clipe da gravação não manda o campo à toa
+      // and a recording clip does not send the field for nothing
       expect(
         const TimelineClip(
           atS: 0,
@@ -468,97 +468,97 @@ void main() {
     });
   });
 
-  group('o que o monitor mostra', () {
-    test('sobre um bloco, o instante correspondente da gravação', () {
-      // bloco que entra aos 2s do vídeo e sai dos 100s da gravação: meio
-      // segundo depois de entrar, o monitor tem de estar em 100.5
+  group('what the monitor shows', () {
+    test('over a block, the matching instant of the recording', () {
+      // a block that enters at 2s of the video and comes from 100s of the recording:
+      // half a second after entering, the monitor has to be at 100.5
       final cuts = [
         TimelineClip(atS: 2, durationS: 1.5, startS: 100, sourceT: 100.7),
       ];
 
-      expect(blocoEm(cuts, 2.5), 0);
-      expect(origemEm(cuts, 2.5), closeTo(100.5, 1e-9));
+      expect(blockAt(cuts, 2.5), 0);
+      expect(sourceAt(cuts, 2.5), closeTo(100.5, 1e-9));
     });
 
-    test('no buraco, tela preta', () {
-      final cuts = [corte(0, 1), corte(3, 1)];
+    test('in the gap, black screen', () {
+      final cuts = [cut(0, 1), cut(3, 1)];
 
-      expect(blocoEm(cuts, 2.0), isNull);
-      expect(origemEm(cuts, 2.0), isNull);
+      expect(blockAt(cuts, 2.0), isNull);
+      expect(sourceAt(cuts, 2.0), isNull);
     });
 
-    test('depois do último bloco também é preto', () {
-      expect(origemEm([corte(0, 1)], 5.0), isNull);
+    test('after the last block it is black too', () {
+      expect(sourceAt([cut(0, 1)], 5.0), isNull);
     });
 
-    test('a borda do bloco pertence a ele; a do fim, não', () {
-      final cuts = [corte(0, 1)];
-      expect(blocoEm(cuts, 0.0), 0);
-      expect(blocoEm(cuts, 1.0), isNull);
+    test('the block edge belongs to it; the end edge does not', () {
+      final cuts = [cut(0, 1)];
+      expect(blockAt(cuts, 0.0), 0);
+      expect(blockAt(cuts, 1.0), isNull);
     });
   });
 
-  group('o que o vídeo vai ter', () {
+  group('what the video will have', () {
     test(
-      'o buraco entra na duração — ele vira tela preta, não encurtamento',
+      'the gap counts in the duration — it becomes black screen, not shortening',
       () {
-        final cuts = [corte(0, 2), corte(5, 1)];
+        final cuts = [cut(0, 2), cut(5, 1)];
 
-        expect(duracaoDoVideo(cuts), 6.0);
-        expect(duracaoEmPreto(cuts), closeTo(3.0, 1e-9));
+        expect(videoDuration(cuts), 6.0);
+        expect(blackDuration(cuts), closeTo(3.0, 1e-9));
       },
     );
 
-    test('blocos encostados não têm preto nenhum', () {
-      final cuts = [corte(0, 2), corte(2, 1)];
-      expect(duracaoEmPreto(cuts), 0);
+    test('back-to-back blocks have no black at all', () {
+      final cuts = [cut(0, 2), cut(2, 1)];
+      expect(blackDuration(cuts), 0);
     });
 
-    test('montagem vazia não tem duração', () {
-      expect(duracaoDoVideo(const []), 0);
+    test('an empty montage has no duration', () {
+      expect(videoDuration(const []), 0);
     });
   });
 
-  group('o que vai para o servidor', () {
-    test('a montagem leva os blocos', () {
+  group('what goes to the server', () {
+    test('the montage carries the blocks', () {
       final json = Montage(
-        title: 'Minha montagem',
+        title: 'My montage',
         layers: [
-          Layer(clips: [corte(0, 1.5, t: 90)]),
+          Layer(clips: [cut(0, 1.5, t: 90)]),
         ],
       ).toJson();
 
-      expect(json['title'], 'Minha montagem');
-      final camadas = json['layers'] as List;
-      expect(camadas, hasLength(1));
-      final clips = (camadas.first as Map)['clips'] as List;
+      expect(json['title'], 'My montage');
+      final layerList = json['layers'] as List;
+      expect(layerList, hasLength(1));
+      final clips = (layerList.first as Map)['clips'] as List;
       expect(clips, hasLength(1));
       expect((clips.first as Map)['at_s'], 0);
       expect((clips.first as Map)['duration_s'], 1.5);
       expect((clips.first as Map)['source_t'], 90);
       expect((clips.first as Map)['kind'], 'kill');
       expect((clips.first as Map)['source'], 'recording');
-      // transformação e som neutros não vão: o servidor os assume
+      // neutral transform and sound are not sent: the server assumes them
       expect((clips.first as Map).containsKey('transform'), isFalse);
     });
 
-    test('a faixa contínua nunca mais é escrita', () {
-      // ela ainda é lida -- vira bloco ao abrir --, e reenviá-la criaria uma
-      // segunda música tocando por baixo da que já virou bloco
+    test('the continuous track is never written again', () {
+      // it is still read -- it becomes a block on open --, and resending it would create a
+      // second song playing under the one that already became a block
       final json = const Montage(trackId: 'abc123', musicStartS: 42.5).toJson();
       expect(json.containsKey('track_id'), isFalse);
       expect(json.containsKey('music_start_s'), isFalse);
     });
 
-    test('a camada de som vai marcada, e volta marcada', () {
-      // é o que diz ao servidor para não desenhar o bloco: sem a marca, uma
-      // música na régua viraria imagem por cima do vídeo
+    test('the sound layer goes marked, and comes back marked', () {
+      // it is what tells the server not to draw the block: without the mark, a
+      // song on the timeline would become a picture over the video
       final json = Montage(
         layers: [
-          Layer(clips: [corte(0, 1.5)]),
+          Layer(clips: [cut(0, 1.5)]),
           Layer(
             kind: 'audio',
-            name: 'Música',
+            name: 'Music',
             clips: [
               TimelineClip(
                 atS: 0,
@@ -572,20 +572,20 @@ void main() {
         ],
       ).toJson();
 
-      final camadas = json['layers'] as List;
-      expect((camadas.first as Map)['kind'], 'video');
-      expect((camadas.last as Map)['kind'], 'audio');
+      final layerList = json['layers'] as List;
+      expect((layerList.first as Map)['kind'], 'video');
+      expect((layerList.last as Map)['kind'], 'audio');
 
-      final volta = Montage.fromJson(json);
-      expect(volta.layers.last.isAudio, isTrue);
-      expect(volta.layers.last.clips.single.mediaId, 'm1');
-      expect(volta.layers.last.clips.single.startS, 12);
+      final back = Montage.fromJson(json);
+      expect(back.layers.last.isAudio, isTrue);
+      expect(back.layers.last.clips.single.mediaId, 'm1');
+      expect(back.layers.last.clips.single.startS, 12);
     });
 
-    test('lê o formato de uma camada só que o app mandava antes', () {
-      // um rascunho salvo antes das camadas existirem tem de abrir
+    test('reads the single-layer format the app used to send', () {
+      // a draft saved before layers existed has to open
       final m = Montage.fromJson(const {
-        'title': 'de ontem',
+        'title': 'from yesterday',
         'music_start_s': 3.0,
         'cuts': [
           {'start_s': 10.0, 'duration_s': 2.0, 'at_s': 0.0, 'kind': 'kill'},
@@ -601,11 +601,11 @@ void main() {
   });
 
   group('Track', () {
-    test('lê a análise que o servidor devolveu', () {
+    test('reads the analysis the server returned', () {
       final t = Track.fromJson(const {
         'id': 'm1',
         'status': 'ready',
-        'name': 'musica.mp3',
+        'name': 'song.mp3',
         'duration_s': 180.5,
         'bpm': 128.0,
         'beats': [0.0, 0.47, 0.94],
@@ -619,12 +619,12 @@ void main() {
       expect(Uri.parse(t.audioUrl).hasScheme, isTrue);
     });
 
-    test('música que o servidor não conseguiu ouvir se anuncia', () {
+    test('a song the server could not listen to announces itself', () {
       final t = Track.fromJson(const {
         'id': 'm2',
         'status': 'failed',
-        'name': 'quebrada.mp3',
-        'error': 'ffmpeg nao decodificou a musica',
+        'name': 'broken.mp3',
+        'error': 'ffmpeg could not decode the song',
         'audio_url': '/api/tracks/m2/audio',
       });
 

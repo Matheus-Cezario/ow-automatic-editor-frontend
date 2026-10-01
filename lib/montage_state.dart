@@ -3,29 +3,30 @@ import 'dart:math' as math;
 import 'api.dart';
 import 'montage.dart';
 
-/// O estado da montagem, inteiro e imutável, mais o histórico que o desfaz.
+/// The montage's state, whole and immutable, plus the history that undoes it.
 ///
-/// Na V1 a tela guardava uma `List<TimelineClip>` e a alterava no lugar, em
-/// trinta pontos diferentes. Funcionava para seis operações e não sobreviveria
-/// a vinte: não havia como desfazer nada, porque não havia "antes" — o estado
-/// anterior era sobrescrito a cada mexida.
+/// In V1 the screen kept a `List<TimelineClip>` and changed it in place, in
+/// thirty different places. It worked for six operations and would not survive
+/// twenty: there was no way to undo anything, because there was no "before" —
+/// the previous state was overwritten on every change.
 ///
-/// Aqui toda operação recebe um estado e devolve **outro**. Guardar o anterior
-/// vira empilhar uma referência, e desfazer vira trocar de referência. A conta
-/// que decide *onde* um bloco pode cair continua em `montage.dart`, testada
-/// sozinha; este arquivo só cuida de quem é quem e do que veio antes.
+/// Here every operation takes a state and returns **another**. Keeping the
+/// previous one becomes pushing a reference, and undoing becomes swapping
+/// references. The computation that decides *where* a block can land stays in
+/// `montage.dart`, tested on its own; this file only deals with who is who and
+/// what came before.
 
-/// Gerador dos ids locais dos blocos. Um contador basta: eles só precisam ser
-/// únicos dentro de uma sessão de edição, e nunca saem do app.
-int _proximoId = 0;
-String novoIdDeCorte() => 'c${_proximoId++}';
+/// Generator of the blocks' local ids. A counter is enough: they only need to
+/// be unique within an editing session, and they never leave the app.
+int _nextId = 0;
+String newCutId() => 'c${_nextId++}';
 
-/// A montagem num instante do tempo.
+/// The montage at one instant in time.
 class MontageState {
   MontageState({
     required List<Layer> layers,
-    Set<String>? selecao,
-    this.camadaAtiva = 0,
+    Set<String>? selectionIds,
+    this.activeLayer = 0,
     this.title = '',
     this.beatOffsetS = 0,
     this.beatMultiplier = 1,
@@ -35,50 +36,51 @@ class MontageState {
     this.export = const ExportSpec(),
   }) : layers = List.unmodifiable(
          (layers.isEmpty ? const [Layer()] : layers).map(
-           // a garantia tem de alcançar os clipes: `clips` é um getter que
-           // devolve lista nova, e travar só ele deixaria a lista de dentro
-           // aberta a quem tivesse a camada na mão
+           // the guarantee must reach the clips: `clips` is a getter that
+           // returns a new list, and locking only it would leave the inner
+           // list open to whoever had the layer in hand
            (l) => l.copyWith(clips: List.unmodifiable(l.clips)),
          ),
        ),
-       selecao = Set.unmodifiable(selecao ?? const <String>{});
+       selectionIds = Set.unmodifiable(selectionIds ?? const <String>{});
 
-  static MontageState vazio() => MontageState(layers: const [Layer()]);
+  static MontageState blank() => MontageState(layers: const [Layer()]);
 
-  /// As camadas, da de baixo para a de cima. Nunca vazia: uma montagem sem
-  /// camada nenhuma não teria onde receber o primeiro clipe.
+  /// The layers, from bottom to top. Never empty: a montage with no layer at
+  /// all would have nowhere to receive the first clip.
   final List<Layer> layers;
 
-  /// Onde os clipes novos entram.
-  final int camadaAtiva;
+  /// Where new clips go.
+  final int activeLayer;
 
-  /// Quem está selecionado, por id de clipe. Vários, porque operações em lote
-  /// são metade do que faz um editor ser um editor.
-  final Set<String> selecao;
+  /// Who is selected, by clip id. Several, because batch operations are half
+  /// of what makes an editor an editor.
+  final Set<String> selectionIds;
 
   final String title;
 
-  /// Correções à grade de batidas — o ímã da tela, não o vídeo.
+  /// Corrections to the beat grid — the screen's magnet, not the video.
   final double beatOffsetS;
   final double beatMultiplier;
   final int beatBar;
 
-  /// Volume da música e do som do jogo na mistura final.
+  /// Volume of the music and of the game sound in the final mix.
   final double musicVolume;
   final double gameVolume;
 
-  /// Como o vídeo final é escrito. Não muda a montagem — muda a janela.
+  /// How the final video is written. It does not change the montage — it
+  /// changes the window.
   final ExportSpec export;
 
-  /// Todos os clipes, de todas as camadas, de baixo para cima.
+  /// Every clip, from every layer, bottom to top.
   List<TimelineClip> get clips => [for (final l in layers) ...l.clips];
 
-  /// O que o monitor mostra: os clipes das camadas visíveis, com a de cima
-  /// ganhando de quem está embaixo no mesmo instante.
+  /// What the monitor shows: the visible layers' clips, with the upper one
+  /// winning over the one below at the same instant.
   ///
-  /// O preview não compõe — ele mostra um quadro. Então quando duas camadas se
-  /// cobrem, o que vale é a de cima, que é o que o servidor vai desenhar por
-  /// último.
+  /// The preview does not compose — it shows one frame. So when two layers
+  /// overlap, what counts is the upper one, which is what the server will draw
+  /// last.
   ///
   /// The upper clip only hides the lower one **where the two overlap**: before
   /// and after that, the lower one shows again, as in the final video. The
@@ -86,19 +88,19 @@ class MontageState {
   ///
   /// Text is left out: it is a transparent canvas the monitor draws over the
   /// picture, and treating it as a clip erased the video underneath.
-  List<TimelineClip> get clipesVisiveis {
-    var visiveis = <TimelineClip>[];
+  List<TimelineClip> get visibleClips {
+    var visible = <TimelineClip>[];
     for (final l in layers) {
-      // uma camada de som não desenha nada: o monitor não tem o que mostrar de
-      // um bloco de música, e considerá-lo apagaria o vídeo que está por baixo
+      // an audio layer draws nothing: the monitor has nothing to show of a
+      // music block, and considering it would erase the video underneath
       if (l.hidden || l.isAudio) continue;
       for (final c in l.clips) {
         if (c.isText) continue;
-        visiveis = [for (final v in visiveis) ..._outside(v, c)];
-        visiveis.add(c);
+        visible = [for (final v in visible) ..._outside(v, c)];
+        visible.add(c);
       }
     }
-    return visiveis..sort((a, b) => a.atS.compareTo(b.atS));
+    return visible..sort((a, b) => a.atS.compareTo(b.atS));
   }
 
   /// What is left of [v] outside the interval [c] covers: nothing, all of it,
@@ -121,12 +123,12 @@ class MontageState {
     ];
   }
 
-  bool get vazia => clips.isEmpty;
+  bool get isBlank => clips.isEmpty;
 
   MontageState copyWith({
     List<Layer>? layers,
-    Set<String>? selecao,
-    int? camadaAtiva,
+    Set<String>? selectionIds,
+    int? activeLayer,
     String? title,
     double? beatOffsetS,
     double? beatMultiplier,
@@ -136,8 +138,8 @@ class MontageState {
     ExportSpec? export,
   }) => MontageState(
     layers: layers ?? this.layers,
-    selecao: selecao ?? this.selecao,
-    camadaAtiva: camadaAtiva ?? this.camadaAtiva,
+    selectionIds: selectionIds ?? this.selectionIds,
+    activeLayer: activeLayer ?? this.activeLayer,
     title: title ?? this.title,
     beatOffsetS: beatOffsetS ?? this.beatOffsetS,
     beatMultiplier: beatMultiplier ?? this.beatMultiplier,
@@ -147,11 +149,11 @@ class MontageState {
     export: export ?? this.export,
   );
 
-  /// Em que camada, e em que posição dela, está o clipe.
+  /// Which layer, and which position in it, the clip is at.
   ///
-  /// `null` quando ele não existe mais — o que acontece o tempo todo depois de
-  /// um desfazer, e é por isso que toda operação pergunta antes de agir.
-  (int, int)? localizar(String id) {
+  /// `null` when it no longer exists — which happens all the time after an
+  /// undo, and is why every operation asks before acting.
+  (int, int)? locate(String id) {
     for (var c = 0; c < layers.length; c++) {
       final i = layers[c].clips.indexWhere((k) => k.id == id);
       if (i >= 0) return (c, i);
@@ -159,30 +161,30 @@ class MontageState {
     return null;
   }
 
-  TimelineClip? clipe(String id) {
-    final onde = localizar(id);
-    return onde == null ? null : layers[onde.$1].clips[onde.$2];
+  TimelineClip? clipItem(String id) {
+    final location = locate(id);
+    return location == null ? null : layers[location.$1].clips[location.$2];
   }
 
-  List<TimelineClip> get selecionados => [
+  List<TimelineClip> get selectedClips => [
     for (final c in clips)
-      if (selecao.contains(c.id)) c,
+      if (selectionIds.contains(c.id)) c,
   ];
 
-  /// Troca um clipe pelo seu sucessor, na camada onde ele está.
-  MontageState comClipe(int camada, int indice, TimelineClip novo) {
-    final lista = [...layers[camada].clips];
-    lista[indice] = novo;
-    return comCamada(camada, layers[camada].copyWith(clips: lista));
+  /// Swaps a clip for its successor, in the layer where it is.
+  MontageState withClip(int layerIndex, int index, TimelineClip updated) {
+    final list = [...layers[layerIndex].clips];
+    list[index] = updated;
+    return withLayer(layerIndex, layers[layerIndex].copyWith(clips: list));
   }
 
-  MontageState comCamada(int indice, Layer nova) {
-    final lista = [...layers];
-    lista[indice] = nova;
-    return copyWith(layers: lista);
+  MontageState withLayer(int index, Layer fresh) {
+    final list = [...layers];
+    list[index] = fresh;
+    return copyWith(layers: list);
   }
 
-  Montage paraEnvio() => Montage(
+  Montage toPayload() => Montage(
     title: title,
     layers: layers,
     beatOffsetS: beatOffsetS,
@@ -194,19 +196,19 @@ class MontageState {
   );
 }
 
-/// Reconstrói o estado a partir do rascunho que voltou do servidor.
+/// Rebuilds the state from the draft that came back from the server.
 ///
-/// É aqui que os clipes ganham id: o servidor não guarda nenhum, porque para
-/// ele um clipe é só um trecho com hora marcada.
-MontageState montagemDoRascunho(Montage draft) => MontageState(
+/// This is where clips get their id: the server keeps none, because to it a
+/// clip is just a stretch with a set time.
+MontageState montageFromDraft(Montage draft) => MontageState(
   layers: [
     for (final l in draft.layers)
       l.copyWith(
-        clips: [for (final c in l.clips) c.copyWith(id: novoIdDeCorte())],
+        clips: [for (final c in l.clips) c.copyWith(id: newCutId())],
       ),
-    // a faixa contínua de antes vira um bloco de música que cobre o vídeo: era
-    // exatamente isso que ela fazia, e agora ela tem pontas para pegar
-    ...?_aTrilhaViraBloco(draft),
+    // the old continuous track becomes a music block covering the video: that
+    // is exactly what it did, and now it has ends to grab
+    ...?_trackBecomesBlock(draft),
   ],
   title: draft.title,
   beatOffsetS: draft.beatOffsetS,
@@ -217,25 +219,26 @@ MontageState montagemDoRascunho(Montage draft) => MontageState(
   export: draft.export,
 );
 
-/// A camada de som que uma montagem antiga ganha ao ser aberta.
+/// The audio layer an old montage gets when it is opened.
 ///
-/// Houve dois jeitos de ter música: a faixa contínua, que tocava por baixo de
-/// tudo e não se cortava, e o bloco na régua. Sobrou o segundo. Quem converte o
-/// formato velho é o código que lê — o servidor faz o mesmo, na mesma regra.
-List<Layer>? _aTrilhaViraBloco(Montage draft) {
+/// There were two ways of having music: the continuous track, which played
+/// under everything and could not be cut, and the block on the ruler. The
+/// second one is what is left. The code that reads is what converts the old
+/// format — the server does the same, with the same rule.
+List<Layer>? _trackBecomesBlock(Montage draft) {
   final id = draft.trackId;
   if (id == null || id.isEmpty) return null;
-  final ate = duracaoDoVideo([for (final l in draft.layers) ...l.clips]);
-  if (ate < kMinCutS) return null;
+  final until = videoDuration([for (final l in draft.layers) ...l.clips]);
+  if (until < kMinCutS) return null;
   return [
     Layer(
       kind: 'audio',
-      name: 'Música',
+      name: 'Music',
       clips: [
         TimelineClip(
-          id: novoIdDeCorte(),
+          id: newCutId(),
           atS: 0,
-          durationS: ate,
+          durationS: until,
           startS: draft.musicStartS,
           source: 'media',
           mediaId: id,
@@ -245,68 +248,68 @@ List<Layer>? _aTrilhaViraBloco(Montage draft) {
   ];
 }
 
-// ─────────────────────────────── operações ──────────────────────────────────
+// ─────────────────────────────── operations ─────────────────────────────────
 //
-// Todas recebem um estado e devolvem outro. A colisão é **por camada**: dois
-// clipes no mesmo instante em camadas diferentes é justamente o que camada
-// serve para fazer.
+// They all take a state and return another. Collision is **per layer**: two
+// clips at the same instant on different layers is exactly what layers are
+// for.
 
-/// Põe um clipe novo na camada ativa, empurrando-o para a primeira vaga livre.
-MontageState adicionar(
+/// Puts a new clip on the active layer, pushing it to the first free slot.
+MontageState addClip(
   MontageState s,
   TimelineClip clip, {
   required List<double> beats,
   required bool snap,
 }) {
-  final camada = s.camadaAtiva.clamp(0, s.layers.length - 1);
-  final vaga = proximaVaga(s.layers[camada].clips, clip.atS, clip.durationS);
-  final novo = clip.copyWith(
-    id: novoIdDeCorte(),
-    atS: snap ? math.max(0, snapToBeat(vaga, beats)) : vaga,
+  final layerIndex = s.activeLayer.clamp(0, s.layers.length - 1);
+  final slot = nextSlot(s.layers[layerIndex].clips, clip.atS, clip.durationS);
+  final updated = clip.copyWith(
+    id: newCutId(),
+    atS: snap ? math.max(0, snapToBeat(slot, beats)) : slot,
   );
   return s
-      .comCamada(
-        camada,
-        s.layers[camada].copyWith(clips: [...s.layers[camada].clips, novo]),
+      .withLayer(
+        layerIndex,
+        s.layers[layerIndex].copyWith(clips: [...s.layers[layerIndex].clips, updated]),
       )
-      .copyWith(selecao: {novo.id});
+      .copyWith(selectionIds: {updated.id});
 }
 
-MontageState moverBloco(
+MontageState moveBlock(
   MontageState s,
   String id,
   double atS, {
   required List<double> beats,
   required bool snap,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  return s.comClipe(
-    camada,
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  return s.withClip(
+    layerIndex,
     i,
-    mover(s.layers[camada].clips, i, atS, beats: beats, snap: snap),
+    move(s.layers[layerIndex].clips, i, atS, beats: beats, snap: snap),
   );
 }
 
-MontageState esticarBloco(
+MontageState stretchBlock(
   MontageState s,
   String id,
-  double duracao, {
+  double durationValue, {
   required List<double> beats,
   required bool snap,
   double? sourceDurationS,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  return s.comClipe(
-    camada,
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  return s.withClip(
+    layerIndex,
     i,
-    esticar(
-      s.layers[camada].clips,
+    stretchRight(
+      s.layers[layerIndex].clips,
       i,
-      duracao,
+      durationValue,
       beats: beats,
       snap: snap,
       sourceDurationS: sourceDurationS,
@@ -314,54 +317,50 @@ MontageState esticarBloco(
   );
 }
 
-MontageState apararBloco(
+MontageState trimBlock(
   MontageState s,
   String id,
   double atS, {
   required List<double> beats,
   required bool snap,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  return s.comClipe(
-    camada,
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  return s.withClip(
+    layerIndex,
     i,
-    aparar(s.layers[camada].clips, i, atS, beats: beats, snap: snap),
+    trimLeft(s.layers[layerIndex].clips, i, atS, beats: beats, snap: snap),
   );
 }
 
-/// Muda um efeito do clipe: velocidade, cor ou fade.
+/// Moves the clip's content inside the frame.
 ///
-/// Todos entram pelo mesmo caminho porque todos são a mesma coisa do ponto de
-/// vista do estado — trocar um clipe pelo seu sucessor.
-/// Move o conteúdo do clipe dentro do quadro.
+/// [x] and [y] are offsets from the centre normalised by half the frame — -1
+/// touches the left/top edge, +1 the right/bottom one. It is the same
+/// computation the server uses, so dragging the text on the monitor puts the
+/// line exactly where it will come out.
 ///
-/// [x] e [y] são deslocamentos do centro normalizados pela metade do quadro —
-/// -1 encosta na borda esquerda/de cima, +1 na direita/de baixo. É a mesma
-/// conta que o servidor usa, então arrastar o texto no monitor põe a frase
-/// exatamente onde ela vai sair.
-///
-/// Fica no intervalo de -1 a 1: além disso o conteúdo sai do quadro, e um
-/// clipe que não aparece é indistinguível de um clipe que sumiu.
-MontageState posicionarNoQuadro(
+/// It stays within -1 to 1: beyond that the content leaves the frame, and a
+/// clip that does not show is indistinguishable from a clip that vanished.
+MontageState positionOnFrame(
   MontageState s,
   String id, {
   double? x,
   double? y,
-  double? escala,
+  double? scaleFactor,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  final c = s.layers[camada].clips[i];
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
   final t = c.transform;
-  return s.comClipe(
-    camada,
+  return s.withClip(
+    layerIndex,
     i,
     c.copyWith(
       transform: ClipTransform(
-        scale: (escala ?? t.scale).clamp(0.1, 4.0),
+        scale: (scaleFactor ?? t.scale).clamp(0.1, 4.0),
         x: (x ?? t.x).clamp(-1.0, 1.0),
         y: (y ?? t.y).clamp(-1.0, 1.0),
         opacity: t.opacity,
@@ -370,78 +369,82 @@ MontageState posicionarNoQuadro(
   );
 }
 
-/// Põe a **jogada** de um bloco em [alvoS] do vídeo, de um jeito ou de outro.
+/// Puts a block's **play** at [targetS] of the video, one way or another.
 ///
-/// Não é o mesmo que mover o bloco para o cursor: o corte começa antes da
-/// jogada, para dar embalo, e é a jogada — a eliminação, o dardo, a pedrada —
-/// que precisa cair na batida. Alinhar pela borda deixaria o impacto meio
-/// segundo depois dela.
+/// It is not the same as moving the block to the cursor: the cut starts before
+/// the play, for run-up, and it is the play — the kill, the dart, the rock —
+/// that needs to land on the beat. Aligning by the edge would leave the impact
+/// half a second after it.
 ///
-/// Há dois jeitos de conseguir isso, e eles mudam coisas diferentes:
+/// There are two ways of getting there, and they change different things:
 ///
-/// * **andar com o bloco** muda *quando* a cena aparece, e mantém o
-///   enquadramento — quanto de embalo há antes da jogada. É o preferido;
-/// * **deslizar o conteúdo dentro do bloco** mantém o bloco no lugar e troca
-///   *qual* trecho da gravação aparece ali. É o que sobra quando os vizinhos
-///   não deixam o bloco andar — o caso comum numa montagem de blocos colados.
+/// * **moving the block** changes *when* the scene appears, and keeps the
+///   framing — how much run-up there is before the play. It is the preferred
+///   one;
+/// * **sliding the content inside the block** keeps the block in place and
+///   swaps *which* stretch of the recording shows there. It is what is left
+///   when the neighbours do not let the block move — the common case in a
+///   montage of adjacent blocks.
 ///
-/// O resultado diz qual dos dois aconteceu, para a tela poder contar.
-({MontageState estado, bool deslizou})? alinharMomento(
+/// The result says which of the two happened, so the screen can tell.
+({MontageState state, bool didSlide})? alignMoment(
   MontageState s,
   String id,
-  double alvoS, {
+  double targetS, {
   required double sourceDurationS,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return null;
-  final (camada, i) = onde;
-  final c = s.layers[camada].clips[i];
-  final marca = momentoNoVideo(c);
-  if (marca == null) return null;
+  final location = s.locate(id);
+  if (location == null) return null;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  final mark = momentInVideo(c);
+  if (mark == null) return null;
 
-  // 1) andar com o bloco
-  final destino = math.max(0.0, c.atS + (alvoS - marca));
-  final movido = mover(
-    s.layers[camada].clips,
+  // 1) move the block
+  final destination = math.max(0.0, c.atS + (targetS - mark));
+  final movedClip = move(
+    s.layers[layerIndex].clips,
     i,
-    destino,
+    destination,
     beats: const [],
     snap: false,
   );
-  // "moveu" é o bloco ter mudado de lugar, e não `mover` ter devolvido outro
-  // objeto: encostado no primeiro quadro, ele devolve o mesmo instante — e aí
-  // o alinhamento ainda não aconteceu
-  if ((movido.atS - c.atS).abs() > 1e-6) {
-    return (estado: s.comClipe(camada, i, movido), deslizou: false);
+  // "moved" means the block changed place, not `move` returning another
+  // object: against the first frame, it returns the same instant — and then
+  // the alignment has not happened yet
+  if ((movedClip.atS - c.atS).abs() > 1e-6) {
+    return (state: s.withClip(layerIndex, i, movedClip), didSlide: false);
   }
 
-  // 2) deslizar o conteúdo: a jogada vem até o cursor sem tocar em vizinho
-  final limite = math.max(0.0, sourceDurationS - c.durationS);
-  final inicio = (c.sourceT - (alvoS - c.atS)).clamp(0.0, limite);
-  final deslizado = c.copyWith(startS: inicio);
-  if ((inicio - c.startS).abs() < 1e-6 || marcaDoMomento(deslizado) == null) {
+  // 2) slide the content: the play comes to the cursor without touching a
+  // neighbour
+  final limit = math.max(0.0, sourceDurationS - c.durationS);
+  final startTime = (c.sourceT - (targetS - c.atS)).clamp(0.0, limit);
+  final wasSlid = c.copyWith(startS: startTime);
+  if ((startTime - c.startS).abs() < 1e-6 || momentMark(wasSlid) == null) {
     return null;
   }
-  return (estado: s.comClipe(camada, i, deslizado), deslizou: true);
+  return (state: s.withClip(layerIndex, i, wasSlid), didSlide: true);
 }
 
-/// Troca a ordem das camadas — que é a ordem em que o servidor as desenha.
+/// Swaps the order of the layers — which is the order the server draws them
+/// in.
 ///
-/// A de baixo é o fundo, a de cima ganha de quem está embaixo no mesmo
-/// instante. Trocar a ordem é, portanto, uma edição de verdade: muda o que
-/// aparece.
-MontageState reordenarCamadas(MontageState s, int de, int para) {
-  if (de == para) return s;
-  if (de < 0 || de >= s.layers.length) return s;
-  if (para < 0 || para >= s.layers.length) return s;
+/// The bottom one is the background, the upper one wins over the one below at
+/// the same instant. Reordering is therefore a real edit: it changes what
+/// shows.
+MontageState reorderLayers(MontageState s, int from, int to) {
+  if (from == to) return s;
+  if (from < 0 || from >= s.layers.length) return s;
+  if (to < 0 || to >= s.layers.length) return s;
 
-  final lista = [...s.layers];
-  final movida = lista.removeAt(de);
-  lista.insert(para, movida);
-  return s.copyWith(layers: lista, camadaAtiva: para);
+  final list = [...s.layers];
+  final movedOne = list.removeAt(from);
+  list.insert(to, movedOne);
+  return s.copyWith(layers: list, activeLayer: to);
 }
 
-MontageState ajustarEfeito(
+MontageState adjustEffect(
   MontageState s,
   String id, {
   double? speed,
@@ -451,59 +454,59 @@ MontageState ajustarEfeito(
   bool? freeze,
   bool? reverse,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  final c = s.layers[camada].clips[i];
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
 
-  // um fade maior que o clipe é recusado pelo servidor; apará-lo aqui evita
-  // descobrir isso só na hora de gerar
-  var novoFade = fade ?? c.fade;
-  final soma = novoFade.inS + novoFade.outS;
-  if (soma > c.durationS) {
-    final escala = c.durationS / soma;
-    novoFade = ClipFade(
-      inS: novoFade.inS * escala,
-      outS: novoFade.outS * escala,
+  // a fade longer than the clip is refused by the server; trimming it here
+  // avoids finding out only when rendering
+  var newFade = fade ?? c.fade;
+  final sum = newFade.inS + newFade.outS;
+  if (sum > c.durationS) {
+    final scaleFactor = c.durationS / sum;
+    newFade = ClipFade(
+      inS: newFade.inS * scaleFactor,
+      outS: newFade.outS * scaleFactor,
     );
   }
 
-  // congelar e inverter ao mesmo tempo o servidor recusa; aqui um desliga o
-  // outro, que é o que a pessoa quis dizer ao ligar o segundo
-  final vaiCongelar = freeze ?? c.freeze;
-  final vaiInverter = reverse ?? c.reverse;
+  // the server refuses freezing and reversing at the same time; here one turns
+  // the other off, which is what the person meant by turning the second on
+  final willFreeze = freeze ?? c.freeze;
+  final willReverse = reverse ?? c.reverse;
 
-  return s.comClipe(
-    camada,
+  return s.withClip(
+    layerIndex,
     i,
     c.copyWith(
       speed: speed?.clamp(0.1, 10.0),
       color: color,
-      fade: novoFade,
+      fade: newFade,
       zoom: zoom,
-      freeze: freeze ?? (vaiInverter ? false : vaiCongelar),
-      reverse: reverse ?? (vaiCongelar ? false : vaiInverter),
+      freeze: freeze ?? (willReverse ? false : willFreeze),
+      reverse: reverse ?? (willFreeze ? false : willReverse),
     ),
   );
 }
 
-/// Muda o que está escrito num clipe de texto, ou como.
-MontageState trocarTexto(
+/// Changes what a text clip says, or how it looks.
+MontageState changeText(
   MontageState s,
   String id, {
-  String? texto,
-  ClipTextStyle? estilo,
+  String? textValue,
+  ClipTextStyle? styleSpec,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  final c = s.layers[camada].clips[i];
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
   if (!c.isText) return s;
 
-  // o servidor recusa texto vazio, e um clipe invisível na régua seria pior do
-  // que um espaço em branco
-  final novo = (texto ?? c.text).trim().isEmpty ? c.text : (texto ?? c.text);
-  return s.comClipe(camada, i, c.copyWith(text: novo, textStyle: estilo));
+  // the server refuses empty text, and an invisible clip on the ruler would be
+  // worse than a blank space
+  final updated = (textValue ?? c.text).trim().isEmpty ? c.text : (textValue ?? c.text);
+  return s.withClip(layerIndex, i, c.copyWith(text: updated, textStyle: styleSpec));
 }
 
 /// Sets (or clears, with `null`) the entrance transition of clips [ids].
@@ -517,14 +520,14 @@ MontageState applyTransition(
 ) {
   var result = s;
   for (final id in ids) {
-    final where = result.localizar(id);
+    final where = result.locate(id);
     if (where == null) continue;
     final (layer, i) = where;
     final l = result.layers[layer];
     if (l.isAudio || l.locked) continue;
     final c = l.clips[i];
     if (c.transition == transition) continue;
-    result = result.comClipe(
+    result = result.withClip(
       layer,
       i,
       transition == null
@@ -535,38 +538,39 @@ MontageState applyTransition(
   return result;
 }
 
-/// O *punch*: a lente fecha rápido e afrouxa até o fim do clipe.
+/// The *punch*: the lens closes in fast and eases off until the end of the
+/// clip.
 ///
-/// Dois movimentos resolvem o efeito mais usado numa montagem de gameplay, e é
-/// melhor oferecê-lo pronto do que um editor de curvas que ninguém vai abrir.
-List<ZoomKey> punch({double ate = 1.6, double quando = 0.25}) => [
+/// Two movements solve the most used effect in a gameplay montage, and it is
+/// better to offer it ready-made than a curve editor nobody will open.
+List<ZoomKey> punch({double until = 1.6, double when = 0.25}) => [
   const ZoomKey(t: 0, scale: 1),
-  ZoomKey(t: quando, scale: ate),
-  ZoomKey(t: 1, scale: 1 + (ate - 1) * 0.4),
+  ZoomKey(t: when, scale: until),
+  ZoomKey(t: 1, scale: 1 + (until - 1) * 0.4),
 ];
 
-/// Move o conteúdo dentro do clipe sem mexer no clipe — o ajuste fino do
-/// enquadramento.
-MontageState deslocarConteudo(
+/// Moves the content inside the clip without touching the clip — the fine
+/// adjustment of the framing.
+MontageState shiftContent(
   MontageState s,
   String id,
   double delta, {
   required double sourceDurationS,
 }) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  final c = s.layers[camada].clips[i];
-  final limite = math.max(0.0, sourceDurationS - c.durationS);
-  return s.comClipe(
-    camada,
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  final limit = math.max(0.0, sourceDurationS - c.durationS);
+  return s.withClip(
+    layerIndex,
     i,
-    c.copyWith(startS: (c.startS + delta).clamp(0, limite)),
+    c.copyWith(startS: (c.startS + delta).clamp(0, limit)),
   );
 }
 
-/// Tira os clipes escolhidos da montagem, de onde quer que estejam.
-MontageState remover(MontageState s, Set<String> ids) {
+/// Removes the chosen clips from the montage, wherever they are.
+MontageState removeClips(MontageState s, Set<String> ids) {
   if (ids.isEmpty) return s;
   return s.copyWith(
     layers: [
@@ -578,169 +582,170 @@ MontageState remover(MontageState s, Set<String> ids) {
           ],
         ),
     ],
-    selecao: const {},
+    selectionIds: const {},
   );
 }
 
-/// Move vários clipes de uma vez, mantendo a distância entre eles.
+/// Moves several clips at once, keeping the distance between them.
 ///
-/// O grupo anda junto ou não anda: se qualquer um fosse parar em cima de um que
-/// ficou parado — na camada dele —, ou antes do primeiro quadro, o movimento
-/// inteiro é recusado. Mover metade de uma seleção desmancharia um arranjo que
-/// o usuário já tinha feito.
-MontageState moverSelecao(
+/// The group moves together or not at all: if any of them would land on one
+/// that stayed still — on its layer — or before the first frame, the whole move
+/// is refused. Moving half a selection would undo an arrangement the user had
+/// already made.
+MontageState moveSelection(
   MontageState s,
   double delta, {
   required List<double> beats,
   required bool snap,
 }) {
-  if (s.selecao.isEmpty || delta == 0) return s;
+  if (s.selectionIds.isEmpty || delta == 0) return s;
 
-  var passo = delta;
+  var step = delta;
   if (snap) {
-    // gruda o grupo pela borda do primeiro clipe: é a referência visível
-    final primeiro = s.selecionados
+    // snaps the group by the first clip's edge: it is the visible reference
+    final first = s.selectedClips
         .map((c) => c.atS)
         .reduce((a, b) => a < b ? a : b);
-    passo = snapToBeat(primeiro + delta, beats) - primeiro;
+    step = snapToBeat(first + delta, beats) - first;
   }
 
-  final novas = <Layer>[];
+  final freshOnes = <Layer>[];
   for (final l in s.layers) {
     final indices = <int>{
       for (var i = 0; i < l.clips.length; i++)
-        if (s.selecao.contains(l.clips[i].id)) i,
+        if (s.selectionIds.contains(l.clips[i].id)) i,
     };
     if (indices.isEmpty) {
-      novas.add(l);
+      freshOnes.add(l);
       continue;
     }
-    final lista = [...l.clips];
+    final list = [...l.clips];
     for (final i in indices) {
-      final destino = lista[i].atS + passo;
-      if (!cabeIgnorando(l.clips, destino, lista[i].durationS, indices)) {
+      final destination = list[i].atS + step;
+      if (!fitsIgnoring(l.clips, destination, list[i].durationS, indices)) {
         return s;
       }
-      lista[i] = lista[i].copyWith(atS: destino);
+      list[i] = list[i].copyWith(atS: destination);
     }
-    novas.add(l.copyWith(clips: lista));
+    freshOnes.add(l.copyWith(clips: list));
   }
-  return s.copyWith(layers: novas);
+  return s.copyWith(layers: freshOnes);
 }
 
-/// Corta um clipe em dois no ponto pedido.
+/// Cuts a clip in two at the requested point.
 ///
-/// O que estava enquadrado continua enquadrado: a metade da direita começa na
-/// gravação exatamente onde a da esquerda parou, então a emenda é invisível até
-/// alguém mexer numa das duas.
-MontageState dividir(MontageState s, String id, double atS) {
-  final onde = s.localizar(id);
-  if (onde == null) return s;
-  final (camada, i) = onde;
-  final c = s.layers[camada].clips[i];
+/// What was framed stays framed: the right half starts in the recording
+/// exactly where the left one stopped, so the splice is invisible until
+/// someone touches one of the two.
+MontageState split(MontageState s, String id, double atS) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
 
-  final esquerda = atS - c.atS;
-  final direita = c.untilS - atS;
-  if (esquerda < kMinCutS || direita < kMinCutS) return s;
+  final leftEdge = atS - c.atS;
+  final right = c.untilS - atS;
+  if (leftEdge < kMinCutS || right < kMinCutS) return s;
 
-  final a = c.copyWith(durationS: esquerda);
+  final a = c.copyWith(durationS: leftEdge);
   final b = c.copyWith(
-    id: novoIdDeCorte(),
+    id: newCutId(),
     atS: atS,
-    durationS: direita,
-    startS: c.startS + esquerda,
+    durationS: right,
+    startS: c.startS + leftEdge,
     // the entrance belongs to the original clip; the right half carries on
     // where the other stopped, and a transition there would come out of
     // nowhere mid-scene
     clearTransition: true,
   );
-  final lista = [...s.layers[camada].clips]
+  final list = [...s.layers[layerIndex].clips]
     ..[i] = a
     ..insert(i + 1, b);
   return s
-      .comCamada(camada, s.layers[camada].copyWith(clips: lista))
-      .copyWith(selecao: {b.id});
+      .withLayer(layerIndex, s.layers[layerIndex].copyWith(clips: list))
+      .copyWith(selectionIds: {b.id});
 }
 
-/// Duplica os clipes escolhidos, pondo as cópias depois do fim da montagem.
-MontageState duplicar(MontageState s, Set<String> ids) {
-  final originais = [
+/// Duplicates the chosen clips, putting the copies after the montage's end.
+MontageState duplicate(MontageState s, Set<String> ids) {
+  final originals = [
     for (final c in s.clips)
       if (ids.contains(c.id)) c,
   ]..sort((a, b) => a.atS.compareTo(b.atS));
-  if (originais.isEmpty) return s;
-  return colar(s, originais, duracaoDoVideo(s.clips));
+  if (originals.isEmpty) return s;
+  return paste(s, originals, videoDuration(s.clips));
 }
 
-/// Põe uma cópia de [area] a partir de [atS], na camada ativa.
+/// Puts a copy of [area] from [atS] on, on the active layer.
 ///
-/// Se não couber ali, o grupo inteiro vai para depois do último clipe da
-/// camada: é mais previsível do que espalhar as cópias pelos buracos.
-MontageState colar(MontageState s, List<TimelineClip> area, double atS) {
+/// If it does not fit there, the whole group goes after the layer's last
+/// clip: that is more predictable than scattering the copies across the
+/// gaps.
+MontageState paste(MontageState s, List<TimelineClip> area, double atS) {
   if (area.isEmpty) return s;
-  final camada = s.camadaAtiva.clamp(0, s.layers.length - 1);
-  final destinoClips = s.layers[camada].clips;
+  final layerIndex = s.activeLayer.clamp(0, s.layers.length - 1);
+  final targetClips = s.layers[layerIndex].clips;
   final base = area.map((c) => c.atS).reduce(math.min);
 
-  var destino = math.max(0.0, atS);
-  final cabeAli = area.every(
-    (c) => cabe(destinoClips, destino + (c.atS - base), c.durationS),
+  var destination = math.max(0.0, atS);
+  final fitsThere = area.every(
+    (c) => fits(targetClips, destination + (c.atS - base), c.durationS),
   );
-  if (!cabeAli) destino = duracaoDoVideo(destinoClips);
+  if (!fitsThere) destination = videoDuration(targetClips);
 
-  final copias = [
+  final copies = [
     for (final c in area)
-      c.copyWith(id: novoIdDeCorte(), atS: destino + (c.atS - base)),
+      c.copyWith(id: newCutId(), atS: destination + (c.atS - base)),
   ];
   return s
-      .comCamada(
-        camada,
-        s.layers[camada].copyWith(clips: [...destinoClips, ...copias]),
+      .withLayer(
+        layerIndex,
+        s.layers[layerIndex].copyWith(clips: [...targetClips, ...copies]),
       )
-      .copyWith(selecao: {for (final c in copias) c.id});
+      .copyWith(selectionIds: {for (final c in copies) c.id});
 }
 
-// ── as camadas em si ────────────────────────────────────────────────────────
+// ── the layers themselves ───────────────────────────────────────────────────
 
-/// Acrescenta uma camada por cima de todas, e passa a trabalhar nela.
-MontageState adicionarCamada(MontageState s, {String nome = ''}) {
-  final nova = Layer(
-    name: nome.isEmpty ? 'Camada ${s.layers.length + 1}' : nome,
+/// Adds a layer on top of all others, and starts working on it.
+MontageState addLayer(MontageState s, {String displayName = ''}) {
+  final fresh = Layer(
+    name: displayName.isEmpty ? 'Layer ${s.layers.length + 1}' : displayName,
   );
   return s.copyWith(
-    layers: [...s.layers, nova],
-    camadaAtiva: s.layers.length,
-    selecao: const {},
+    layers: [...s.layers, fresh],
+    activeLayer: s.layers.length,
+    selectionIds: const {},
   );
 }
 
-/// Tira uma camada e tudo o que está nela.
+/// Removes a layer and everything on it.
 ///
-/// A última não sai: uma montagem sem camada nenhuma não teria onde receber o
-/// próximo clipe.
-MontageState removerCamada(MontageState s, int indice) {
-  if (s.layers.length <= 1 || indice < 0 || indice >= s.layers.length) return s;
-  final lista = [...s.layers]..removeAt(indice);
+/// The last one stays: a montage with no layer at all would have nowhere to
+/// receive the next clip.
+MontageState removeLayer(MontageState s, int index) {
+  if (s.layers.length <= 1 || index < 0 || index >= s.layers.length) return s;
+  final list = [...s.layers]..removeAt(index);
   return s.copyWith(
-    layers: lista,
-    camadaAtiva: s.camadaAtiva.clamp(0, lista.length - 1),
-    selecao: const {},
+    layers: list,
+    activeLayer: s.activeLayer.clamp(0, list.length - 1),
+    selectionIds: const {},
   );
 }
 
-/// Muda mudo, escondida ou travada de uma camada.
-MontageState ajustarCamada(
+/// Changes a layer's muted, hidden or locked flags.
+MontageState adjustLayer(
   MontageState s,
-  int indice, {
+  int index, {
   bool? muted,
   bool? hidden,
   bool? locked,
   String? name,
 }) {
-  if (indice < 0 || indice >= s.layers.length) return s;
-  return s.comCamada(
-    indice,
-    s.layers[indice].copyWith(
+  if (index < 0 || index >= s.layers.length) return s;
+  return s.withLayer(
+    index,
+    s.layers[index].copyWith(
       muted: muted,
       hidden: hidden,
       locked: locked,
@@ -749,181 +754,184 @@ MontageState ajustarCamada(
   );
 }
 
-/// Leva um clipe para outra camada, no mesmo instante do vídeo.
+/// Takes a clip to another layer, at the same instant of the video.
 ///
-/// Recusa quando o lugar já está ocupado lá: empurrar o clipe para outro
-/// instante seria mudar duas coisas quando se pediu uma.
-MontageState moverParaCamada(MontageState s, String id, int destino) {
-  final onde = s.localizar(id);
-  if (onde == null || destino < 0 || destino >= s.layers.length) return s;
-  final (origem, i) = onde;
-  if (origem == destino) return s;
+/// It refuses when the place is already taken there: pushing the clip to
+/// another instant would change two things when one was asked.
+MontageState moveToLayer(MontageState s, String id, int destination) {
+  final location = s.locate(id);
+  if (location == null || destination < 0 || destination >= s.layers.length) return s;
+  final (origin, i) = location;
+  if (origin == destination) return s;
 
-  // som não sobe para camada de imagem, nem imagem desce para camada de som:
-  // o servidor recusaria os dois, e recusar aqui explica melhor
-  if (s.layers[origem].isAudio != s.layers[destino].isAudio) return s;
+  // sound does not go up to a picture layer, nor a picture down to an audio
+  // layer: the server would refuse both, and refusing here explains better
+  if (s.layers[origin].isAudio != s.layers[destination].isAudio) return s;
 
-  final clip = s.layers[origem].clips[i];
-  if (!cabe(s.layers[destino].clips, clip.atS, clip.durationS)) return s;
+  final clip = s.layers[origin].clips[i];
+  if (!fits(s.layers[destination].clips, clip.atS, clip.durationS)) return s;
 
-  final lista = [...s.layers];
-  lista[origem] = lista[origem].copyWith(
-    clips: [...lista[origem].clips]..removeAt(i),
+  final list = [...s.layers];
+  list[origin] = list[origin].copyWith(
+    clips: [...list[origin].clips]..removeAt(i),
   );
-  lista[destino] = lista[destino].copyWith(
-    clips: [...lista[destino].clips, clip],
+  list[destination] = list[destination].copyWith(
+    clips: [...list[destination].clips, clip],
   );
-  return s.copyWith(layers: lista, camadaAtiva: destino);
+  return s.copyWith(layers: list, activeLayer: destination);
 }
 
-/// Abre uma camada só de som.
+/// Opens an audio-only layer.
 ///
-/// Ela não entra no empilhamento visual — não desenha nada. Serve para o que a
-/// faixa contínua nunca soube fazer: cortar a música, deixar um trecho em
-/// silêncio, trocar de faixa no meio do vídeo.
-MontageState adicionarCamadaDeMusica(MontageState s, {String nome = 'Música'}) {
-  final nova = Layer(kind: 'audio', name: nome);
+/// It does not enter the visual stacking — it draws nothing. It serves what
+/// the continuous track never could do: cut the music, leave a stretch silent,
+/// switch tracks in the middle of the video.
+MontageState addMusicLayer(MontageState s, {String displayName = 'Music'}) {
+  final fresh = Layer(kind: 'audio', name: displayName);
   return s.copyWith(
-    layers: [...s.layers, nova],
-    camadaAtiva: s.layers.length,
-    selecao: const {},
+    layers: [...s.layers, fresh],
+    activeLayer: s.layers.length,
+    selectionIds: const {},
   );
 }
 
-/// Põe um pedaço de uma música na régua.
+/// Puts a piece of a music track on the ruler.
 ///
-/// Sem duração pedida, entra o que sobra da faixa a partir de [startS] — o caso
-/// comum é querer a música inteira e aparar depois, não calcular o tamanho
-/// antes de ouvir.
-MontageState porMusica(
+/// With no duration asked, what is left of the track from [startS] goes in —
+/// the common case is wanting the whole song and trimming later, not
+/// computing the size before listening.
+MontageState putMusic(
   MontageState s,
-  Track musica, {
+  Track music, {
   required double atS,
   double? durationS,
   double startS = 0,
 }) {
-  if (!musica.isReady) return s;
+  if (!music.isReady) return s;
 
-  var destino = s.camadaAtiva;
+  var destination = s.activeLayer;
   var base = s;
-  if (destino >= s.layers.length || !s.layers[destino].isAudio) {
-    // sem camada de som escolhida, a primeira que houver; senão, uma nova
-    final existente = base.layers.indexWhere((l) => l.isAudio);
-    if (existente >= 0) {
-      destino = existente;
+  if (destination >= s.layers.length || !s.layers[destination].isAudio) {
+    // with no audio layer chosen, the first there is; otherwise, a new one
+    final existing = base.layers.indexWhere((l) => l.isAudio);
+    if (existing >= 0) {
+      destination = existing;
     } else {
-      base = adicionarCamadaDeMusica(base);
-      destino = base.layers.length - 1;
+      base = addMusicLayer(base);
+      destination = base.layers.length - 1;
     }
   }
 
-  final sobra = math.max(0.0, musica.durationS - startS);
-  var dura = durationS ?? sobra;
-  if (sobra > 0) dura = math.min(dura, sobra);
-  if (dura < kMinCutS) return s;
+  final leftover = math.max(0.0, music.durationS - startS);
+  var lasts = durationS ?? leftover;
+  if (leftover > 0) lasts = math.min(lasts, leftover);
+  if (lasts < kMinCutS) return s;
 
-  // não empurra nada: onde já há música, a nova entra depois do que está lá
-  final onde = cabe(base.layers[destino].clips, atS, dura)
+  // it pushes nothing: where there is music already, the new one goes after
+  // what is there
+  final location = fits(base.layers[destination].clips, atS, lasts)
       ? atS
-      : base.layers[destino].durationS;
+      : base.layers[destination].durationS;
 
-  final bloco = TimelineClip(
-    id: novoIdDeCorte(),
-    atS: onde,
-    durationS: dura,
+  final block = TimelineClip(
+    id: newCutId(),
+    atS: location,
+    durationS: lasts,
     startS: startS,
     source: 'media',
-    mediaId: musica.id,
+    mediaId: music.id,
   );
   return base
-      .comCamada(
-        destino,
-        base.layers[destino].copyWith(
-          clips: [...base.layers[destino].clips, bloco]
+      .withLayer(
+        destination,
+        base.layers[destination].copyWith(
+          clips: [...base.layers[destination].clips, block]
             ..sort((a, b) => a.atS.compareTo(b.atS)),
         ),
       )
-      .copyWith(selecao: {bloco.id}, camadaAtiva: destino);
+      .copyWith(selectionIds: {block.id}, activeLayer: destination);
 }
 
-// ─────────────────────────────── histórico ──────────────────────────────────
+// ──────────────────────────────── history ───────────────────────────────────
 
-/// A pilha do desfazer, com agrupamento por gesto.
+/// The undo stack, with grouping by gesture.
 ///
-/// Um arrasto produz um estado novo por quadro. Empilhar todos faria "desfazer"
-/// andar um pixel de cada vez — inútil. Por isso um gesto é aberto no começo do
-/// arrasto e fechado ao soltar: enquanto ele está aberto, o topo da pilha é
-/// substituído em vez de crescer, e o passo que fica é o arrasto inteiro.
+/// A drag produces a new state per frame. Pushing all of them would make
+/// "undo" go back one pixel at a time — useless. That is why a gesture is
+/// opened at the start of the drag and closed on release: while it is open,
+/// the top of the stack is replaced instead of growing, and the step that
+/// remains is the whole drag.
 class MontageHistory {
-  MontageHistory(this._atual);
+  MontageHistory(this._current);
 
-  MontageState _atual;
-  final List<MontageState> _passado = [];
-  final List<MontageState> _futuro = [];
+  MontageState _current;
+  final List<MontageState> _past = [];
+  final List<MontageState> _future = [];
 
-  /// Teto de passos guardados. Cada estado é uma lista de blocos — barato —,
-  /// mas uma sessão longa não precisa de memória infinita.
-  static const int maxPassos = 200;
+  /// Ceiling of stored steps. Each state is a list of blocks — cheap — but a
+  /// long session does not need infinite memory.
+  static const int maxSteps = 200;
 
-  bool _emGesto = false;
-  bool _mudouNoGesto = false;
+  bool _inGesture = false;
+  bool _changedInGesture = false;
 
-  MontageState get atual => _atual;
-  bool get podeDesfazer => _passado.isNotEmpty;
-  bool get podeRefazer => _futuro.isNotEmpty;
+  MontageState get present => _current;
+  bool get canUndo => _past.isNotEmpty;
+  bool get canRedo => _future.isNotEmpty;
 
-  /// Troca o estado, guardando o anterior.
-  void aplicar(MontageState novo) {
-    if (identical(novo, _atual)) return;
-    if (_emGesto && _mudouNoGesto) {
-      // o gesto já empilhou o "antes"; daqui em diante só o topo se atualiza
-      _atual = novo;
+  /// Swaps the state, keeping the previous one.
+  void apply(MontageState updated) {
+    if (identical(updated, _current)) return;
+    if (_inGesture && _changedInGesture) {
+      // the gesture already pushed the "before"; from here on only the top
+      // is updated
+      _current = updated;
       return;
     }
-    _passado.add(_atual);
-    if (_passado.length > maxPassos) _passado.removeAt(0);
-    _futuro.clear();
-    _atual = novo;
-    if (_emGesto) _mudouNoGesto = true;
+    _past.add(_current);
+    if (_past.length > maxSteps) _past.removeAt(0);
+    _future.clear();
+    _current = updated;
+    if (_inGesture) _changedInGesture = true;
   }
 
-  /// Troca o estado **sem** criar um passo — para o que não é edição
-  /// (selecionar, por exemplo, que desfazer não deveria reverter).
-  void substituir(MontageState novo) => _atual = novo;
+  /// Swaps the state **without** creating a step — for what is not an edit
+  /// (selecting, for instance, which undo should not revert).
+  void replace(MontageState updated) => _current = updated;
 
-  /// Joga a memória fora, ficando com o estado que se passar.
+  /// Throws the memory away, keeping the current state.
   ///
-  /// Usado ao trocar de montagem: o histórico é a memória de uma sessão de
-  /// trabalho **numa** montagem, e desfazer para dentro de outra apagaria o
-  /// que se acabou de abrir.
-  void limpar() {
-    _passado.clear();
-    _futuro.clear();
-    _emGesto = false;
-    _mudouNoGesto = false;
+  /// Used when switching montages: the history is the memory of a working
+  /// session **on one** montage, and undoing into another would erase what was
+  /// just opened.
+  void reset() {
+    _past.clear();
+    _future.clear();
+    _inGesture = false;
+    _changedInGesture = false;
   }
 
-  void abrirGesto() {
-    _emGesto = true;
-    _mudouNoGesto = false;
+  void startGesture() {
+    _inGesture = true;
+    _changedInGesture = false;
   }
 
-  void fecharGesto() {
-    _emGesto = false;
-    _mudouNoGesto = false;
+  void endGesture() {
+    _inGesture = false;
+    _changedInGesture = false;
   }
 
-  MontageState desfazer() {
-    if (_passado.isEmpty) return _atual;
-    _futuro.add(_atual);
-    _atual = _passado.removeLast();
-    return _atual;
+  MontageState undo() {
+    if (_past.isEmpty) return _current;
+    _future.add(_current);
+    _current = _past.removeLast();
+    return _current;
   }
 
-  MontageState refazer() {
-    if (_futuro.isEmpty) return _atual;
-    _passado.add(_atual);
-    _atual = _futuro.removeLast();
-    return _atual;
+  MontageState redo() {
+    if (_future.isEmpty) return _current;
+    _past.add(_current);
+    _current = _future.removeLast();
+    return _current;
   }
 }

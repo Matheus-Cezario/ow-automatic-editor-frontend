@@ -9,22 +9,23 @@ import '../api.dart';
 import '../montage.dart';
 import 'highlight_style.dart';
 
-/// O monitor da montagem: mostra o que o vídeo vai ser, antes de pedi-lo.
+/// The montage's monitor: shows what the video will be, before asking for it.
 ///
-/// Não renderiza nada. Abre a **gravação original** e busca dentro dela o
-/// instante que corresponde à cabeça de leitura — se ela está sobre um bloco
-/// que começa aos 3 min da partida, é aos 3 min que a gravação é posicionada.
-/// Onde não há bloco, tela preta: o mesmo que o servidor vai gerar ali.
+/// It renders nothing. It opens the **original recording** and seeks inside it
+/// to the instant that corresponds to the playhead — if it is over a block
+/// that starts at minute 3 of the match, it is at minute 3 that the recording
+/// is positioned. Where there is no block, a black screen: the same the server
+/// will render there.
 ///
-/// Renderizar de verdade a cada ajuste custaria uma volta inteira pelo ffmpeg
-/// por arrasto. Buscar dentro do arquivo que já existe é instantâneo, e é o que
-/// qualquer editor faz enquanto você edita.
+/// Really rendering on every adjustment would cost a full trip through ffmpeg
+/// per drag. Seeking inside the file that already exists is instant, and it is
+/// what any editor does while you edit.
 ///
-/// > O que este preview **não** garante é sincronia de quadro com a música
-/// > durante a reprodução: são dois elementos de mídia independentes, e a
-/// > emenda entre blocos é feita por busca. Dentro de um bloco a imagem corre
-/// > sozinha, e um blocozinho de 1 s pode terminar alguns quadros adiantado. O
-/// > corte exato é o do arquivo final, que o servidor monta com ffmpeg.
+/// > What this preview does **not** guarantee is frame sync with the music
+/// > during playback: they are two independent media elements, and the splice
+/// > between blocks is done by seeking. Within a block the picture runs on its
+/// > own, and a 1 s block may end a few frames early. The exact cut is the
+/// > final file's, which the server assembles with ffmpeg.
 class PreviewPlayer extends StatefulWidget {
   const PreviewPlayer({
     super.key,
@@ -32,11 +33,11 @@ class PreviewPlayer extends StatefulWidget {
     required this.cuts,
     required this.atS,
     required this.playing,
-    this.textos = const [],
-    this.selecao = const {},
-    this.onSelecionarTexto,
-    this.onMoverTexto,
-    this.onArrastando,
+    this.texts = const [],
+    this.selectionIds = const {},
+    this.onSelectText,
+    this.onMoveText,
+    this.onDragging,
     this.editingId,
     this.onEditing,
     this.onTextChanged,
@@ -47,23 +48,23 @@ class PreviewPlayer extends StatefulWidget {
   final String videoUrl;
   final List<TimelineClip> cuts;
 
-  /// Onde a cabeça de leitura está, em tempo de **vídeo montado**.
+  /// Where the playhead is, in **assembled video** time.
   final double atS;
   final bool playing;
 
-  /// Os clipes de texto da montagem. O monitor os desenha por cima da imagem,
-  /// no lugar e no tamanho em que o servidor vai desenhá-los — é a única forma
-  /// de decidir onde uma frase fica sem gerar o vídeo para ver.
-  final List<TimelineClip> textos;
+  /// The montage's text clips. The monitor draws them over the picture, at the
+  /// place and size the server will draw them — it is the only way to decide
+  /// where a line goes without rendering the video to see.
+  final List<TimelineClip> texts;
 
-  /// Quem está selecionado, para a frase escolhida se destacar.
-  final Set<String> selecao;
+  /// Who is selected, so the chosen line stands out.
+  final Set<String> selectionIds;
 
-  final ValueChanged<String>? onSelecionarTexto;
+  final ValueChanged<String>? onSelectText;
 
-  /// (id, x, y) — a posição nova, em fração da metade do quadro, como o
-  /// servidor a entende.
-  final void Function(String id, double x, double y)? onMoverTexto;
+  /// (id, x, y) — the new position, as a fraction of half the frame, as the
+  /// server understands it.
+  final void Function(String id, double x, double y)? onMoveText;
 
   /// The text being typed right there on the frame; `null` if none.
   final String? editingId;
@@ -79,9 +80,9 @@ class PreviewPlayer extends StatefulWidget {
   final VoidCallback? onGestureStart;
   final VoidCallback? onGestureEnd;
 
-  /// Texto para a tela mostrar enquanto o dedo arrasta a frase; `null` ao
-  /// soltar. Serve ao mesmo propósito do rótulo de arrasto da régua.
-  final ValueChanged<String?>? onArrastando;
+  /// Text for the screen to show while the finger drags the line; `null` on
+  /// release. It serves the same purpose as the ruler's drag label.
+  final ValueChanged<String?>? onDragging;
 
   @override
   State<PreviewPlayer> createState() => _PreviewPlayerState();
@@ -89,154 +90,155 @@ class PreviewPlayer extends StatefulWidget {
 
 class _PreviewPlayerState extends State<PreviewPlayer> {
   VideoPlayerController? _c;
-  String? _erro;
-  bool _reabrindo = false;
+  String? _error;
+  bool _reopening = false;
 
-  /// Quantas vezes o player já morreu e foi trazido de volta sozinho.
+  /// How many times the player has died and been brought back by itself.
   ///
-  /// Uma gravação de meio giga entregue por `Range`, com dezenas de buscas por
-  /// segundo enquanto se arrasta, às vezes derruba o elemento de vídeo do
-  /// navegador. Antes disto ele ficava preto até a página ser recarregada — e
-  /// recarregar custava a montagem inteira.
-  int _quedas = 0;
-  static const _maxQuedas = 4;
+  /// A half-gigabyte recording delivered via `Range`, with dozens of seeks per
+  /// second while dragging, sometimes brings the browser's video element down.
+  /// Before this it stayed black until the page was reloaded — and reloading
+  /// cost the whole montage.
+  int _crashes = 0;
+  static const _maxCrashes = 4;
 
-  /// Uma busca por vez. `didUpdateWidget` dispara a cada quadro do arrasto, e
-  /// buscas sobrepostas são justamente o que faz o elemento engasgar.
-  bool _ocupado = false;
+  /// One seek at a time. `didUpdateWidget` fires on every frame of a drag, and
+  /// overlapping seeks are exactly what makes the element choke.
+  bool _busy = false;
 
-  DateTime _ultimaBusca = DateTime.fromMillisecondsSinceEpoch(0);
-  int? _blocoAtual;
+  DateTime _lastSeek = DateTime.fromMillisecondsSinceEpoch(0);
+  int? _currentBlock;
 
   @override
   void initState() {
     super.initState();
-    _abrir();
+    _open();
   }
 
   @override
   void dispose() {
-    _c?.removeListener(_vigiar);
+    _c?.removeListener(_watch);
     _c?.dispose();
     super.dispose();
   }
 
-  Future<void> _abrir({Duration? retomarEm}) async {
+  Future<void> _open({Duration? resumeAt}) async {
     final c = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
     try {
       await c.initialize();
-      await c.setVolume(0); // quem manda no som é a música da montagem
-      if (retomarEm != null) await c.seekTo(retomarEm);
+      await c.setVolume(0); // the montage's music rules the sound
+      if (resumeAt != null) await c.seekTo(resumeAt);
     } catch (e) {
       await c.dispose();
-      if (mounted) setState(() => _erro = '$e');
+      if (mounted) setState(() => _error = '$e');
       return;
     }
     if (!mounted) {
       await c.dispose();
       return;
     }
-    c.addListener(_vigiar);
+    c.addListener(_watch);
     setState(() {
       _c = c;
-      _erro = null;
-      _reabrindo = false;
+      _error = null;
+      _reopening = false;
     });
-    _acompanhar(forcar: true);
+    _follow(force: true);
   }
 
-  /// Percebe o player morrer e o traz de volta no mesmo ponto.
-  void _vigiar() {
+  /// Notices the player dying and brings it back at the same point.
+  void _watch() {
     final c = _c;
-    if (c == null || _reabrindo || !c.value.hasError) return;
-    _reabrindo = true;
-    final onde = c.value.position;
-    _quedas++;
-    if (_quedas > _maxQuedas) {
+    if (c == null || _reopening || !c.value.hasError) return;
+    _reopening = true;
+    final location = c.value.position;
+    _crashes++;
+    if (_crashes > _maxCrashes) {
       setState(() {
-        _erro = 'o player parou de responder; toque para tentar de novo';
-        _reabrindo = false;
+        _error = 'the player stopped responding; tap to try again';
+        _reopening = false;
       });
       return;
     }
-    unawaited(_ressuscitar(onde));
+    unawaited(_revive(location));
   }
 
-  Future<void> _ressuscitar(Duration onde) async {
-    final morto = _c;
+  Future<void> _revive(Duration location) async {
+    final dead = _c;
     setState(() => _c = null);
-    morto?.removeListener(_vigiar);
-    await morto?.dispose();
+    dead?.removeListener(_watch);
+    await dead?.dispose();
     if (!mounted) return;
-    await _abrir(retomarEm: onde);
+    await _open(resumeAt: location);
   }
 
-  Future<void> _tentarDeNovo() async {
-    _quedas = 0;
+  Future<void> _retry() async {
+    _crashes = 0;
     setState(() {
-      _erro = null;
-      _reabrindo = true;
+      _error = null;
+      _reopening = true;
     });
-    await _ressuscitar(Duration.zero);
+    await _revive(Duration.zero);
   }
 
   @override
   void didUpdateWidget(PreviewPlayer old) {
     super.didUpdateWidget(old);
     if (old.videoUrl != widget.videoUrl) {
-      _quedas = 0;
-      unawaited(_ressuscitar(Duration.zero));
+      _crashes = 0;
+      unawaited(_revive(Duration.zero));
       return;
     }
-    _acompanhar(forcar: widget.playing != old.playing);
+    _follow(force: widget.playing != old.playing);
   }
 
-  /// Põe a gravação no instante que a cabeça de leitura pede.
-  Future<void> _acompanhar({bool forcar = false}) async {
+  /// Puts the recording at the instant the playhead asks for.
+  Future<void> _follow({bool force = false}) async {
     final c = _c;
     if (c == null || !c.value.isInitialized || c.value.hasError) return;
-    if (_ocupado) return;
+    if (_busy) return;
 
-    final origem = origemEm(widget.cuts, widget.atS);
-    final bloco = blocoEm(widget.cuts, widget.atS);
+    final origin = sourceAt(widget.cuts, widget.atS);
+    final block = blockAt(widget.cuts, widget.atS);
 
-    // buraco (ou depois do fim): nada a mostrar, e nada a tocar
-    if (origem == null) {
-      _blocoAtual = null;
+    // a gap (or past the end): nothing to show, and nothing to play
+    if (origin == null) {
+      _currentBlock = null;
       if (c.value.isPlaying) {
-        _ocupado = true;
+        _busy = true;
         try {
           await c.pause();
         } finally {
-          _ocupado = false;
+          _busy = false;
         }
       }
       if (mounted) setState(() {});
       return;
     }
 
-    // pedir um instante além do fim do arquivo é o tipo de coisa que derruba o
-    // elemento de vídeo, e um corte pode ter sido esticado até lá
-    final limite = c.value.duration.inMilliseconds / 1000.0;
-    final alvo = limite > 0 ? origem.clamp(0.0, limite - 0.05) : origem;
+    // asking for an instant past the end of the file is the kind of thing that
+    // brings the video element down, and a cut may have been stretched there
+    final limit = c.value.duration.inMilliseconds / 1000.0;
+    final target = limit > 0 ? origin.clamp(0.0, limit - 0.05) : origin;
 
-    final trocouDeBloco = bloco != _blocoAtual;
-    _blocoAtual = bloco;
+    final changedBlock = block != _currentBlock;
+    _currentBlock = block;
 
-    // Tocando, a imagem corre sozinha dentro do bloco; só se busca ao entrar
-    // num bloco novo ou quando ela se afasta demais do que devia mostrar.
-    final agora = c.value.position.inMilliseconds / 1000.0;
-    final desviou = (agora - alvo).abs() > 0.34;
-    final recente =
-        DateTime.now().difference(_ultimaBusca) <
+    // While playing, the picture runs by itself inside the block; it only seeks
+    // when entering a new block or when it drifts too far from what it should
+    // show.
+    final nowS = c.value.position.inMilliseconds / 1000.0;
+    final drifted = (nowS - target).abs() > 0.34;
+    final recent =
+        DateTime.now().difference(_lastSeek) <
         const Duration(milliseconds: 120);
 
-    _ocupado = true;
+    _busy = true;
     try {
-      if (forcar || trocouDeBloco || desviou) {
-        if (!(recente && !forcar && !trocouDeBloco)) {
-          _ultimaBusca = DateTime.now();
-          await c.seekTo(Duration(milliseconds: (alvo * 1000).round()));
+      if (force || changedBlock || drifted) {
+        if (!(recent && !force && !changedBlock)) {
+          _lastSeek = DateTime.now();
+          await c.seekTo(Duration(milliseconds: (target * 1000).round()));
         }
       }
       if (widget.playing && !c.value.isPlaying) {
@@ -245,10 +247,10 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
         await c.pause();
       }
     } catch (_) {
-      // uma busca que falha não pode derrubar a tela: o vigia cuida de
-      // reabrir o player se ele tiver morrido de verdade
+      // a failing seek must not bring the screen down: the watcher takes care
+      // of reopening the player if it really died
     } finally {
-      _ocupado = false;
+      _busy = false;
     }
     if (mounted) setState(() {});
   }
@@ -298,20 +300,20 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final c = _c;
-    final naTelaPreta = origemEm(widget.cuts, widget.atS) == null;
-    final vivo = c != null && c.value.isInitialized && !c.value.hasError;
+    final onBlack = sourceAt(widget.cuts, widget.atS) == null;
+    final alive = c != null && c.value.isInitialized && !c.value.hasError;
 
     return AspectRatio(
-      aspectRatio: vivo ? c.value.aspectRatio : 16 / 9,
+      aspectRatio: alive ? c.value.aspectRatio : 16 / 9,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // No buraco o quadro anterior não pode ficar à mostra: ali o vídeo
-            // vai ser preto de verdade, e mostrar a imagem velha mentiria sobre
-            // o que vai sair.
-            if (vivo && !naTelaPreta) _withTransition(VideoPlayer(c)),
+            // In a gap the previous frame must not stay on show: the video will
+            // really be black there, and showing the old picture would lie
+            // about what will come out.
+            if (alive && !onBlack) _withTransition(VideoPlayer(c)),
             if (_veil() case final veil?)
               IgnorePointer(
                 child: ColoredBox(
@@ -346,10 +348,10 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                 ),
               ),
 
-            // O aviso de tela preta não pega toque: ele fica no meio do
-            // quadro, que é justamente onde o texto costuma estar, e um aviso
-            // roubando o arrasto da frase seria o pior lugar possível.
-            if (naTelaPreta && _erro == null)
+            // The black-screen notice takes no taps: it sits in the middle of
+            // the frame, which is exactly where text usually is, and a notice
+            // stealing the line's drag would be the worst place possible.
+            if (onBlack && _error == null)
               IgnorePointer(
                 child: Center(
                   child: Column(
@@ -362,8 +364,8 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                       const SizedBox(height: 6),
                       Text(
                         widget.cuts.isEmpty
-                            ? 'sem cortes ainda'
-                            : 'tela preta — só a música aqui',
+                            ? 'no cuts yet'
+                            : 'black screen — only the music here',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.hintColor,
                         ),
@@ -373,22 +375,23 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                 ),
               ),
 
-            // ── o texto, por cima da imagem ──────────────────────────────
+            // ── the text, over the picture ──────────────────────────────
             //
-            // Desenhado com a mesma conta do servidor: o corpo é fração da
-            // altura do quadro e a posição é deslocamento do centro pela
-            // metade dele. O que se vê aqui é o que vai sair.
-            for (final t in widget.textos)
+            // Drawn with the same computation as the server: the size is a
+            // fraction of the frame's height and the position is an offset
+            // from the centre by half of it. What is seen here is what will
+            // come out.
+            for (final t in widget.texts)
               if (widget.atS >= t.atS - 1e-6 && widget.atS < t.untilS - 1e-6)
-                _TextoNoQuadro(
-                  key: ValueKey('texto-no-quadro-${t.id}'),
+                _TextOnFrame(
+                  key: ValueKey('text-on-frame-${t.id}'),
                   clip: t,
-                  escolhido: widget.selecao.contains(t.id),
-                  onEscolher: () => widget.onSelecionarTexto?.call(t.id),
-                  onMover: widget.onMoverTexto == null
+                  pickedOne: widget.selectionIds.contains(t.id),
+                  onChoose: () => widget.onSelectText?.call(t.id),
+                  onMove: widget.onMoveText == null
                       ? null
-                      : (x, y) => widget.onMoverTexto!(t.id, x, y),
-                  onArrastando: widget.onArrastando,
+                      : (x, y) => widget.onMoveText!(t.id, x, y),
+                  onDragging: widget.onDragging,
                   editing: widget.editingId == t.id,
                   onEditing: widget.onEditing == null
                       ? null
@@ -400,7 +403,7 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                   onGestureEnd: widget.onGestureEnd,
                 ),
 
-            if (_erro != null)
+            if (_error != null)
               Center(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -408,26 +411,26 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        _erro!,
+                        _error!,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.error,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      // a montagem não se perde por causa do player: dá para
-                      // continuar editando pela onda e pelas batidas
+                      // the montage is not lost because of the player: editing
+                      // can go on through the waveform and the beats
                       TextButton.icon(
-                        onPressed: _tentarDeNovo,
+                        onPressed: _retry,
                         icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text('Tentar de novo'),
+                        label: const Text('Try again'),
                       ),
                     ],
                   ),
                 ),
               )
-            else if (c == null || _reabrindo)
-              // idem: enquanto o vídeo abre, o texto continua arrastável
+            else if (c == null || _reopening)
+              // likewise: while the video opens, the text is still draggable
               const IgnorePointer(
                 child: Center(
                   child: SizedBox(
@@ -444,21 +447,21 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
   }
 }
 
-/// Uma frase desenhada sobre o monitor, e arrastável.
+/// A line of text drawn over the monitor, and draggable.
 ///
-/// Arrastar aqui é o jeito natural de dizer onde o texto fica: a alternativa
-/// era digitar dois números e gerar o vídeo para conferir.
+/// Dragging here is the natural way to say where the text goes: the
+/// alternative was typing two numbers and rendering the video to check.
 ///
 /// It is also where text is typed: tapping the already selected text opens
 /// editing on the frame itself, at the size and colour it will come out in.
-class _TextoNoQuadro extends StatefulWidget {
-  const _TextoNoQuadro({
+class _TextOnFrame extends StatefulWidget {
+  const _TextOnFrame({
     super.key,
     required this.clip,
-    required this.escolhido,
-    required this.onEscolher,
-    required this.onMover,
-    required this.onArrastando,
+    required this.pickedOne,
+    required this.onChoose,
+    required this.onMove,
+    required this.onDragging,
     this.editing = false,
     this.onEditing,
     this.onTextChanged,
@@ -467,10 +470,10 @@ class _TextoNoQuadro extends StatefulWidget {
   });
 
   final TimelineClip clip;
-  final bool escolhido;
-  final VoidCallback onEscolher;
-  final void Function(double x, double y)? onMover;
-  final ValueChanged<String?>? onArrastando;
+  final bool pickedOne;
+  final VoidCallback onChoose;
+  final void Function(double x, double y)? onMove;
+  final ValueChanged<String?>? onDragging;
   final bool editing;
   final ValueChanged<bool>? onEditing;
   final ValueChanged<String>? onTextChanged;
@@ -478,18 +481,18 @@ class _TextoNoQuadro extends StatefulWidget {
   final VoidCallback? onGestureEnd;
 
   @override
-  State<_TextoNoQuadro> createState() => _TextoNoQuadroState();
+  State<_TextOnFrame> createState() => _TextOnFrameState();
 }
 
-class _TextoNoQuadroState extends State<_TextoNoQuadro> {
-  /// Quanto o dedo já andou neste gesto, e de onde a frase partiu.
+class _TextOnFrameState extends State<_TextOnFrame> {
+  /// How far the finger has moved in this gesture, and where the line started.
   ///
-  /// O deslocamento é somado aqui, e não lido da posição do ponteiro: o
-  /// primeiro `onPanUpdate` chega com a posição do instante em que o gesto foi
-  /// aceito — a mesma do `onPanStart` —, então medir "posição menos origem"
-  /// dava zero, e um arrasto de um salto só (o de um teste, ou o de um dedo
-  /// rápido) não movia nada.
-  Offset _andou = Offset.zero;
+  /// The offset is accumulated here, not read from the pointer position: the
+  /// first `onPanUpdate` arrives with the position of the instant the gesture
+  /// was accepted — the same as `onPanStart` — so measuring "position minus
+  /// origin" gave zero, and a single-jump drag (a test's, or a fast finger's)
+  /// moved nothing.
+  Offset _moved = Offset.zero;
   double _x0 = 0;
   double _y0 = 0;
 
@@ -517,7 +520,7 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
   }
 
   @override
-  void didUpdateWidget(_TextoNoQuadro old) {
+  void didUpdateWidget(_TextOnFrame old) {
     super.didUpdateWidget(old);
     if (widget.editing && !old.editing) _opened();
     // undo, or another screen, changed the text from outside: the field follows
@@ -562,72 +565,72 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
 
   @override
   Widget build(BuildContext context) {
-    final estilo = widget.clip.textStyle;
+    final styleSpec = widget.clip.textStyle;
     final t = widget.clip.transform;
 
     return LayoutBuilder(
-      builder: (context, caixa) {
-        final corpo = estilo.size * caixa.maxHeight;
-        final contorno = estilo.outline * corpo;
-        final cor = _cores[estilo.color] ?? Colors.white;
-        final corDoContorno = _cores[estilo.outlineColor] ?? Colors.black;
+      builder: (context, box) {
+        final body = styleSpec.size * box.maxHeight;
+        final outlineSize = styleSpec.outline * body;
+        final fillColour = _colours[styleSpec.color] ?? Colors.white;
+        final outlineColour = _colours[styleSpec.outlineColor] ?? Colors.black;
 
         return Align(
-          // é a mesma conta do `drawtext`: o centro da frase cai a `x` metades
-          // de quadro do centro da tela
+          // it is the same computation as `drawtext`: the line's centre lands
+          // `x` half-frames from the centre of the screen
           alignment: Alignment(t.x, t.y),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            // `down`, e não `start`: com o padrão, o deslocamento gasto para
-            // vencer o slop é descartado e um arrasto entregue de uma vez só
-            // (dedo rápido, ou um teste) não produz update nenhum — a frase
-            // não saía do lugar
+            // `down`, not `start`: with the default, the offset spent beating
+            // the slop is discarded and a drag delivered all at once (a fast
+            // finger, or a test) produces no update at all — the line did not
+            // move
             dragStartBehavior: DragStartBehavior.down,
             onTap: widget.editing
                 ? null
-                : widget.escolhido && widget.onEditing != null
+                : widget.pickedOne && widget.onEditing != null
                 ? () => widget.onEditing!(true)
-                : widget.onEscolher,
-            onPanStart: widget.onMover == null || widget.editing
+                : widget.onChoose,
+            onPanStart: widget.onMove == null || widget.editing
                 ? null
                 : (_) {
-                    widget.onEscolher();
+                    widget.onChoose();
                     widget.onGestureStart?.call();
-                    _andou = Offset.zero;
+                    _moved = Offset.zero;
                     _x0 = t.x;
                     _y0 = t.y;
                   },
-            onPanUpdate: widget.onMover == null || widget.editing
+            onPanUpdate: widget.onMove == null || widget.editing
                 ? null
                 : (d) {
-                    _andou += d.delta;
-                    final x = (_x0 + _andou.dx / (caixa.maxWidth / 2)).clamp(
+                    _moved += d.delta;
+                    final x = (_x0 + _moved.dx / (box.maxWidth / 2)).clamp(
                       -1.0,
                       1.0,
                     );
-                    final y = (_y0 + _andou.dy / (caixa.maxHeight / 2)).clamp(
+                    final y = (_y0 + _moved.dy / (box.maxHeight / 2)).clamp(
                       -1.0,
                       1.0,
                     );
-                    widget.onArrastando?.call(
-                      'texto em ${(x * 100).round()}%, ${(y * 100).round()}% '
-                      'do centro',
+                    widget.onDragging?.call(
+                      'text at ${(x * 100).round()}%, ${(y * 100).round()}% '
+                      'from the centre',
                     );
-                    widget.onMover!(x, y);
+                    widget.onMove!(x, y);
                   },
-            onPanEnd: widget.onMover == null || widget.editing
+            onPanEnd: widget.onMove == null || widget.editing
                 ? null
                 : (_) {
-                    _andou = Offset.zero;
-                    widget.onArrastando?.call(null);
+                    _moved = Offset.zero;
+                    widget.onDragging?.call(null);
                     widget.onGestureEnd?.call();
                   },
             child: Container(
-              // a chave fica na frase, e não na área do quadro: é nela que se
-              // toca, e é dela que o arrasto parte
-              key: ValueKey('frase-${widget.clip.id}'),
+              // the key is on the line, not on the frame's area: it is what is
+              // tapped, and it is where the drag starts
+              key: ValueKey('frame-text-${widget.clip.id}'),
               padding: const EdgeInsets.all(4),
-              decoration: widget.escolhido
+              decoration: widget.pickedOne
                   ? BoxDecoration(
                       border: Border.all(
                         color: Theme.of(context).colorScheme.primary,
@@ -642,7 +645,7 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                         controller: _controller,
                         focusNode: _focusNode,
                         textAlign: TextAlign.center,
-                        cursorColor: cor,
+                        cursorColor: fillColour,
                         onChanged: widget.onTextChanged,
                         onSubmitted: (_) => _finish(),
                         onTapOutside: (_) => _finish(),
@@ -650,14 +653,14 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                           hintText: '',
                         ),
                         style: TextStyle(
-                          fontSize: corpo,
+                          fontSize: body,
                           fontWeight: FontWeight.bold,
                           height: 1.1,
-                          color: cor,
+                          color: fillColour,
                           // the real outline is a second text underneath, and a
                           // field cannot draw two; the shadow imitates it well
                           // enough to read what is being typed
-                          shadows: contorno > 0
+                          shadows: outlineSize > 0
                               ? [
                                   for (final d in const [
                                     Offset(1, 1),
@@ -666,8 +669,8 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                                     Offset(-1, -1),
                                   ])
                                     Shadow(
-                                      color: corDoContorno,
-                                      offset: d * (contorno / 2),
+                                      color: outlineColour,
+                                      offset: d * (outlineSize / 2),
                                     ),
                                 ]
                               : null,
@@ -676,30 +679,31 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                     )
                   : Stack(
                       children: [
-                        // o contorno é o que faz texto branco sobreviver a cena
-                        // clara; sem ele o preview mentiria sobre a legibilidade
-                        if (contorno > 0)
+                        // the outline is what makes white text survive a bright
+                        // scene; without it the preview would lie about
+                        // legibility
+                        if (outlineSize > 0)
                           Text(
                             widget.clip.text,
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              fontSize: corpo,
+                              fontSize: body,
                               fontWeight: FontWeight.bold,
                               height: 1.1,
                               foreground: Paint()
                                 ..style = PaintingStyle.stroke
-                                ..strokeWidth = contorno
-                                ..color = corDoContorno,
+                                ..strokeWidth = outlineSize
+                                ..color = outlineColour,
                             ),
                           ),
                         Text(
                           widget.clip.text,
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            fontSize: corpo,
+                            fontSize: body,
                             fontWeight: FontWeight.bold,
                             height: 1.1,
-                            color: cor,
+                            color: fillColour,
                           ),
                         ),
                       ],
@@ -711,8 +715,8 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
     );
   }
 
-  /// As mesmas cores que o servidor aceita, do lado do app.
-  static const _cores = <String, Color>{
+  /// The same colours the server accepts, on the app's side.
+  static const _colours = <String, Color>{
     'white': Colors.white,
     'yellow': Color(0xFFFFEB3B),
     'orange': Color(0xFFFF9800),

@@ -7,33 +7,33 @@ import 'package:http/http.dart' as http;
 
 import 'upload.dart';
 
-/// Base da API. Quando o app Flutter é servido pelo próprio gateway, fica
-/// vazia e as chamadas viram relativas — assim funciona em qualquer host sem
-/// recompilar. Em desenvolvimento o app roda numa porta e a API em outra.
+/// API base. When the Flutter app is served by the gateway itself it is
+/// empty and calls become relative — so it works on any host without a
+/// rebuild. In development the app runs on one port and the API on another.
 const String kApiBase = String.fromEnvironment(
   'API_BASE',
   defaultValue: 'http://localhost:8000',
 );
 
-/// Transforma o caminho devolvido pela API numa URL absoluta.
+/// Turns a path returned by the API into an absolute URL.
 ///
-/// Em produção o app é compilado com [kApiBase] vazio para chamar a API em
-/// caminho relativo — o que funciona para `fetch` e para a tag `<video>`, que o
-/// navegador resolve sozinho. Mas quem abre um download precisa de URL
-/// absoluta: `Uri.parse('/api/...')` não tem esquema nem host, e o
-/// `url_launcher` recusa. `Uri.base` é o endereço da página, então resolver
-/// contra ele dá a URL completa em qualquer host.
+/// In production the app is built with an empty [kApiBase] so it calls the
+/// API on a relative path — which works for `fetch` and for the `<video>` tag,
+/// which the browser resolves on its own. But opening a download needs an
+/// absolute URL: `Uri.parse('/api/...')` has no scheme and no host, and
+/// `url_launcher` refuses it. `Uri.base` is the page address, so resolving
+/// against it gives the full URL on any host.
 String absoluteUrl(String pathOrUrl) {
   final uri = Uri.parse(pathOrUrl);
   if (uri.hasScheme) return pathOrUrl;
   return Uri.base.resolve(pathOrUrl).toString();
 }
 
-/// A miniatura de um instante da partida.
+/// The thumbnail of an instant of the match.
 ///
-/// O `.toStringAsFixed(2)` não é cosmético: a chave do arquivo no servidor sai
-/// do instante arredondado em centésimos, então pedir com outra precisão é
-/// pedir um arquivo que não existe.
+/// The `.toStringAsFixed(2)` is not cosmetic: the file key on the server comes
+/// from the instant rounded to hundredths, so asking with another precision is
+/// asking for a file that does not exist.
 String frameUrl(String jobId, double t) =>
     absoluteUrl('$kApiBase/api/jobs/$jobId/frame?t=${t.toStringAsFixed(2)}');
 
@@ -46,19 +46,19 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-// ─────────────────────────────── modelos ────────────────────────────────────
+// ─────────────────────────────── models ──────────────────────────────────────
 
-/// Parâmetros da **análise**: como ler a partida.
+/// **Analysis** parameters: how to read the match.
 ///
-/// Valem para a partida inteira e são decididos no upload. Já foram muitos
-/// mais — quantas eliminações faziam uma rajada, quantas faziam um "sozinho
-/// contra todos" — porque a análise terminava propondo vídeos prontos. Ela não
-/// propõe mais: entrega os momentos, e agrupá-los é trabalho de quem edita.
+/// They apply to the whole match and are decided at upload. There used to be
+/// many more — how many kills made a streak, how many made a "one against
+/// all" — because the analysis ended by proposing finished videos. It no
+/// longer does: it delivers the moments, and grouping them is the editor's job.
 class JobParams {
   const JobParams({this.ultNegateWindowS = 6});
 
-  /// Uma ultimate inimiga seguida de eliminação dentro desta janela conta
-  /// como ultimate anulada — a única leitura que precisa de dois detectores.
+  /// An enemy ultimate followed by a kill within this window counts as a
+  /// negated ultimate — the only reading that needs two detectors.
   final double ultNegateWindowS;
 
   Map<String, dynamic> toJson() => {'ult_negate_window_s': ultNegateWindowS};
@@ -67,12 +67,12 @@ class JobParams {
       JobParams(ultNegateWindowS: ultNegateWindowS ?? this.ultNegateWindowS);
 }
 
-/// Uma música enviada para a partida, já ouvida pelo sistema.
+/// A song uploaded for the match, already listened to by the system.
 ///
-/// Ela sobe **antes** de existir vídeo nenhum: é ouvindo a música, com as
-/// batidas e a forma de onda desenhadas, que o usuário decide onde cada corte
-/// cai. Por isso ela é da partida, e não de um pedido — a mesma trilha serve a
-/// quantas montagens ele quiser.
+/// It goes up **before** any video exists: it is by listening to the song,
+/// with the beats and the waveform drawn, that the user decides where each cut
+/// lands. That is why it belongs to the match and not to a request — the same
+/// track serves as many montages as they want.
 class Track {
   Track({
     required this.id,
@@ -108,11 +108,11 @@ class Track {
   final double durationS;
   final double bpm;
 
-  /// Instantes das batidas. É o que o ímã usa para grudar os cortes.
+  /// Beat instants. This is what the magnet uses to snap the cuts.
   final List<double> beats;
 
-  /// Envelope da música em 0..1, já reduzido pelo servidor: o app desenha a
-  /// onda sem baixar o áudio inteiro só para isso.
+  /// Song envelope in 0..1, already reduced by the server: the app draws the
+  /// wave without downloading the whole audio just for that.
   final List<double> peaks;
   final String audioUrl;
   final String? error;
@@ -122,15 +122,15 @@ class Track {
   bool get isPending => status == 'pending';
 }
 
-/// Onde e de que tamanho o clipe aparece no quadro.
+/// Where and at what size the clip appears in the frame.
 ///
-/// Chama-se `ClipTransform` e não `Transform` porque o Flutter já tem um widget
-/// com esse nome, e as duas coisas se encontram em toda tela que desenha a
-/// régua.
+/// It is called `ClipTransform` and not `Transform` because Flutter already has
+/// a widget with that name, and the two meet on every screen that draws the
+/// timeline.
 ///
-/// [x] e [y] são deslocamentos do centro normalizados pela metade do quadro:
-/// -1 encosta na borda esquerda/superior, +1 na direita/inferior. Assim a mesma
-/// montagem vale em qualquer resolução — o que importa é a proporção.
+/// [x] and [y] are offsets from the centre normalised by half the frame:
+/// -1 touches the left/top edge, +1 the right/bottom. So the same montage
+/// works at any resolution — what matters is the proportion.
 class ClipTransform {
   const ClipTransform({
     this.scale = 1,
@@ -151,8 +151,8 @@ class ClipTransform {
   final double y;
   final double opacity;
 
-  /// O clipe entra do jeito que veio, sem nada por cima.
-  bool get neutra => scale == 1 && x == 0 && y == 0 && opacity == 1;
+  /// The clip comes in as it came, with nothing on top.
+  bool get isNeutral => scale == 1 && x == 0 && y == 0 && opacity == 1;
 
   ClipTransform copyWith({
     double? scale,
@@ -174,7 +174,7 @@ class ClipTransform {
   };
 }
 
-/// O som do próprio clipe — que não é a trilha do vídeo.
+/// The clip's own sound — which is not the video's soundtrack.
 class ClipAudio {
   const ClipAudio({
     this.volume = 1,
@@ -195,7 +195,7 @@ class ClipAudio {
   final double fadeInS;
   final double fadeOutS;
 
-  bool get neutro => volume == 1 && !mute && fadeInS == 0 && fadeOutS == 0;
+  bool get isNeutral => volume == 1 && !mute && fadeInS == 0 && fadeOutS == 0;
 
   ClipAudio copyWith({
     double? volume,
@@ -217,11 +217,11 @@ class ClipAudio {
   };
 }
 
-/// Uma camada da linha do tempo.
+/// A timeline layer.
 ///
-/// Chama-se camada, e não faixa, porque `Track` neste sistema já é a música que
-/// o usuário enviou. A ordem na lista é a ordem de empilhamento: a primeira é o
-/// fundo, a última fica por cima.
+/// It is called a layer, not a track, because `Track` in this system is already
+/// the song the user uploaded. The list order is the stacking order: the first
+/// is the background, the last is on top.
 class Layer {
   const Layer({
     this.kind = 'video',
@@ -243,7 +243,7 @@ class Layer {
         .toList(),
   );
 
-  /// `video` ou `audio`. Uma camada desenha ou toca — não as duas coisas.
+  /// `video` or `audio`. A layer draws or plays — not both.
   final String kind;
 
   bool get isAudio => kind == 'audio';
@@ -252,7 +252,7 @@ class Layer {
   final bool muted;
   final bool hidden;
 
-  /// Travada não muda nada no vídeo — é o app que recusa editar.
+  /// Locked changes nothing in the video — it is the app that refuses edits.
   final bool locked;
   final List<TimelineClip> clips;
 
@@ -284,10 +284,10 @@ class Layer {
   };
 }
 
-/// Ajuste de cor do clipe.
+/// Clip colour adjustment.
 ///
-/// Os três que resolvem quase tudo numa montagem de gameplay: gravação escura,
-/// gravação lavada, gravação sem cor.
+/// The three that fix almost everything in a gameplay montage: dark footage,
+/// washed-out footage, colourless footage.
 class ClipColor {
   const ClipColor({
     this.brightness = 0,
@@ -305,7 +305,7 @@ class ClipColor {
   final double contrast;
   final double saturation;
 
-  bool get neutra => brightness == 0 && contrast == 1 && saturation == 1;
+  bool get isNeutral => brightness == 0 && contrast == 1 && saturation == 1;
 
   ClipColor copyWith({
     double? brightness,
@@ -324,11 +324,11 @@ class ClipColor {
   };
 }
 
-/// Entrada e saída do clipe, em segundos.
+/// Clip fade in and fade out, in seconds.
 ///
-/// São transições de e para o **fundo** — que numa montagem em camadas é preto.
-/// A transição *entre dois clipes* é outra coisa, e não cabe no formato de
-/// sobreposição.
+/// These are transitions from and to the **background** — which in a layered
+/// montage is black. The transition *between two clips* is something else
+/// (see [ClipTransition]).
 class ClipFade {
   const ClipFade({this.inS = 0, this.outS = 0});
 
@@ -340,7 +340,7 @@ class ClipFade {
   final double inS;
   final double outS;
 
-  bool get neutro => inS == 0 && outS == 0;
+  bool get isNeutral => inS == 0 && outS == 0;
 
   ClipFade copyWith({double? inS, double? outS}) =>
       ClipFade(inS: inS ?? this.inS, outS: outS ?? this.outS);
@@ -391,13 +391,13 @@ class ClipTransition {
   int get hashCode => Object.hash(kind, durationS);
 }
 
-/// Como o texto aparece.
+/// How the text appears.
 ///
-/// Chama-se `ClipTextStyle` e não `TextStyle` porque o Flutter já tem uma
-/// classe com esse nome, e as duas se encontram em toda tela que desenha texto.
+/// It is called `ClipTextStyle` and not `TextStyle` because Flutter already has
+/// a class with that name, and the two meet on every screen that draws text.
 ///
-/// Tamanho e contorno são **frações da altura do quadro**, não pixels: a mesma
-/// montagem tem de sair igual em 720p e em 4K.
+/// Size and outline are **fractions of the frame height**, not pixels: the
+/// same montage has to come out the same in 720p and in 4K.
 class ClipTextStyle {
   const ClipTextStyle({
     this.size = 0.08,
@@ -416,7 +416,7 @@ class ClipTextStyle {
   final double size;
   final String color;
 
-  /// Contorno não é enfeite: sem ele, texto branco some em cena clara.
+  /// The outline is not decoration: without it, white text vanishes on bright scenes.
   final double outline;
   final String outlineColor;
 
@@ -440,11 +440,11 @@ class ClipTextStyle {
   };
 }
 
-/// Um ponto da animação de zoom, dentro do clipe.
+/// A point of the zoom animation, inside the clip.
 ///
-/// [t] vai de 0 a 1 — é a fração do clipe, não segundos. Assim a animação
-/// sobrevive a esticar ou aparar o bloco: um zoom que fecha no fim continua
-/// fechando no fim.
+/// [t] goes from 0 to 1 — it is the fraction of the clip, not seconds. So the
+/// animation survives stretching or trimming the block: a zoom that closes at
+/// the end keeps closing at the end.
 class ZoomKey {
   const ZoomKey({required this.t, this.scale = 1, this.x = 0, this.y = 0});
 
@@ -463,11 +463,11 @@ class ZoomKey {
   Map<String, dynamic> toJson() => {'t': t, 'scale': scale, 'x': x, 'y': y};
 }
 
-/// Um item da biblioteca de mídia da partida.
+/// An item of the match media library.
 ///
-/// Começou como "a música do job" e virou a biblioteca — porque era a mesma
-/// coisa: um arquivo sobe, um worker o analisa e o gateway o entrega com
-/// `Range`. Uma música é um item de tipo `audio`, com batidas por cima.
+/// It started as "the job's song" and became the library — because it was the
+/// same thing: a file goes up, a worker analyses it and the gateway serves it
+/// with `Range`. A song is an item of kind `audio`, with beats on top.
 class Media {
   Media({
     required this.id,
@@ -517,7 +517,7 @@ class Media {
 
   final String id;
 
-  /// `audio`, `video` ou `image`.
+  /// `audio`, `video` or `image`.
   final String kind;
   final String status;
   final String name;
@@ -529,9 +529,9 @@ class Media {
   final String? proxyUrl;
   final String? error;
 
-  /// Só de áudio: o que a régua precisa para desenhar a música e grudar os
-  /// cortes na batida. Vem no mesmo item da biblioteca — pedir de novo por
-  /// outra rota seria uma viagem à toa.
+  /// Audio only: what the timeline needs to draw the song and snap cuts to
+  /// the beat. It comes in the same library item — asking again through
+  /// another route would be a wasted trip.
   final double bpm;
   final List<double> beats;
   final List<double> peaks;
@@ -543,11 +543,11 @@ class Media {
   bool get isAudio => kind == 'audio';
   bool get isImage => kind == 'image';
 
-  /// A mesma música, vista como faixa.
+  /// The same song, seen as a track.
   ///
-  /// `Track` e `Media` de áudio são a mesma linha no banco; o app tem os dois
-  /// nomes porque a régua fala de música e a biblioteca fala de arquivo.
-  Track get comoMusica => Track(
+  /// `Track` and audio `Media` are the same database row; the app has both
+  /// names because the timeline talks about music and the library about files.
+  Track get asMusic => Track(
     id: id,
     status: status,
     name: name,
@@ -559,19 +559,19 @@ class Media {
     error: error,
   );
 
-  /// Quanto um clipe deste item dura por padrão.
+  /// How long a clip of this item lasts by default.
   ///
-  /// Imagem não tem duração própria — quanto ela fica na tela é escolha da
-  /// montagem —, e de um vídeo longo se usa um pedaço, não ele inteiro.
-  double get duracaoSugerida =>
+  /// An image has no duration of its own — how long it stays on screen is the
+  /// montage's choice —, and from a long video you use a piece, not all of it.
+  double get suggestedDuration =>
       isImage ? 2.0 : (durationS > 0 ? math.min(durationS, 3.0) : 2.0);
 }
 
-/// Um bloco na linha do tempo: um pedaço da gravação posto num ponto do vídeo.
+/// A block on the timeline: a piece of the recording placed at a point of the video.
 ///
-/// [startS] e [durationS] dizem *o que* entra (na gravação); [atS] diz *onde*
-/// (no vídeo que vai sair). São independentes — o mesmo momento pode aparecer
-/// duas vezes, em pontos diferentes da música e com durações diferentes.
+/// [startS] and [durationS] say *what* goes in (in the recording); [atS] says
+/// *where* (in the output video). They are independent — the same moment can
+/// appear twice, at different points of the song and with different durations.
 class TimelineClip {
   const TimelineClip({
     required this.startS,
@@ -595,52 +595,51 @@ class TimelineClip {
     this.transition,
   });
 
-  /// Identidade do bloco **dentro do editor**. Não vai para o servidor e não
-  /// tem significado nenhum lá.
+  /// Identity of the block **inside the editor**. It does not go to the server
+  /// and means nothing there.
   ///
-  /// Existe porque índice não serve de identidade: apagar um bloco desloca
-  /// todos os seguintes, e uma seleção múltipla ou um passo de "desfazer"
-  /// passariam a apontar para o vizinho. Com id, quem é quem não depende de
-  /// onde está na lista.
+  /// It exists because an index is not an identity: deleting a block shifts
+  /// all the following ones, and a multiple selection or an "undo" step would
+  /// end up pointing at the neighbour. With an id, who is who does not depend
+  /// on where it sits in the list.
   final String id;
 
-  /// Instante do momento que originou o bloco. Não afeta o corte: serve para
-  /// rotular e para recalcular o enquadramento quando a duração muda.
+  /// Instant of the moment that originated the block. It does not affect the
+  /// cut: it is used for labels and to recompute the framing when the duration changes.
   final double sourceT;
   final double startS;
   final double durationS;
   final double atS;
   final String kind;
 
-  /// De onde sai a imagem: `recording` ou `media`. `text` chega com a fase que
-  /// o desenha.
+  /// Where the picture comes from: `recording`, `media` or `text`.
   final String source;
 
-  /// Qual item da biblioteca, quando [source] é `media`.
+  /// Which library item, when [source] is `media`.
   final String? mediaId;
   final ClipTransform transform;
   final ClipAudio audio;
   final ClipColor color;
   final ClipFade fade;
 
-  /// Quanto mais rápido o clipe corre. 2 = dobro, 0.5 = câmera lenta.
+  /// How much faster the clip runs. 2 = double, 0.5 = slow motion.
   ///
-  /// Muda quanto da fonte ele consome, não quanto ele ocupa no vídeo — isso é
-  /// [durationS], que é o que se arrasta na régua.
+  /// It changes how much of the source it consumes, not how much it takes in
+  /// the video — that is [durationS], which is what gets dragged on the timeline.
   final double speed;
 
-  /// Animação de zoom dentro do clipe. Vazia = sem animação.
+  /// Zoom animation inside the clip. Empty = no animation.
   ///
-  /// É o *punch* na batida. Zoom é coisa do conteúdo — olhar mais de perto o
-  /// que está ali — e não se confunde com [ClipTransform.scale], que é o
-  /// tamanho do clipe dentro do quadro.
+  /// It is the *punch* on the beat. Zoom belongs to the content — looking
+  /// closer at what is there — and is not to be confused with
+  /// [ClipTransform.scale], which is the size of the clip inside the frame.
   final List<ZoomKey> zoom;
 
-  /// Congela em vez de correr. A duração continua sendo a do bloco.
+  /// Freezes instead of running. The duration is still the block's.
   final bool freeze;
   final bool reverse;
 
-  /// O que está escrito, quando [source] é `text`.
+  /// What is written, when [source] is `text`.
   final String text;
   final ClipTextStyle textStyle;
 
@@ -649,28 +648,28 @@ class TimelineClip {
 
   bool get isText => source == 'text';
 
-  /// Quanto da gravação este clipe come. A 2×, dois segundos de vídeo comem
-  /// quatro de gravação — e um congelado come um quadro só.
-  double get fonteConsumidaS => freeze ? 0.05 : durationS * speed;
+  /// How much of the recording this clip eats. At 2×, two seconds of video eat
+  /// four of recording — and a frozen one eats a single frame.
+  double get sourceConsumedS => freeze ? 0.05 : durationS * speed;
 
-  /// O clipe entra do jeito que veio, sem camada nem ajuste — é o que o
-  /// caminho de corte-e-emenda do servidor dá conta de montar.
-  bool get simples =>
+  /// The clip comes in as it came, with no layer or adjustment — what the
+  /// server's cut-and-concat path can assemble.
+  bool get simple =>
       source == 'recording' &&
-      transform.neutra &&
-      audio.neutro &&
-      color.neutra &&
-      fade.neutro &&
+      transform.isNeutral &&
+      audio.isNeutral &&
+      color.isNeutral &&
+      fade.isNeutral &&
       transition == null &&
       speed == 1 &&
       zoom.isEmpty &&
       !freeze &&
       !reverse;
 
-  /// Onde o corte termina na gravação.
+  /// Where the cut ends in the recording.
   double get endS => startS + durationS;
 
-  /// Onde o bloco termina no vídeo.
+  /// Where the block ends in the video.
   double get untilS => atS + durationS;
 
   TimelineClip copyWith({
@@ -716,8 +715,8 @@ class TimelineClip {
     transition: clearTransition ? null : transition ?? this.transition,
   );
 
-  /// O `id` não vem do servidor: ele é atribuído ao carregar, por
-  /// `montagemDoRascunho`.
+  /// The `id` does not come from the server: it is assigned on load, by
+  /// `montageFromDraft`.
   factory TimelineClip.fromJson(Map<String, dynamic> j) => TimelineClip(
     sourceT: (j['source_t'] as num?)?.toDouble() ?? 0,
     startS: (j['start_s'] as num).toDouble(),
@@ -763,10 +762,10 @@ class TimelineClip {
     'kind': kind,
     'source': source,
     if (mediaId != null) 'media_id': mediaId,
-    if (!transform.neutra) 'transform': transform.toJson(),
-    if (!audio.neutro) 'audio': audio.toJson(),
-    if (!color.neutra) 'color': color.toJson(),
-    if (!fade.neutro) 'fade': fade.toJson(),
+    if (!transform.isNeutral) 'transform': transform.toJson(),
+    if (!audio.isNeutral) 'audio': audio.toJson(),
+    if (!color.isNeutral) 'color': color.toJson(),
+    if (!fade.isNeutral) 'fade': fade.toJson(),
     if (speed != 1) 'speed': speed,
     if (zoom.isNotEmpty) 'zoom': [for (final k in zoom) k.toJson()],
     if (freeze) 'freeze': true,
@@ -777,11 +776,11 @@ class TimelineClip {
   };
 }
 
-/// Como o vídeo final é escrito.
+/// How the final video is written.
 ///
-/// Separado da montagem de propósito: a mesma montagem vira um 16:9 para o
-/// YouTube e um 9:16 para os Shorts sem que nada dela mude. O que muda é a
-/// janela por onde se olha.
+/// Kept apart from the montage on purpose: the same montage becomes a 16:9 for
+/// YouTube and a 9:16 for Shorts without any of it changing. What changes is
+/// the window you look through.
 class ExportSpec {
   const ExportSpec({
     this.width = 0,
@@ -813,31 +812,31 @@ class ExportSpec {
     watermarkOpacity: (j['watermark_opacity'] as num?)?.toDouble() ?? 0.65,
   );
 
-  /// `0` nos dois = o tamanho da gravação.
+  /// `0` on both = the recording size.
   final int width;
   final int height;
   final double fps;
 
-  /// Qualidade do H.264: menor é melhor.
+  /// H.264 quality: lower is better.
   final int crf;
 
-  /// `cover` preenche e corta as sobras; `contain` mostra tudo e deixa barras.
+  /// `cover` fills and crops the excess; `contain` shows everything with bars.
   final String fit;
 
   final double fromS;
   final double? toS;
 
-  /// Item da biblioteca desenhado por cima de tudo.
+  /// Library item drawn on top of everything.
   final String? watermarkId;
 
-  /// Tamanho da marca em fração da largura, e o canto onde ela fica, medido
-  /// do centro: `(1, -1)` é o canto superior direito.
+  /// Watermark size as a fraction of the width, and the corner where it sits,
+  /// measured from the centre: `(1, -1)` is the top right corner.
   final double watermarkScale;
   final double watermarkX;
   final double watermarkY;
   final double watermarkOpacity;
 
-  bool get padrao =>
+  bool get standard =>
       width == 0 &&
       fps == 0 &&
       crf == 20 &&
@@ -854,9 +853,9 @@ class ExportSpec {
     String? fit,
     double? fromS,
     double? toS,
-    bool limparTo = false,
+    bool clearTo = false,
     String? watermarkId,
-    bool limparMarca = false,
+    bool clearWatermark = false,
     double? watermarkScale,
     double? watermarkX,
     double? watermarkY,
@@ -868,8 +867,8 @@ class ExportSpec {
     crf: crf ?? this.crf,
     fit: fit ?? this.fit,
     fromS: fromS ?? this.fromS,
-    toS: limparTo ? null : (toS ?? this.toS),
-    watermarkId: limparMarca ? null : (watermarkId ?? this.watermarkId),
+    toS: clearTo ? null : (toS ?? this.toS),
+    watermarkId: clearWatermark ? null : (watermarkId ?? this.watermarkId),
     watermarkScale: watermarkScale ?? this.watermarkScale,
     watermarkX: watermarkX ?? this.watermarkX,
     watermarkY: watermarkY ?? this.watermarkY,
@@ -892,7 +891,7 @@ class ExportSpec {
   };
 }
 
-/// Um vídeo montado à mão: as camadas e os blocos que o formam.
+/// A hand-made video: the layers and blocks that form it.
 class Montage {
   const Montage({
     this.title = '',
@@ -909,59 +908,59 @@ class Montage {
 
   final String title;
 
-  /// **Formato antigo**: a faixa contínua que tocava por baixo de tudo e não se
-  /// cortava. Continua sendo lida — vira um bloco na camada de som ao abrir —,
-  /// e nunca mais é escrita.
+  /// **Old format**: the continuous track that played under everything and
+  /// could not be cut. It is still read — it becomes a block on the sound
+  /// layer on open —, and never written again.
   final String? trackId;
 
-  /// De que ponto da música a faixa contínua entrava.
+  /// At which point of the song the continuous track started.
   final double musicStartS;
 
-  /// As camadas, da de baixo para a de cima.
+  /// The layers, from bottom to top.
   final List<Layer> layers;
 
-  /// Todos os clipes, de todas as camadas. Serve a quem só quer saber o que o
-  /// vídeo mostra — o monitor, a duração, o resumo.
+  /// All the clips, from every layer. For whoever only wants to know what the
+  /// video shows — the monitor, the duration, the summary.
   List<TimelineClip> get clips => [for (final l in layers) ...l.clips];
 
-  /// Correções à grade de batidas. Não mudam o vídeo — o corte guarda
-  /// instantes absolutos —, mas mudam onde o ímã gruda, então valem ser
-  /// lembradas entre uma sessão e outra.
+  /// Corrections to the beat grid. They do not change the video — the cut
+  /// stores absolute instants —, but they change where the magnet snaps, so
+  /// they are worth remembering between sessions.
   final double beatOffsetS;
   final double beatMultiplier;
   final int beatBar;
 
-  /// Volume da música e do som do jogo. Com [gameVolume] em 0 a música
-  /// substitui o áudio; acima disso os dois se misturam. Sem bloco de música
-  /// nenhum, o áudio dos cortes vale por si.
+  /// Music and game sound volume. With [gameVolume] at 0 the music replaces
+  /// the audio; above that the two mix. With no music block at all, the cuts'
+  /// audio stands on its own.
   final double musicVolume;
   final double gameVolume;
 
-  /// Como o vídeo final é escrito. Não muda a montagem — muda a janela.
+  /// How the final video is written. It does not change the montage — it changes the window.
   final ExportSpec export;
 
-  /// Reconstrói a montagem que ficou salva no servidor.
+  /// Rebuilds the montage saved on the server.
   ///
-  /// É o que faz um F5 no meio do trabalho não custar a montagem inteira.
-  /// Lê os dois formatos.
+  /// It is what keeps an F5 in the middle of work from costing the whole
+  /// montage. It reads both formats.
   ///
-  /// Um rascunho salvo antes das camadas existirem chega com `cuts`, e vira uma
-  /// camada só — a mesma conversão que o servidor faz na leitura dele.
+  /// A draft saved before layers existed arrives with `cuts`, and becomes a
+  /// single layer — the same conversion the server does when reading it.
   factory Montage.fromJson(Map<String, dynamic> j) {
-    final camadas = (j['layers'] as List?) ?? const [];
-    final velhos = (j['cuts'] as List?) ?? const [];
+    final layerList = (j['layers'] as List?) ?? const [];
+    final olds = (j['cuts'] as List?) ?? const [];
     return Montage(
       title: j['title'] as String? ?? '',
       trackId: j['track_id'] as String?,
       musicStartS: (j['music_start_s'] as num?)?.toDouble() ?? 0,
-      layers: camadas.isNotEmpty
-          ? camadas
+      layers: layerList.isNotEmpty
+          ? layerList
                 .map((e) => Layer.fromJson(e as Map<String, dynamic>))
                 .toList()
           : [
-              if (velhos.isNotEmpty)
+              if (olds.isNotEmpty)
                 Layer(
-                  clips: velhos
+                  clips: olds
                       .map(
                         (e) => TimelineClip.fromJson(e as Map<String, dynamic>),
                       )
@@ -983,8 +982,8 @@ class Montage {
 
   Map<String, dynamic> toJson() => {
     'title': title,
-    // `track_id` e `music_start_s` não vão: quem os tinha já os converteu em
-    // bloco ao abrir, e mandá-los de volta criaria uma segunda música
+    // `track_id` and `music_start_s` are not sent: whoever had them already
+    // turned them into a block on open, and sending them back would create a second song
     'layers': [for (final l in layers) l.toJson()],
     'beat_offset_s': beatOffsetS,
     'beat_multiplier': beatMultiplier,
@@ -995,11 +994,11 @@ class Montage {
   };
 }
 
-/// Uma montagem nomeada de uma partida.
+/// A named montage of a match.
 ///
-/// Até a Fase 8 havia uma só, e era preciso escolher entre o corte de 30 s para
-/// o Shorts e a montagem longa. São trabalhos diferentes sobre o mesmo
-/// material, e agora cada um tem o seu nome.
+/// Until Phase 8 there was only one, and you had to choose between the 30 s cut
+/// for Shorts and the long montage. They are different jobs on the same
+/// material, and now each has its own name.
 class SavedMontage {
   const SavedMontage({
     required this.id,
@@ -1028,7 +1027,7 @@ class SavedMontage {
   final String id;
   final String name;
 
-  /// O conteúdo. Vem vazio nas respostas que só trazem o resumo.
+  /// The content. Empty in responses that only carry the summary.
   final Montage montage;
 
   final int nClips;
@@ -1040,10 +1039,10 @@ class SavedMontage {
   bool get isEmpty => nClips == 0;
 }
 
-/// Uma foto de uma montagem, guardada para se poder voltar a ela.
+/// A snapshot of a montage, kept so you can go back to it.
 ///
-/// Não é o desfazer — esse vive na tela e morre com a aba. São marcos: "o que
-/// eu gerei" e "estava bom assim".
+/// It is not undo — that lives on the screen and dies with the tab. These are
+/// milestones: "what I generated" and "it was good like this".
 class MontageVersion {
   const MontageVersion({
     required this.id,
@@ -1068,13 +1067,13 @@ class MontageVersion {
   final DateTime createdAt;
 }
 
-/// Como montar um vídeo a partir do que aconteceu numa partida.
+/// How to build a video from what happened in a match.
 ///
-/// Uma predefinição não guarda cortes — guarda o **jeito** de cortar. "Dois
-/// segundos por eliminação, encaixado na batida, com zoom" vale para qualquer
-/// partida, enquanto uma lista de cortes só vale para aquela.
-class Receita {
-  const Receita({
+/// A preset does not store cuts — it stores the **way** of cutting. "Two
+/// seconds per kill, snapped to the beat, with zoom" works for any match,
+/// while a list of cuts only works for that one.
+class Recipe {
+  const Recipe({
     this.kinds = const ['kill', 'sleep', 'stun'],
     this.leadS = 1.0,
     this.durationS = 2.0,
@@ -1091,7 +1090,7 @@ class Receita {
     this.export = const ExportSpec(),
   });
 
-  factory Receita.fromJson(Map<String, dynamic> j) => Receita(
+  factory Recipe.fromJson(Map<String, dynamic> j) => Recipe(
     kinds: [
       for (final k in (j['kinds'] as List?) ?? const ['kill', 'sleep', 'stun'])
         k as String,
@@ -1113,29 +1112,29 @@ class Receita {
     ),
   );
 
-  /// Que eventos viram corte.
+  /// Which events become cuts.
   final List<String> kinds;
 
-  /// Quanto tempo antes do evento o corte começa — o momento precisa de
-  /// embalo, senão a eliminação aparece no primeiro quadro.
+  /// How long before the event the cut starts — the moment needs a run-up,
+  /// otherwise the kill shows up on the first frame.
   final double leadS;
 
-  /// Tamanho de cada corte. Ignorado quando [beatsPerCut] manda.
+  /// Length of each cut. Ignored when [beatsPerCut] is in charge.
   final double durationS;
 
-  /// Com trilha, cada corte dura N batidas em vez de [durationS].
+  /// With a track, each cut lasts N beats instead of [durationS].
   final double beatsPerCut;
 
   final double gapS;
 
-  /// `0` = todos os momentos que houver.
+  /// `0` = every moment there is.
   final int maxCuts;
 
   final bool zoom;
   final double fadeS;
   final double speed;
 
-  /// Texto que o sistema escreve sozinho.
+  /// Text the system writes on its own.
   final bool counter;
   final bool streaks;
 
@@ -1143,7 +1142,7 @@ class Receita {
   final double gameVolume;
   final ExportSpec export;
 
-  Receita copyWith({
+  Recipe copyWith({
     List<String>? kinds,
     double? leadS,
     double? durationS,
@@ -1158,7 +1157,7 @@ class Receita {
     double? musicVolume,
     double? gameVolume,
     ExportSpec? export,
-  }) => Receita(
+  }) => Recipe(
     kinds: kinds ?? this.kinds,
     leadS: leadS ?? this.leadS,
     durationS: durationS ?? this.durationS,
@@ -1193,21 +1192,21 @@ class Receita {
   };
 }
 
-/// Uma predefinição salva: a receita com um nome.
+/// A saved preset: the recipe with a name.
 class Preset {
-  const Preset({required this.id, required this.name, required this.receita});
+  const Preset({required this.id, required this.name, required this.recipe});
 
   factory Preset.fromJson(Map<String, dynamic> j) => Preset(
     id: j['id'] as String,
     name: j['name'] as String? ?? '',
-    receita: Receita.fromJson(
+    recipe: Recipe.fromJson(
       (j['data'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
   );
 
   final String id;
   final String name;
-  final Receita receita;
+  final Recipe recipe;
 }
 
 class DetectionEvent {
@@ -1229,15 +1228,15 @@ class DetectionEvent {
   final double t;
   final double confidence;
 
-  /// O que o detector viu além do instante. Varia por tipo: um `ability_kill`
-  /// traz `ability` (`"orisa/energy_javelin"`), uma `ult_negated` traz de quem
-  /// era a ultimate e quanto demorou.
+  /// What the detector saw besides the instant. It varies by kind: an
+  /// `ability_kill` carries `ability` (`"orisa/energy_javelin"`), an
+  /// `ult_negated` carries whose ultimate it was and how long it took.
   final Map<String, dynamic> meta;
 
-  /// A habilidade que matou, quando o evento é de habilidade.
+  /// The ability that killed, when the event is an ability one.
   ///
-  /// Vem no formato do arquivo do ícone — `heroi/habilidade` — porque é dali
-  /// que o detector a reconhece.
+  /// It comes in the icon file format — `hero/ability` — because that is
+  /// how the detector recognises it.
   String? get ability {
     final a = meta['ability'];
     return a is String && a.isNotEmpty ? a : null;
@@ -1308,11 +1307,11 @@ class Clip {
   final double score;
   final String? renderId;
 
-  /// Nulo quando a montagem falhou: sobraram só os cortes.
+  /// Null when the montage failed: only the cuts were left.
   final String? videoUrl;
   final String? thumbUrl;
 
-  /// Zip com os cortes individuais da montagem, quando existem.
+  /// Zip with the montage's individual cuts, when they exist.
   final String? segmentsZipUrl;
   final Map<String, dynamic> meta;
 
@@ -1325,16 +1324,16 @@ class Clip {
   num? get bpm => meta['bpm'] as num?;
   String? get musicName => meta['music_name'] as String?;
 
-  /// Sem trilha escolhida, o vídeo ficou com o som da partida.
+  /// With no track chosen, the video kept the match sound.
   bool get keepsOriginalAudio => meta['original_audio'] == true;
 
-  /// A montagem falhou mas os cortes ficaram disponíveis.
+  /// The montage failed but the cuts are available.
   bool get onlyCuts => videoUrl == null && segmentsZipUrl != null;
   String? get renderError => meta['render_error'] as String?;
 }
 
-/// Um pedido de geração: as montagens mandadas para o servidor de uma vez.
-/// Uma partida acumula quantos pedidos o usuário quiser.
+/// A generation request: the montages sent to the server at once.
+/// A match piles up as many requests as the user wants.
 class Render {
   Render({
     required this.id,
@@ -1366,16 +1365,17 @@ class Render {
   final String? error;
   final List<Clip> clips;
 
-  /// Nomes das músicas usadas neste pedido, sem repetir.
+  /// Names of the songs used in this request, without repeats.
   ///
-  /// Saem dos **clipes gerados**, e não do pedido: a trilha de uma montagem é
-  /// um bloco na régua dela, e é o editor que sabe qual acabou tocando. Já
-  /// vinha das `selections` do pedido, quando a música era escolhida à parte
-  /// do vídeo — com aquele campo removido, ler dali dava sempre vazio, e todo
-  /// vídeo aparecia na lista como se tivesse saído com o áudio da partida.
+  /// They come from the **generated clips**, not from the request: a montage's
+  /// track is a block on its timeline, and it is the editor that knows which
+  /// one ended up playing. It used to come from the request's `selections`,
+  /// when the song was chosen apart from the video — with that field removed,
+  /// reading from there was always empty, and every video showed up in the
+  /// list as if it had come out with the match audio.
   List<String> get musicNames => {
     for (final c in clips)
-      if (c.meta['music_name'] case final String nome) nome,
+      if (c.meta['music_name'] case final String displayName) displayName,
   }.toList();
 
   bool get isActive => status == 'pending' || status == 'rendering';
@@ -1475,43 +1475,43 @@ class Job {
   final String videoName;
   final double durationS;
 
-  /// Quadros por segundo da gravação. É o que dá sentido ao passo de um quadro
-  /// no editor — 33 ms num vídeo a 30 fps, 16 ms num a 60.
+  /// Recording frames per second. It is what gives meaning to a one-frame
+  /// step in the editor — 33 ms in a 30 fps video, 16 ms in a 60 fps one.
   final double fps;
 
-  /// Tamanho da gravação. É o padrão de exportação — e o que deixa o editor
-  /// dizer se a saída pedida corta o quadro ou deixa barras.
+  /// Recording size. It is the export default — and what lets the editor
+  /// tell whether the requested output crops the frame or adds bars.
   final int width;
   final int height;
 
   final DateTime createdAt;
   final int nClips;
 
-  /// A gravação original, servida com `Range`. É de onde saem os cortes.
+  /// The original recording, served with `Range`. It is where the cuts come from.
   final String? videoUrl;
 
-  /// A cópia reduzida da gravação. É o que o monitor abre: buscar dentro do
-  /// arquivo original dezenas de vezes por segundo chegou a derrubar o
-  /// elemento de vídeo do navegador.
+  /// The reduced copy of the recording. It is what the monitor opens: seeking
+  /// inside the original file dozens of times per second once brought down
+  /// the browser's video element.
   ///
-  /// Nulo nas partidas analisadas antes de o proxy existir — aí o monitor cai
-  /// na gravação original, como fazia antes.
+  /// Null for matches analysed before the proxy existed — then the monitor
+  /// falls back to the original recording, as it used to.
   final String? proxyUrl;
 
-  /// Forma de onda do áudio da partida: é nela que se vê o tiro e a explosão,
-  /// para casar o corte com o som do jogo.
+  /// Waveform of the match audio: it is where you see the shot and the
+  /// explosion, to match the cut with the game sound.
   final List<double> waveform;
 
-  /// O que o monitor deve abrir.
+  /// What the monitor should open.
   String? get monitorUrl => proxyUrl ?? videoUrl;
   final int nRenders;
 
-  /// Pacote da partida inteira: vídeos finais e cortes avulsos.
+  /// Package of the whole match: final videos and individual cuts.
   final String? zipUrl;
   final bool hasCuts;
 
-  /// Algum pedido de geração ainda em andamento. Vem da API porque a listagem
-  /// não carrega os pedidos inteiros.
+  /// Some generation request still in progress. It comes from the API because
+  /// the listing does not load the full requests.
   final bool hasActiveRender;
   final String? error;
   final List<DetectionEvent> events;
@@ -1519,71 +1519,71 @@ class Job {
   final List<Clip> clips;
   final List<DetectorReport> detectors;
 
-  /// Músicas já enviadas para esta partida, prontas para montar em cima.
+  /// Songs already uploaded for this match, ready to build on.
   ///
-  /// São os itens de [media] do tipo áudio — a lista existe à parte porque é
-  /// ela que o seletor de trilha usa.
+  /// They are the audio items of [media] — the list exists separately because
+  /// it is the one the track picker uses.
   final List<Track> tracks;
 
-  /// A biblioteca inteira: música, clipe e imagem que o usuário trouxe.
+  /// The whole library: music, clips and images the user brought.
   final List<Media> media;
 
-  /// A montagem em andamento, se houver. É o que a tela de montagem carrega ao
-  /// abrir — recarregar a página não custa mais o trabalho todo.
+  /// The montage in progress, if any. It is what the montage screen loads on
+  /// open — reloading the page no longer costs all the work.
   final Montage? draft;
 
-  /// As montagens desta partida. Uma partida rende mais de um vídeo: o corte
-  /// vertical para o Shorts e a montagem longa são trabalhos diferentes sobre
-  /// o mesmo material.
+  /// The montages of this match. A match yields more than one video: the
+  /// vertical cut for Shorts and the long montage are different jobs on the
+  /// same material.
   final List<SavedMontage> montages;
 
-  /// A análise ainda está rodando.
+  /// The analysis is still running.
   bool get isAnalyzing => status != 'ready' && status != 'failed';
 
-  /// A análise terminou: dá para escolher o que gerar.
+  /// The analysis finished: you can choose what to generate.
   bool get isReady => status == 'ready';
   bool get isFailed => status == 'failed';
 
-  /// Vale continuar consultando o servidor.
+  /// Worth polling the server again.
   bool get isActive =>
       isAnalyzing || hasActiveRender || renders.any((r) => r.isActive);
 
-  /// Quanto ainda falta para a análise terminar, ou nulo quando não dá para
-  /// dizer com honestidade.
+  /// How much is left until the analysis finishes, or null when it cannot be
+  /// said honestly.
   ///
-  /// A conta é a mais simples que existe — o que já andou, na velocidade com
-  /// que andou — e ela só se sustenta porque a barra do servidor passou a ser
-  /// proporcional ao *tempo* de cada fase, e não ao número de fases. Enquanto
-  /// o recorte, que é três quartos do trabalho, ocupava um décimo da barra,
-  /// qualquer estimativa daqui mentiria por minutos.
+  /// The maths is the simplest there is — what has progressed, at the speed it
+  /// progressed — and it only holds because the server bar became
+  /// proportional to the *time* of each stage, not to the number of stages.
+  /// While the cropping, which is three quarters of the work, took a tenth of
+  /// the bar, any estimate from here would be off by minutes.
   ///
-  /// Nulo abaixo de 3%: com pouco andado, o erro da estimativa é maior que ela.
-  Duration? get restante {
+  /// Null below 3%: with little progress, the estimate's error is bigger than it.
+  Duration? get remaining {
     if (!isAnalyzing || progress < 0.03) return null;
-    final decorrido = DateTime.now().toUtc().difference(createdAt.toUtc());
-    if (decorrido <= Duration.zero) return null;
-    final total = decorrido.inMilliseconds / progress;
-    final falta = total - decorrido.inMilliseconds;
-    if (falta <= 0 || falta > const Duration(hours: 3).inMilliseconds) {
+    final elapsed = DateTime.now().toUtc().difference(createdAt.toUtc());
+    if (elapsed <= Duration.zero) return null;
+    final total = elapsed.inMilliseconds / progress;
+    final missing = total - elapsed.inMilliseconds;
+    if (missing <= 0 || missing > const Duration(hours: 3).inMilliseconds) {
       return null;
     }
-    return Duration(milliseconds: falta.round());
+    return Duration(milliseconds: missing.round());
   }
 }
 
-/// "~6 min", "~40 s" — grosso de propósito. Uma estimativa ao segundo daria
-/// uma precisão que ela não tem, e ficaria pulando a cada recarga.
-String? formatRestante(Duration? d) {
+/// "~6 min", "~40 s" — coarse on purpose. A to-the-second estimate would claim
+/// a precision it does not have, and would jump on every reload.
+String? formatRemaining(Duration? d) {
   if (d == null) return null;
   final s = d.inSeconds;
-  if (s < 45) return 'menos de 1 min';
+  if (s < 45) return 'under 1 min';
   final min = (s / 60).round();
   if (min < 60) return '~$min min';
   final h = d.inHours;
   return '~${h}h${(d.inMinutes % 60).toString().padLeft(2, '0')}';
 }
 
-// ─────────────────────────────── cliente ────────────────────────────────────
+// ─────────────────────────────── client ──────────────────────────────────────
 
 class ApiClient {
   ApiClient({this.baseUrl = kApiBase});
@@ -1621,12 +1621,11 @@ class ApiClient {
     if (r.statusCode != 204) _check(r);
   }
 
-  /// Envia a gravação. `onProgress` recebe 0..1 conforme os bytes saem — em
-  /// vídeo de partida isso importa: o arquivo costuma ter centenas de
-  /// megabytes.
+  /// Uploads the recording. `onProgress` gets 0..1 as the bytes go out — for
+  /// a match video this matters: the file is usually hundreds of megabytes.
   ///
-  /// O arquivo é lido em streaming, nunca inteiro na memória: uma gravação de
-  /// partida não caberia na RAM de um celular.
+  /// The file is read as a stream, never whole in memory: a match recording
+  /// would not fit in a phone's RAM.
   Future<String> createJob({
     required PlatformFile video,
     JobParams params = const JobParams(),
@@ -1638,8 +1637,8 @@ class ApiClient {
       field: 'video',
       file: video,
       length: total,
-      // o tamanho vai junto para o servidor conferir o que chegou: envio
-      // truncado nao se parece com erro nenhum do lado de la
+      // the size goes along so the server can check what arrived: a truncated
+      // upload does not look like any error on that side
       fields: {'params': jsonEncode(params.toJson()), 'size': '$total'},
       onProgress: onProgress,
     );
@@ -1647,11 +1646,11 @@ class ApiClient {
     return (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
   }
 
-  /// Envia uma música para a partida e manda o sistema ouvi-la.
+  /// Uploads a song for the match and has the system listen to it.
   ///
-  /// Volta na hora, com a música ainda `pending` — a análise (duração, BPM,
-  /// batidas e forma de onda) roda no servidor. Use [waitForTrack] para
-  /// esperar por ela.
+  /// Returns immediately, with the song still `pending` — the analysis
+  /// (duration, BPM, beats and waveform) runs on the server. Use
+  /// [waitForTrack] to wait for it.
   Future<Track> uploadTrack({
     required String jobId,
     required PlatformFile audio,
@@ -1671,10 +1670,10 @@ class ApiClient {
     return getTrack(id);
   }
 
-  /// Guarda a montagem em andamento.
+  /// Saves the montage in progress.
   ///
-  /// Chamada sozinha pelo editor enquanto se edita, com folga entre uma e
-  /// outra: o que importa é não perder o trabalho, não registrar cada pixel.
+  /// Called by the editor on its own while editing, with slack between calls:
+  /// what matters is not losing work, not recording every pixel.
   Future<void> saveDraft(String jobId, Montage draft) async {
     final r = await http.put(
       Uri.parse('$baseUrl/api/jobs/$jobId/draft'),
@@ -1689,7 +1688,7 @@ class ApiClient {
     if (r.statusCode != 204) _check(r);
   }
 
-  // ── montagens nomeadas ─────────────────────────────────────────────────────
+  // ── named montages ──────────────────────────────────────────────────────────
 
   Future<List<SavedMontage>> listMontages(String jobId) async {
     final r = await http.get(Uri.parse('$baseUrl/api/jobs/$jobId/montages'));
@@ -1718,9 +1717,9 @@ class ApiClient {
     return SavedMontage.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
   }
 
-  /// Guarda a montagem. Chamada sozinha pelo editor enquanto se edita, com
-  /// folga entre uma e outra: o que importa é não perder o trabalho, não
-  /// registrar cada pixel de um arrasto.
+  /// Saves the montage. Called by the editor on its own while editing, with
+  /// slack between calls: what matters is not losing work, not recording
+  /// every pixel of a drag.
   Future<void> saveMontage(
     String jobId,
     String montageId, {
@@ -1753,7 +1752,7 @@ class ApiClient {
     if (r.statusCode != 204) _check(r);
   }
 
-  // ── histórico ──────────────────────────────────────────────────────────────
+  // ── history ─────────────────────────────────────────────────────────────────
 
   Future<List<MontageVersion>> listVersions(
     String jobId,
@@ -1770,11 +1769,11 @@ class ApiClient {
     ];
   }
 
-  /// Marca a montagem como ela está.
+  /// Marks the montage as it is.
   ///
-  /// Devolve `false` quando não havia nada de novo para marcar — o servidor
-  /// recusa fotos idênticas à última, e isso não é erro: gerar o mesmo vídeo
-  /// duas vezes seguidas não produziu versão nenhuma.
+  /// Returns `false` when there was nothing new to mark — the server refuses
+  /// snapshots identical to the last one, and that is not an error: generating
+  /// the same video twice in a row produced no version.
   Future<bool> createVersion(
     String jobId,
     String montageId, {
@@ -1804,7 +1803,7 @@ class ApiClient {
     return SavedMontage.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
   }
 
-  // ── predefinições ──────────────────────────────────────────────────────────
+  // ── presets ─────────────────────────────────────────────────────────────────
 
   Future<List<Preset>> listPresets() async {
     final r = await http.get(Uri.parse('$baseUrl/api/presets'));
@@ -1816,11 +1815,11 @@ class ApiClient {
     ];
   }
 
-  Future<Preset> createPreset(String name, Receita receita) async {
+  Future<Preset> createPreset(String name, Recipe recipe) async {
     final r = await http.post(
       Uri.parse('$baseUrl/api/presets'),
       headers: const {'content-type': 'application/json'},
-      body: jsonEncode({'name': name, 'data': receita.toJson()}),
+      body: jsonEncode({'name': name, 'data': recipe.toJson()}),
     );
     _check(r);
     return Preset.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
@@ -1831,10 +1830,10 @@ class ApiClient {
     if (r.statusCode != 204) _check(r);
   }
 
-  /// Traz um arquivo para a biblioteca da partida.
+  /// Brings a file into the match library.
   ///
-  /// Volta na hora, ainda `pending`: a análise (dimensões, miniatura, proxy;
-  /// batidas quando for áudio) roda no servidor.
+  /// Returns immediately, still `pending`: the analysis (dimensions, thumbnail,
+  /// proxy; beats for audio) runs on the server.
   Future<Media> uploadMedia({
     required String jobId,
     required PlatformFile file,
@@ -1865,25 +1864,26 @@ class ApiClient {
     if (r.statusCode != 204) _check(r);
   }
 
-  /// Espera o item ficar pronto, consultando de tempos em tempos.
+  /// Waits for the item to be ready, polling now and then.
   Future<Media> waitForMedia(
     String id, {
     Duration timeout = const Duration(minutes: 3),
     Duration every = const Duration(seconds: 1),
   }) async {
-    final limite = DateTime.now().add(timeout);
+    final limit = DateTime.now().add(timeout);
     var item = await getMedia(id);
-    while (item.isPending && DateTime.now().isBefore(limite)) {
+    while (item.isPending && DateTime.now().isBefore(limit)) {
       await Future<void>.delayed(every);
       item = await getMedia(id);
     }
     return item;
   }
 
-  /// Manda extrair as miniaturas que faltam nesta partida.
+  /// Asks for the missing thumbnails of this match to be extracted.
   ///
-  /// Jobs novos já saem com elas; isto cobre os antigos e as que falharam. O
-  /// serviço pula o que já está no lugar, então chamar à toa é barato.
+  /// New jobs already come out with them; this covers old ones and the ones
+  /// that failed. The service skips what is already in place, so calling it
+  /// needlessly is cheap.
   Future<void> requestFrames(String jobId) async {
     final r = await http.post(Uri.parse('$baseUrl/api/jobs/$jobId/frames'));
     if (r.statusCode != 202) _check(r);
@@ -1900,32 +1900,32 @@ class ApiClient {
     if (r.statusCode != 204) _check(r);
   }
 
-  /// Espera a música ficar pronta, consultando de tempos em tempos.
+  /// Waits for the song to be ready, polling now and then.
   ///
-  /// Uma música de 3 minutos leva alguns segundos para ser ouvida; a tela de
-  /// montagem não tem o que desenhar antes disso. Desiste depois de [timeout]
-  /// devolvendo a música como está — quem chamou decide o que dizer ao usuário.
+  /// A 3-minute song takes a few seconds to be listened to; the montage screen
+  /// has nothing to draw before that. It gives up after [timeout] returning
+  /// the song as it is — the caller decides what to tell the user.
   Future<Track> waitForTrack(
     String id, {
     Duration timeout = const Duration(minutes: 3),
     Duration every = const Duration(seconds: 1),
   }) async {
-    final limite = DateTime.now().add(timeout);
+    final limit = DateTime.now().add(timeout);
     var track = await getTrack(id);
-    while (track.isPending && DateTime.now().isBefore(limite)) {
+    while (track.isPending && DateTime.now().isBefore(limit)) {
       await Future<void>.delayed(every);
       track = await getTrack(id);
     }
     return track;
   }
 
-  /// Pede a geração das montagens.
+  /// Requests the rendering of the montages.
   ///
-  /// Elas já trazem os blocos posicionados e apontam para músicas que **já
-  /// subiram** pela biblioteca, então o pedido não leva arquivo nenhum.
+  /// They already carry the positioned blocks and point to songs that **were
+  /// already uploaded** through the library, so the request carries no file.
   ///
-  /// Já houve um segundo caminho aqui: as propostas escolhidas, cada uma com a
-  /// sua música num campo `music_<proposal_id>`. Não há mais propostas.
+  /// There used to be a second path here: the chosen proposals, each with its
+  /// song in a `music_<proposal_id>` field. There are no proposals anymore.
   Future<String> createRender({
     required String jobId,
     required List<Montage> montages,

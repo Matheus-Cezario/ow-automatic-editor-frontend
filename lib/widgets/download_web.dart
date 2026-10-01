@@ -1,16 +1,16 @@
 import 'package:web/web.dart' as web;
 
-/// Download na web, sem plugin nenhum.
+/// Download on the web, with no plugin at all.
 ///
-/// O jeito canônico do navegador: um `<a download>` clicado por código. O
-/// servidor já responde com `Content-Disposition: attachment`, então o nome do
-/// arquivo vem de lá e a página não sai do lugar.
+/// The browser's canonical way: an `<a download>` clicked from code. The server
+/// already answers with `Content-Disposition: attachment`, so the file name
+/// comes from there and the page does not move.
 ///
-/// Esta função existe porque o `url_launcher` falhou aqui duas vezes — a
-/// segunda com `MissingPluginException`, mesmo com o plugin no registrant. Para
-/// baixar um arquivo da mesma origem não é preciso plugin: o navegador faz
-/// isso nativamente.
-Future<void> abrirDownload(String url) async {
+/// This function exists because `url_launcher` failed here twice — the second
+/// time with `MissingPluginException`, even with the plugin in the registrant.
+/// Downloading a same-origin file needs no plugin: the browser does it
+/// natively.
+Future<void> openDownload(String url) async {
   final a = web.HTMLAnchorElement()
     ..href = url
     ..download = ''

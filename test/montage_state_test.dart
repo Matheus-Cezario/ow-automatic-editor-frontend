@@ -3,13 +3,13 @@ import 'package:ow_editor/api.dart';
 import 'package:ow_editor/montage.dart';
 import 'package:ow_editor/montage_state.dart';
 
-/// O estado da montagem e o histórico que o desfaz.
+/// The montage state and the history that undoes it.
 ///
-/// A conta de *onde* um bloco pode cair está em `montage_test.dart`. Aqui o que
-/// se verifica é o que a V1 não tinha: que uma operação devolve um estado novo
-/// sem estragar o anterior, e que dá para voltar atrás.
+/// The maths of *where* a block can land is in `montage_test.dart`. What is
+/// checked here is what V1 did not have: that an operation returns a new state
+/// without spoiling the previous one, and that you can go back.
 void main() {
-  TimelineClip corte(
+  TimelineClip cut(
     double at,
     double dur, {
     double t = 10,
@@ -22,65 +22,65 @@ void main() {
     kind: kind,
   );
 
-  /// Um estado com clipes já identificados, como sai do rascunho.
-  MontageState estadoCom(List<TimelineClip> clips) =>
-      montagemDoRascunho(Montage(layers: [Layer(clips: clips)]));
+  /// A state with clips already identified, as it comes out of the draft.
+  MontageState stateWith(List<TimelineClip> clips) =>
+      montageFromDraft(Montage(layers: [Layer(clips: clips)]));
 
-  /// Um estado de duas camadas, para o que só camada faz.
-  MontageState estadoEmCamadas(
-    List<TimelineClip> baixo,
-    List<TimelineClip> cima,
-  ) => montagemDoRascunho(
+  /// A two-layer state, for what only layers do.
+  MontageState layeredState(
+    List<TimelineClip> lower,
+    List<TimelineClip> upper,
+  ) => montageFromDraft(
     Montage(
       layers: [
-        Layer(clips: baixo),
-        Layer(name: 'cima', clips: cima),
+        Layer(clips: lower),
+        Layer(name: 'upper', clips: upper),
       ],
     ),
   );
 
-  group('imutabilidade', () {
-    test('operar devolve um estado novo e não estraga o anterior', () {
-      // é isto que a V1 não fazia: `_cuts` era alterada no lugar, e o "antes"
-      // deixava de existir no instante em que o "depois" nascia
-      final antes = estadoCom([corte(0, 1)]);
-      final id = antes.clips.first.id;
+  group('immutability', () {
+    test('operating returns a new state and does not spoil the previous one', () {
+      // this is what V1 did not do: `_cuts` was changed in place, and the "before"
+      // ceased to exist the instant the "after" was born
+      final beforeState = stateWith([cut(0, 1)]);
+      final id = beforeState.clips.first.id;
 
-      final depois = moverBloco(antes, id, 5, beats: const [], snap: false);
+      final afterState = moveBlock(beforeState, id, 5, beats: const [], snap: false);
 
-      expect(depois.clips.first.atS, 5);
-      expect(antes.clips.first.atS, 0, reason: 'o estado anterior foi mexido');
-      expect(identical(antes, depois), isFalse);
+      expect(afterState.clips.first.atS, 5);
+      expect(beforeState.clips.first.atS, 0, reason: 'the previous state was touched');
+      expect(identical(beforeState, afterState), isFalse);
     });
 
-    test('as listas não aceitam alteração por fora', () {
-      final s = estadoCom([corte(0, 1)]);
+    test('the lists do not accept changes from outside', () {
+      final s = stateWith([cut(0, 1)]);
       expect(
-        () => s.layers.first.clips.add(corte(2, 1)),
+        () => s.layers.first.clips.add(cut(2, 1)),
         throwsUnsupportedError,
       );
       expect(() => s.layers.add(const Layer()), throwsUnsupportedError);
-      expect(() => s.selecao.add('x'), throwsUnsupportedError);
+      expect(() => s.selectionIds.add('x'), throwsUnsupportedError);
     });
 
-    test('cada bloco ganha uma identidade ao ser carregado', () {
-      final s = estadoCom([corte(0, 1), corte(2, 1)]);
+    test('each block gets an identity when loaded', () {
+      final s = stateWith([cut(0, 1), cut(2, 1)]);
       expect(s.clips[0].id, isNotEmpty);
       expect(s.clips[0].id, isNot(s.clips[1].id));
     });
 
-    test('a identidade não vai para o servidor', () {
-      // para o servidor um bloco é um trecho com hora marcada, e mais nada
-      final s = estadoCom([corte(0, 1)]);
-      final clip = s.paraEnvio().toJson()['layers'][0]['clips'][0] as Map;
+    test('the identity does not go to the server', () {
+      // for the server a block is a span with a set time, and nothing else
+      final s = stateWith([cut(0, 1)]);
+      final clip = s.toPayload().toJson()['layers'][0]['clips'][0] as Map;
       expect(clip.containsKey('id'), isFalse);
     });
   });
 
-  group('correções da grade de batidas', () {
-    test('voltam do rascunho e vão de volta para o servidor', () {
-      // consertar a grade duas vezes irrita mais do que consertá-la uma
-      final s = montagemDoRascunho(
+  group('beat grid corrections', () {
+    test('come back from the draft and go back to the server', () {
+      // fixing the grid twice annoys more than fixing it once
+      final s = montageFromDraft(
         const Montage(
           layers: [],
           beatOffsetS: 0.12,
@@ -93,49 +93,49 @@ void main() {
       expect(s.beatMultiplier, 2);
       expect(s.beatBar, 4);
 
-      final json = s.paraEnvio().toJson();
+      final json = s.toPayload().toJson();
       expect(json['beat_offset_s'], 0.12);
       expect(json['beat_multiplier'], 2);
       expect(json['beat_bar'], 4);
     });
 
-    test('mudá-las é edição, e edição se desfaz', () {
-      // a grade errada faz todo corte grudar no lugar errado; voltar atrás
-      // dela tem de ser tão possível quanto voltar atrás de um arrasto
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      h.aplicar(h.atual.copyWith(beatOffsetS: 0.25));
+    test('changing them is an edit, and edits can be undone', () {
+      // the wrong grid makes every cut snap to the wrong place; going back
+      // from it has to be as possible as going back from a drag
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      h.apply(h.present.copyWith(beatOffsetS: 0.25));
 
-      expect(h.atual.beatOffsetS, 0.25);
-      expect(h.desfazer().beatOffsetS, 0);
+      expect(h.present.beatOffsetS, 0.25);
+      expect(h.undo().beatOffsetS, 0);
     });
   });
 
-  group('efeitos', () {
-    test('a velocidade muda o que se come da gravação, não o que se vê', () {
-      final s = estadoCom([corte(0, 2, t: 10)]);
+  group('effects', () {
+    test('speed changes what is eaten from the recording, not what is seen', () {
+      final s = stateWith([cut(0, 2, t: 10)]);
       final id = s.clips.first.id;
 
-      final lento = ajustarEfeito(s, id, speed: 0.5);
+      final slow = adjustEffect(s, id, speed: 0.5);
 
-      expect(lento.clips.first.speed, 0.5);
-      expect(lento.clips.first.fonteConsumidaS, closeTo(1.0, 1e-9));
-      expect(lento.clips.first.durationS, 2.0, reason: 'o bloco não encolheu');
+      expect(slow.clips.first.speed, 0.5);
+      expect(slow.clips.first.sourceConsumedS, closeTo(1.0, 1e-9));
+      expect(slow.clips.first.durationS, 2.0, reason: 'the block did not shrink');
     });
 
-    test('velocidade absurda é aparada em vez de recusada pelo servidor', () {
-      final s = estadoCom([corte(0, 1)]);
+    test('an absurd speed is clamped instead of refused by the server', () {
+      final s = stateWith([cut(0, 1)]);
       final id = s.clips.first.id;
 
-      expect(ajustarEfeito(s, id, speed: 99).clips.first.speed, 10.0);
-      expect(ajustarEfeito(s, id, speed: 0.001).clips.first.speed, 0.1);
+      expect(adjustEffect(s, id, speed: 99).clips.first.speed, 10.0);
+      expect(adjustEffect(s, id, speed: 0.001).clips.first.speed, 0.1);
     });
 
-    test('fades maiores que o clipe são encolhidos, mantendo a proporção', () {
-      // o servidor recusaria; descobrir isso só na hora de gerar seria pior
-      final s = estadoCom([corte(0, 1)]);
+    test('fades longer than the clip are shrunk, keeping the proportion', () {
+      // the server would refuse; finding that out only at render time would be worse
+      final s = stateWith([cut(0, 1)]);
       final id = s.clips.first.id;
 
-      final c = ajustarEfeito(
+      final c = adjustEffect(
         s,
         id,
         fade: const ClipFade(inS: 1.0, outS: 3.0),
@@ -145,181 +145,181 @@ void main() {
       expect(c.fade.outS / c.fade.inS, closeTo(3.0, 1e-6));
     });
 
-    test('efeito é edição, e edição se desfaz', () {
-      final h = MontageHistory(estadoCom([corte(0, 2)]));
-      final id = h.atual.clips.first.id;
+    test('an effect is an edit, and edits can be undone', () {
+      final h = MontageHistory(stateWith([cut(0, 2)]));
+      final id = h.present.clips.first.id;
 
-      h.aplicar(ajustarEfeito(h.atual, id, speed: 2));
+      h.apply(adjustEffect(h.present, id, speed: 2));
 
-      expect(h.atual.clips.first.speed, 2);
-      expect(h.desfazer().clips.first.speed, 1);
+      expect(h.present.clips.first.speed, 2);
+      expect(h.undo().clips.first.speed, 1);
     });
 
-    test('o que vai para o servidor só leva o que não é neutro', () {
-      final s = estadoCom([corte(0, 2)]);
+    test('what goes to the server only carries what is not neutral', () {
+      final s = stateWith([cut(0, 2)]);
       final id = s.clips.first.id;
-      final limpo = s.paraEnvio().toJson()['layers'][0]['clips'][0] as Map;
-      expect(limpo.containsKey('speed'), isFalse);
-      expect(limpo.containsKey('fade'), isFalse);
+      final clean = s.toPayload().toJson()['layers'][0]['clips'][0] as Map;
+      expect(clean.containsKey('speed'), isFalse);
+      expect(clean.containsKey('fade'), isFalse);
 
-      final comEfeito =
-          ajustarEfeito(
+      final withEffect =
+          adjustEffect(
                 s,
                 id,
                 speed: 2,
-              ).paraEnvio().toJson()['layers'][0]['clips'][0]
+              ).toPayload().toJson()['layers'][0]['clips'][0]
               as Map;
-      expect(comEfeito['speed'], 2);
+      expect(withEffect['speed'], 2);
     });
 
-    test('a mistura de áudio viaja com a montagem', () {
-      final s = estadoCom([
-        corte(0, 1),
+    test('the audio mix travels with the montage', () {
+      final s = stateWith([
+        cut(0, 1),
       ]).copyWith(musicVolume: 0.8, gameVolume: 0.4);
-      final json = s.paraEnvio().toJson();
+      final json = s.toPayload().toJson();
 
       expect(json['music_volume'], 0.8);
       expect(json['game_volume'], 0.4);
     });
   });
 
-  group('zoom, congelar e inverter', () {
-    test('o punch fecha a lente e afrouxa até o fim', () {
-      final k = punch(ate: 2.0);
+  group('zoom, freeze and reverse', () {
+    test('the punch closes the lens and loosens until the end', () {
+      final k = punch(until: 2.0);
 
       expect(k, hasLength(3));
       expect(k.first.t, 0);
-      expect(k.first.scale, 1, reason: 'começa no tamanho cheio');
-      expect(k[1].scale, 2.0, reason: 'o pico é o que se pediu');
+      expect(k.first.scale, 1, reason: 'starts at full size');
+      expect(k[1].scale, 2.0, reason: 'the peak is what was asked');
       expect(k.last.t, 1);
       expect(k.last.scale, greaterThan(1));
-      expect(k.last.scale, lessThan(k[1].scale), reason: 'afrouxa depois');
+      expect(k.last.scale, lessThan(k[1].scale), reason: 'loosens afterwards');
     });
 
-    test('os pontos estão em ordem — o servidor recusaria fora dela', () {
+    test('the points are in order — the server would refuse them otherwise', () {
       final ts = punch().map((k) => k.t).toList();
       expect(ts, orderedEquals([...ts]..sort()));
     });
 
-    test('congelar desliga inverter, e vice-versa', () {
-      // o servidor recusa os dois juntos; ligar o segundo quer dizer trocar
-      var s = estadoCom([corte(0, 2)]);
+    test('freezing turns off reverse, and vice versa', () {
+      // the server refuses both together; turning on the second means swapping
+      var s = stateWith([cut(0, 2)]);
       final id = s.clips.first.id;
 
-      s = ajustarEfeito(s, id, freeze: true);
+      s = adjustEffect(s, id, freeze: true);
       expect(s.clips.first.freeze, isTrue);
 
-      s = ajustarEfeito(s, id, reverse: true);
+      s = adjustEffect(s, id, reverse: true);
       expect(s.clips.first.reverse, isTrue);
-      expect(s.clips.first.freeze, isFalse, reason: 'um desligou o outro');
+      expect(s.clips.first.freeze, isFalse, reason: 'one turned the other off');
     });
 
-    test('um clipe congelado come um quadro só da gravação', () {
-      var s = estadoCom([corte(0, 3, t: 10)]);
+    test('a frozen clip eats a single frame of the recording', () {
+      var s = stateWith([cut(0, 3, t: 10)]);
       final id = s.clips.first.id;
-      s = ajustarEfeito(s, id, freeze: true);
+      s = adjustEffect(s, id, freeze: true);
 
-      expect(s.clips.first.fonteConsumidaS, lessThan(0.2));
-      expect(s.clips.first.untilS, 3.0, reason: 'mas ocupa o bloco inteiro');
+      expect(s.clips.first.sourceConsumedS, lessThan(0.2));
+      expect(s.clips.first.untilS, 3.0, reason: 'but takes the whole block');
     });
 
-    test('o que vai para o servidor só leva o que está ligado', () {
-      var s = estadoCom([corte(0, 2)]);
+    test('what goes to the server only carries what is on', () {
+      var s = stateWith([cut(0, 2)]);
       final id = s.clips.first.id;
-      s = ajustarEfeito(s, id, zoom: punch(), freeze: true);
+      s = adjustEffect(s, id, zoom: punch(), freeze: true);
 
-      final clip = s.paraEnvio().toJson()['layers'][0]['clips'][0] as Map;
+      final clip = s.toPayload().toJson()['layers'][0]['clips'][0] as Map;
       expect((clip['zoom'] as List), hasLength(3));
       expect(clip['freeze'], isTrue);
       expect(clip.containsKey('reverse'), isFalse);
     });
   });
 
-  group('camadas', () {
-    test('colisão é por camada: dois clipes no mesmo instante convivem', () {
-      // é justamente para isto que camada serve
-      final s = estadoEmCamadas([corte(0, 2)], [corte(0, 2)]);
+  group('layers', () {
+    test('collision is per layer: two clips at the same instant coexist', () {
+      // that is precisely what layers are for
+      final s = layeredState([cut(0, 2)], [cut(0, 2)]);
 
       expect(s.clips, hasLength(2));
       expect(s.layers[0].clips.first.atS, 0);
       expect(s.layers[1].clips.first.atS, 0);
     });
 
-    test('o clipe novo entra na camada ativa', () {
-      var s = estadoEmCamadas([corte(0, 1)], []);
-      s = s.copyWith(camadaAtiva: 1);
-      s = adicionar(s, corte(0, 1), beats: const [], snap: false);
+    test('the new clip goes into the active layer', () {
+      var s = layeredState([cut(0, 1)], []);
+      s = s.copyWith(activeLayer: 1);
+      s = addClip(s, cut(0, 1), beats: const [], snap: false);
 
       expect(s.layers[0].clips, hasLength(1));
       expect(s.layers[1].clips, hasLength(1));
-      // e não foi empurrado: a camada de cima estava livre naquele instante
+      // and it was not pushed: the top layer was free at that instant
       expect(s.layers[1].clips.first.atS, 0);
     });
 
-    test('trocar de camada mantém o instante', () {
-      final s = estadoEmCamadas([corte(3, 1)], []);
+    test('switching layers keeps the instant', () {
+      final s = layeredState([cut(3, 1)], []);
       final id = s.layers[0].clips.first.id;
 
-      final depois = moverParaCamada(s, id, 1);
+      final afterState = moveToLayer(s, id, 1);
 
-      expect(depois.layers[0].clips, isEmpty);
-      expect(depois.layers[1].clips.first.atS, 3.0);
-      expect(depois.camadaAtiva, 1);
+      expect(afterState.layers[0].clips, isEmpty);
+      expect(afterState.layers[1].clips.first.atS, 3.0);
+      expect(afterState.activeLayer, 1);
     });
 
-    test('não troca de camada se o lugar estiver ocupado lá', () {
-      // empurrar para outro instante seria mudar duas coisas quando se pediu
+    test('does not switch layers if the place is taken there', () {
+      // pushing to another instant would change two things when one was asked
       // uma
-      final s = estadoEmCamadas([corte(0, 2)], [corte(1, 2)]);
+      final s = layeredState([cut(0, 2)], [cut(1, 2)]);
       final id = s.layers[0].clips.first.id;
 
-      expect(moverParaCamada(s, id, 1).layers[0].clips, hasLength(1));
+      expect(moveToLayer(s, id, 1).layers[0].clips, hasLength(1));
     });
 
-    test('a última camada não sai', () {
-      // sem camada nenhuma não haveria onde receber o próximo clipe
-      final s = estadoCom([corte(0, 1)]);
-      expect(removerCamada(s, 0).layers, hasLength(1));
+    test('the last layer cannot be removed', () {
+      // with no layer at all there would be nowhere to receive the next clip
+      final s = stateWith([cut(0, 1)]);
+      expect(removeLayer(s, 0).layers, hasLength(1));
     });
 
-    test('tirar uma camada leva os clipes dela e reancora a ativa', () {
-      var s = estadoEmCamadas([corte(0, 1)], [corte(0, 1)]);
-      s = s.copyWith(camadaAtiva: 1);
+    test('removing a layer takes its clips and re-anchors the active one', () {
+      var s = layeredState([cut(0, 1)], [cut(0, 1)]);
+      s = s.copyWith(activeLayer: 1);
 
-      final depois = removerCamada(s, 1);
+      final afterState = removeLayer(s, 1);
 
-      expect(depois.layers, hasLength(1));
-      expect(depois.clips, hasLength(1));
-      expect(depois.camadaAtiva, 0);
+      expect(afterState.layers, hasLength(1));
+      expect(afterState.clips, hasLength(1));
+      expect(afterState.activeLayer, 0);
     });
 
-    test('esconder e emudecer não mexem nos clipes', () {
-      var s = estadoEmCamadas([corte(0, 1)], [corte(0, 1)]);
-      s = ajustarCamada(s, 1, hidden: true, muted: true);
+    test('hiding and muting do not touch the clips', () {
+      var s = layeredState([cut(0, 1)], [cut(0, 1)]);
+      s = adjustLayer(s, 1, hidden: true, muted: true);
 
       expect(s.layers[1].hidden, isTrue);
       expect(s.layers[1].muted, isTrue);
-      expect(s.clips, hasLength(2), reason: 'os clipes continuam lá');
+      expect(s.clips, hasLength(2), reason: 'the clips are still there');
     });
 
-    test('o monitor mostra a camada de cima onde as duas se cobrem', () {
-      // o preview não compõe: ele mostra um quadro, e o que vale é o que o
-      // servidor vai desenhar por último
-      final s = estadoEmCamadas([corte(0, 4, t: 10)], [corte(1, 1, t: 50)]);
+    test('the monitor shows the top layer where both overlap', () {
+      // the preview does not composite: it shows one frame, and what counts is what
+      // the server will draw last
+      final s = layeredState([cut(0, 4, t: 10)], [cut(1, 1, t: 50)]);
       final below = s.layers[0].clips.single;
 
-      final visible = s.clipesVisiveis;
+      final visible = s.visibleClips;
       expect(visible, hasLength(3));
       expect(visible[1].sourceT, 50, reason: 'where they overlap, upper wins');
       expect(
-        origemEm(visible, 1.5),
+        sourceAt(visible, 1.5),
         closeTo(50 - 1 * kMomentAnchor + 0.5, 1e-9),
       );
       // before and after, the lower one carries on: it was only covered in
       // the middle
-      expect(origemEm(visible, 0.5), closeTo(below.startS + 0.5, 1e-9));
+      expect(sourceAt(visible, 0.5), closeTo(below.startS + 0.5, 1e-9));
       expect(
-        origemEm(visible, 3),
+        sourceAt(visible, 3),
         closeTo(below.startS + 3, 1e-9),
         reason: 'the piece after follows the recording where it would be',
       );
@@ -329,8 +329,8 @@ void main() {
     test('text on top does not erase the video below', () {
       // text is drawn over the picture; when it ended, the monitor went black
       // even with the video clip still running underneath
-      final s = estadoEmCamadas(
-        [corte(0, 6, t: 10)],
+      final s = layeredState(
+        [cut(0, 6, t: 10)],
         [
           const TimelineClip(
             atS: 1,
@@ -342,276 +342,276 @@ void main() {
         ],
       );
 
-      final visible = s.clipesVisiveis;
+      final visible = s.visibleClips;
       expect(visible.single.isText, isFalse);
       for (final t in [0.5, 2.0, 4.0, 5.5]) {
-        expect(origemEm(visible, t), isNotNull, reason: 'black at $t s');
+        expect(sourceAt(visible, t), isNotNull, reason: 'black at $t s');
       }
     });
 
-    test('camada escondida não aparece no monitor', () {
-      var s = estadoEmCamadas([corte(0, 1, t: 10)], [corte(0, 1, t: 50)]);
-      s = ajustarCamada(s, 1, hidden: true);
+    test('a hidden layer does not show on the monitor', () {
+      var s = layeredState([cut(0, 1, t: 10)], [cut(0, 1, t: 50)]);
+      s = adjustLayer(s, 1, hidden: true);
 
-      expect(s.clipesVisiveis.single.sourceT, 10);
+      expect(s.visibleClips.single.sourceT, 10);
     });
 
-    test('a montagem vai para o servidor em camadas', () {
-      final s = estadoEmCamadas([corte(0, 1)], [corte(2, 1)]);
-      final camadas = s.paraEnvio().toJson()['layers'] as List;
+    test('the montage goes to the server in layers', () {
+      final s = layeredState([cut(0, 1)], [cut(2, 1)]);
+      final layerList = s.toPayload().toJson()['layers'] as List;
 
-      expect(camadas, hasLength(2));
-      expect(((camadas[0] as Map)['clips'] as List), hasLength(1));
-      expect(((camadas[1] as Map)['clips'] as List), hasLength(1));
+      expect(layerList, hasLength(2));
+      expect(((layerList[0] as Map)['clips'] as List), hasLength(1));
+      expect(((layerList[1] as Map)['clips'] as List), hasLength(1));
     });
   });
 
-  group('adicionar e apagar', () {
-    test('o bloco novo entra selecionado', () {
-      final s = adicionar(
-        MontageState.vazio(),
-        corte(0, 1),
+  group('adding and deleting', () {
+    test('the new block comes in selected', () {
+      final s = addClip(
+        MontageState.blank(),
+        cut(0, 1),
         beats: const [],
         snap: false,
       );
 
       expect(s.clips, hasLength(1));
-      expect(s.selecao, {s.clips.first.id});
+      expect(s.selectionIds, {s.clips.first.id});
     });
 
-    test('um bloco novo em cima de outro vai para a primeira vaga', () {
-      var s = estadoCom([corte(0, 2)]);
-      s = adicionar(s, corte(0.5, 1), beats: const [], snap: false);
+    test('a new block on top of another goes to the first free slot', () {
+      var s = stateWith([cut(0, 2)]);
+      s = addClip(s, cut(0.5, 1), beats: const [], snap: false);
 
       expect(s.clips.last.atS, 2.0);
     });
 
-    test('apagar tira só os escolhidos e limpa a seleção', () {
-      final s = estadoCom([corte(0, 1), corte(2, 1), corte(4, 1)]);
-      final depois = remover(s, {s.clips[1].id});
+    test('deleting removes only the selected ones and clears the selection', () {
+      final s = stateWith([cut(0, 1), cut(2, 1), cut(4, 1)]);
+      final afterState = removeClips(s, {s.clips[1].id});
 
-      expect(depois.clips.map((c) => c.atS), [0.0, 4.0]);
-      expect(depois.selecao, isEmpty);
+      expect(afterState.clips.map((c) => c.atS), [0.0, 4.0]);
+      expect(afterState.selectionIds, isEmpty);
     });
   });
 
-  group('dividir', () {
+  group('splitting', () {
     test(
-      'a emenda é invisível: a segunda metade continua de onde a primeira parou',
+      'the seam is invisible: the second half continues where the first stopped',
       () {
-        final s = estadoCom([corte(0, 2, t: 10)]);
+        final s = stateWith([cut(0, 2, t: 10)]);
         final original = s.clips.first;
 
-        final depois = dividir(s, original.id, 1.2);
+        final afterState = split(s, original.id, 1.2);
 
-        expect(depois.clips, hasLength(2));
-        final a = depois.clips[0];
-        final b = depois.clips[1];
+        expect(afterState.clips, hasLength(2));
+        final a = afterState.clips[0];
+        final b = afterState.clips[1];
         expect(a.durationS, closeTo(1.2, 1e-9));
         expect(b.atS, closeTo(1.2, 1e-9));
         expect(b.durationS, closeTo(0.8, 1e-9));
-        // o quadro seguinte da gravação, sem salto nem repetição
+        // the next frame of the recording, with no jump or repetition
         expect(b.startS, closeTo(a.endS, 1e-9));
-        // e juntas continuam cobrindo exatamente o que o bloco cobria
+        // and together they still cover exactly what the block covered
         expect(b.untilS, closeTo(original.untilS, 1e-9));
       },
     );
 
-    test('a metade nova fica selecionada, para seguir editando', () {
-      final s = estadoCom([corte(0, 2)]);
-      final depois = dividir(s, s.clips.first.id, 1);
-      expect(depois.selecao, {depois.clips[1].id});
+    test('the new half stays selected, to keep editing', () {
+      final s = stateWith([cut(0, 2)]);
+      final afterState = split(s, s.clips.first.id, 1);
+      expect(afterState.selectionIds, {afterState.clips[1].id});
     });
 
-    test('não divide se sobrasse um pedaço invisível', () {
-      final s = estadoCom([corte(0, 1)]);
-      expect(dividir(s, s.clips.first.id, 0.99).clips, hasLength(1));
-      expect(dividir(s, s.clips.first.id, 0.01).clips, hasLength(1));
+    test('does not split if an invisible piece would be left', () {
+      final s = stateWith([cut(0, 1)]);
+      expect(split(s, s.clips.first.id, 0.99).clips, hasLength(1));
+      expect(split(s, s.clips.first.id, 0.01).clips, hasLength(1));
     });
 
-    test('dividir fora do bloco não faz nada', () {
-      final s = estadoCom([corte(0, 1)]);
-      expect(dividir(s, s.clips.first.id, 5).clips, hasLength(1));
+    test('splitting outside the block does nothing', () {
+      final s = stateWith([cut(0, 1)]);
+      expect(split(s, s.clips.first.id, 5).clips, hasLength(1));
     });
   });
 
-  group('seleção em lote', () {
-    test('o grupo anda junto, mantendo a distância entre os blocos', () {
-      var s = estadoCom([corte(0, 1), corte(2, 1), corte(10, 1)]);
-      s = s.copyWith(selecao: {s.clips[0].id, s.clips[1].id});
+  group('batch selection', () {
+    test('the group moves together, keeping the distance between blocks', () {
+      var s = stateWith([cut(0, 1), cut(2, 1), cut(10, 1)]);
+      s = s.copyWith(selectionIds: {s.clips[0].id, s.clips[1].id});
 
-      final depois = moverSelecao(s, 3, beats: const [], snap: false);
+      final afterState = moveSelection(s, 3, beats: const [], snap: false);
 
-      expect(depois.clips[0].atS, 3.0);
-      expect(depois.clips[1].atS, 5.0);
+      expect(afterState.clips[0].atS, 3.0);
+      expect(afterState.clips[1].atS, 5.0);
       expect(
-        depois.clips[2].atS,
+        afterState.clips[2].atS,
         10.0,
-        reason: 'quem não estava na seleção ficou',
+        reason: 'whoever was not in the selection stayed',
       );
     });
 
-    test('anda junto ou não anda: colidir cancela o movimento inteiro', () {
-      // mover metade de uma seleção desmancharia um arranjo já feito
-      var s = estadoCom([corte(0, 1), corte(2, 1), corte(4, 1)]);
-      s = s.copyWith(selecao: {s.clips[0].id, s.clips[1].id});
+    test('moves together or not at all: a collision cancels the whole move', () {
+      // moving half of a selection would undo an arrangement already made
+      var s = stateWith([cut(0, 1), cut(2, 1), cut(4, 1)]);
+      s = s.copyWith(selectionIds: {s.clips[0].id, s.clips[1].id});
 
-      final depois = moverSelecao(s, 2.5, beats: const [], snap: false);
+      final afterState = moveSelection(s, 2.5, beats: const [], snap: false);
 
-      expect(depois.clips.map((c) => c.atS), [0.0, 2.0, 4.0]);
+      expect(afterState.clips.map((c) => c.atS), [0.0, 2.0, 4.0]);
     });
 
-    test('não empurra o grupo para antes do primeiro quadro', () {
-      var s = estadoCom([corte(1, 1), corte(3, 1)]);
-      s = s.copyWith(selecao: {for (final c in s.clips) c.id});
+    test('does not push the group before the first frame', () {
+      var s = stateWith([cut(1, 1), cut(3, 1)]);
+      s = s.copyWith(selectionIds: {for (final c in s.clips) c.id});
 
       expect(
-        moverSelecao(s, -2, beats: const [], snap: false).clips[0].atS,
+        moveSelection(s, -2, beats: const [], snap: false).clips[0].atS,
         1.0,
       );
     });
 
-    test('com ímã, o grupo gruda pela borda do primeiro', () {
-      var s = estadoCom([corte(0, 1), corte(2, 1)]);
-      s = s.copyWith(selecao: {for (final c in s.clips) c.id});
+    test('with the magnet, the group snaps by the edge of the first one', () {
+      var s = stateWith([cut(0, 1), cut(2, 1)]);
+      s = s.copyWith(selectionIds: {for (final c in s.clips) c.id});
 
-      final depois = moverSelecao(
+      final afterState = moveSelection(
         s,
         1.04,
         beats: const [0, 1, 2, 3, 4],
         snap: true,
       );
 
-      expect(depois.clips[0].atS, 1.0);
-      expect(depois.clips[1].atS, 3.0, reason: 'a distância se manteve');
+      expect(afterState.clips[0].atS, 1.0);
+      expect(afterState.clips[1].atS, 3.0, reason: 'the distance was kept');
     });
   });
 
-  group('duplicar e colar', () {
-    test('as cópias vão para depois do fim, com identidade nova', () {
-      var s = estadoCom([corte(0, 1), corte(2, 1)]);
+  group('duplicating and pasting', () {
+    test('the copies go after the end, with a new identity', () {
+      var s = stateWith([cut(0, 1), cut(2, 1)]);
       final ids = {for (final c in s.clips) c.id};
 
-      s = duplicar(s, ids);
+      s = duplicate(s, ids);
 
       expect(s.clips, hasLength(4));
       expect(s.clips[2].atS, 3.0);
-      expect(s.clips[3].atS, 5.0, reason: 'o arranjo interno se manteve');
+      expect(s.clips[3].atS, 5.0, reason: 'the internal arrangement was kept');
       expect(
         ids.intersection({for (final c in s.clips.skip(2)) c.id}),
         isEmpty,
       );
-      expect(s.selecao, {s.clips[2].id, s.clips[3].id});
+      expect(s.selectionIds, {s.clips[2].id, s.clips[3].id});
     });
 
-    test('colar no cursor mantém o arranjo', () {
-      final s = estadoCom([corte(0, 1)]);
-      final area = [corte(10, 1), corte(12, 2)];
+    test('pasting at the cursor keeps the arrangement', () {
+      final s = stateWith([cut(0, 1)]);
+      final area = [cut(10, 1), cut(12, 2)];
 
-      final depois = colar(s, area, 4);
+      final afterState = paste(s, area, 4);
 
-      expect(depois.clips[1].atS, 4.0);
-      expect(depois.clips[2].atS, 6.0);
+      expect(afterState.clips[1].atS, 4.0);
+      expect(afterState.clips[2].atS, 6.0);
     });
 
-    test('sem caber no cursor, o grupo inteiro vai para o fim', () {
-      // espalhar as cópias pelos buracos seria menos previsível
-      final s = estadoCom([corte(0, 5)]);
-      final depois = colar(s, [corte(0, 1), corte(2, 1)], 1);
+    test('if it does not fit at the cursor, the whole group goes to the end', () {
+      // spreading the copies through the gaps would be less predictable
+      final s = stateWith([cut(0, 5)]);
+      final afterState = paste(s, [cut(0, 1), cut(2, 1)], 1);
 
-      expect(depois.clips[1].atS, 5.0);
-      expect(depois.clips[2].atS, 7.0);
+      expect(afterState.clips[1].atS, 5.0);
+      expect(afterState.clips[2].atS, 7.0);
     });
 
-    test('colar nada não muda nada', () {
-      final s = estadoCom([corte(0, 1)]);
-      expect(colar(s, const [], 3).clips, hasLength(1));
+    test('pasting nothing changes nothing', () {
+      final s = stateWith([cut(0, 1)]);
+      expect(paste(s, const [], 3).clips, hasLength(1));
     });
   });
 
-  group('histórico', () {
-    test('desfazer volta ao estado anterior; refazer traz de volta', () {
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      final id = h.atual.clips.first.id;
+  group('history', () {
+    test('undo goes back to the previous state; redo brings it back', () {
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      final id = h.present.clips.first.id;
 
-      h.aplicar(moverBloco(h.atual, id, 5, beats: const [], snap: false));
-      expect(h.atual.clips.first.atS, 5);
+      h.apply(moveBlock(h.present, id, 5, beats: const [], snap: false));
+      expect(h.present.clips.first.atS, 5);
 
-      expect(h.desfazer().clips.first.atS, 0);
-      expect(h.refazer().clips.first.atS, 5);
+      expect(h.undo().clips.first.atS, 0);
+      expect(h.redo().clips.first.atS, 5);
     });
 
-    test('sem nada a desfazer, não estoura nem inventa', () {
-      final h = MontageHistory(MontageState.vazio());
-      expect(h.podeDesfazer, isFalse);
-      expect(h.desfazer().clips, isEmpty);
-      expect(h.refazer().clips, isEmpty);
+    test('with nothing to undo, it neither blows up nor invents', () {
+      final h = MontageHistory(MontageState.blank());
+      expect(h.canUndo, isFalse);
+      expect(h.undo().clips, isEmpty);
+      expect(h.redo().clips, isEmpty);
     });
 
-    test('um arrasto inteiro vale um passo só', () {
-      // sem agrupar, desfazer andaria um pixel de cada vez
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      final id = h.atual.clips.first.id;
+    test('a whole drag counts as a single step', () {
+      // without grouping, undo would go one pixel at a time
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      final id = h.present.clips.first.id;
 
-      h.abrirGesto();
+      h.startGesture();
       for (final at in [1.0, 2.0, 3.0, 4.0]) {
-        h.aplicar(moverBloco(h.atual, id, at, beats: const [], snap: false));
+        h.apply(moveBlock(h.present, id, at, beats: const [], snap: false));
       }
-      h.fecharGesto();
+      h.endGesture();
 
-      expect(h.atual.clips.first.atS, 4);
-      expect(h.desfazer().clips.first.atS, 0);
-      expect(h.podeDesfazer, isFalse);
+      expect(h.present.clips.first.atS, 4);
+      expect(h.undo().clips.first.atS, 0);
+      expect(h.canUndo, isFalse);
     });
 
-    test('dois arrastos são dois passos', () {
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      final id = h.atual.clips.first.id;
+    test('two drags are two steps', () {
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      final id = h.present.clips.first.id;
 
       for (final at in [2.0, 4.0]) {
-        h.abrirGesto();
-        h.aplicar(moverBloco(h.atual, id, at, beats: const [], snap: false));
-        h.fecharGesto();
+        h.startGesture();
+        h.apply(moveBlock(h.present, id, at, beats: const [], snap: false));
+        h.endGesture();
       }
 
-      expect(h.desfazer().clips.first.atS, 2);
-      expect(h.desfazer().clips.first.atS, 0);
+      expect(h.undo().clips.first.atS, 2);
+      expect(h.undo().clips.first.atS, 0);
     });
 
-    test('editar depois de desfazer descarta o refazer', () {
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      final id = h.atual.clips.first.id;
+    test('editing after undoing discards the redo', () {
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      final id = h.present.clips.first.id;
 
-      h.aplicar(moverBloco(h.atual, id, 5, beats: const [], snap: false));
-      h.desfazer();
-      h.aplicar(moverBloco(h.atual, id, 9, beats: const [], snap: false));
+      h.apply(moveBlock(h.present, id, 5, beats: const [], snap: false));
+      h.undo();
+      h.apply(moveBlock(h.present, id, 9, beats: const [], snap: false));
 
-      expect(h.podeRefazer, isFalse);
-      expect(h.atual.clips.first.atS, 9);
+      expect(h.canRedo, isFalse);
+      expect(h.present.clips.first.atS, 9);
     });
 
-    test('selecionar não vira passo de desfazer', () {
-      // desfazer tem de voltar uma *edição*, não uma mudança de foco
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      h.substituir(h.atual.copyWith(selecao: {h.atual.clips.first.id}));
+    test('selecting does not become an undo step', () {
+      // undo has to go back one *edit*, not a focus change
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      h.replace(h.present.copyWith(selectionIds: {h.present.clips.first.id}));
 
-      expect(h.podeDesfazer, isFalse);
-      expect(h.atual.selecao, hasLength(1));
+      expect(h.canUndo, isFalse);
+      expect(h.present.selectionIds, hasLength(1));
     });
 
-    test('aplicar o mesmo estado não cria passo', () {
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      h.aplicar(h.atual);
-      expect(h.podeDesfazer, isFalse);
+    test('applying the same state does not create a step', () {
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      h.apply(h.present);
+      expect(h.canUndo, isFalse);
     });
 
-    test('o histórico tem teto', () {
-      final h = MontageHistory(estadoCom([corte(0, 1)]));
-      final id = h.atual.clips.first.id;
-      for (var i = 0; i < MontageHistory.maxPassos + 40; i++) {
-        h.aplicar(
-          moverBloco(
-            h.atual,
+    test('the history has a ceiling', () {
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      final id = h.present.clips.first.id;
+      for (var i = 0; i < MontageHistory.maxSteps + 40; i++) {
+        h.apply(
+          moveBlock(
+            h.present,
             id,
             i.toDouble() + 1,
             beats: const [],
@@ -619,76 +619,76 @@ void main() {
           ),
         );
       }
-      var passos = 0;
-      while (h.podeDesfazer) {
-        h.desfazer();
-        passos++;
+      var steps = 0;
+      while (h.canUndo) {
+        h.undo();
+        steps++;
       }
-      expect(passos, MontageHistory.maxPassos);
+      expect(steps, MontageHistory.maxSteps);
     });
   });
 
-  group('música na régua', () {
-    Track musica({
+  group('music on the timeline', () {
+    Track music({
       String id = 'm1',
-      String nome = 'faixa.mp3',
-      double duracao = 90,
+      String displayName = 'track.mp3',
+      double durationValue = 90,
       String status = 'ready',
     }) => Track(
       id: id,
       status: status,
-      name: nome,
-      durationS: duracao,
+      name: displayName,
+      durationS: durationValue,
       bpm: 120,
       beats: const [],
       peaks: const [],
       audioUrl: '',
     );
 
-    test('a camada de som não desenha nada', () {
-      // é a diferença que justifica o tipo: um bloco de música na camada de
-      // cima apagaria o vídeo se o empilhamento visual o considerasse
-      final s = porMusica(
-        adicionarCamadaDeMusica(estadoCom([corte(0, 2)])),
-        musica(),
+    test('the sound layer draws nothing', () {
+      // it is the difference that justifies the kind: a music block on the top
+      // layer would erase the video if the visual stacking took it into account
+      final s = putMusic(
+        addMusicLayer(stateWith([cut(0, 2)])),
+        music(),
         atS: 0,
       );
 
       expect(s.layers.last.isAudio, isTrue);
       expect(s.layers.last.clips, hasLength(1));
-      expect(s.clipesVisiveis, hasLength(1));
-      expect(s.clipesVisiveis.single.source, isNot('media'));
+      expect(s.visibleClips, hasLength(1));
+      expect(s.visibleClips.single.source, isNot('media'));
     });
 
-    test('abrir a camada de som leva o foco para ela', () {
-      final s = adicionarCamadaDeMusica(estadoCom([corte(0, 2)]));
-      expect(s.camadaAtiva, s.layers.length - 1);
-      expect(s.selecao, isEmpty);
+    test('opening the sound layer moves the focus to it', () {
+      final s = addMusicLayer(stateWith([cut(0, 2)]));
+      expect(s.activeLayer, s.layers.length - 1);
+      expect(s.selectionIds, isEmpty);
     });
 
-    test('pôr música sem camada de som abre uma', () {
-      // ninguém deveria ter de preparar o terreno antes de pedir a música
-      final s = porMusica(estadoCom([corte(0, 2)]), musica(), atS: 0);
+    test('adding music without a sound layer opens one', () {
+      // nobody should have to prepare the ground before asking for the music
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
 
       expect(s.layers, hasLength(2));
       expect(s.layers.last.isAudio, isTrue);
       expect(s.layers.last.clips.single.mediaId, 'm1');
-      expect(s.selecao, {s.layers.last.clips.single.id});
+      expect(s.selectionIds, {s.layers.last.clips.single.id});
     });
 
-    test('a segunda música vai para a mesma camada de som', () {
-      var s = porMusica(estadoCom([corte(0, 2)]), musica(), atS: 0);
-      s = porMusica(s, musica(id: 'm2'), atS: 200, durationS: 10);
+    test('the second song goes to the same sound layer', () {
+      var s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      s = putMusic(s, music(id: 'm2'), atS: 200, durationS: 10);
 
-      expect(s.layers, hasLength(2), reason: 'não abriu outra camada');
+      expect(s.layers, hasLength(2), reason: 'it did not open another layer');
       expect(s.layers.last.clips, hasLength(2));
       expect(s.layers.last.clips.last.mediaId, 'm2');
     });
 
-    test('sem duração pedida, entra o que sobra da faixa', () {
-      final s = porMusica(
-        estadoCom([corte(0, 2)]),
-        musica(duracao: 90),
+    test('without a requested duration, what is left of the track goes in', () {
+      final s = putMusic(
+        stateWith([cut(0, 2)]),
+        music(durationValue: 90),
         atS: 0,
         startS: 20,
       );
@@ -697,10 +697,10 @@ void main() {
       expect(s.layers.last.clips.single.startS, 20);
     });
 
-    test('a duração pedida não passa do que a faixa tem', () {
-      final s = porMusica(
-        estadoCom([corte(0, 2)]),
-        musica(duracao: 30),
+    test('the requested duration does not exceed what the track has', () {
+      final s = putMusic(
+        stateWith([cut(0, 2)]),
+        music(durationValue: 30),
         atS: 0,
         durationS: 500,
       );
@@ -708,264 +708,264 @@ void main() {
       expect(s.layers.last.clips.single.durationS, 30);
     });
 
-    test('onde já há música, a nova entra depois — não empurra ninguém', () {
-      // empurrar desalinharia a que já estava encaixada na batida
-      var s = porMusica(
-        estadoCom([corte(0, 2)]),
-        musica(),
+    test('where there is already music, the new one goes after — it pushes no one', () {
+      // pushing would misalign the one already fitted to the beat
+      var s = putMusic(
+        stateWith([cut(0, 2)]),
+        music(),
         atS: 0,
         durationS: 10,
       );
-      s = porMusica(s, musica(id: 'm2'), atS: 5, durationS: 10);
+      s = putMusic(s, music(id: 'm2'), atS: 5, durationS: 10);
 
-      final blocos = s.layers.last.clips;
-      expect(blocos.map((c) => c.atS), [0, 10]);
-      expect(blocos.last.mediaId, 'm2');
+      final blocks = s.layers.last.clips;
+      expect(blocks.map((c) => c.atS), [0, 10]);
+      expect(blocks.last.mediaId, 'm2');
     });
 
-    test('música que ainda não foi ouvida não entra', () {
-      final s = estadoCom([corte(0, 2)]);
-      expect(porMusica(s, musica(status: 'pending'), atS: 0), same(s));
+    test('a song not yet listened to does not go in', () {
+      final s = stateWith([cut(0, 2)]);
+      expect(putMusic(s, music(status: 'pending'), atS: 0), same(s));
     });
 
-    test('a faixa contínua de uma montagem antiga vira bloco ao abrir', () {
-      // houve dois jeitos de ter música e sobrou um. Quem converte o formato
-      // velho é o código que lê -- e o servidor lê pela mesma regra
-      final s = montagemDoRascunho(
+    test('the continuous track of an old montage becomes a block on open', () {
+      // there were two ways of having music and one was left. Whoever converts the
+      // old format is the reading code -- and the server reads by the same rule
+      final s = montageFromDraft(
         Montage(
           trackId: 'm1',
           musicStartS: 12,
           layers: [
-            Layer(clips: [corte(0, 2), corte(2, 3)]),
+            Layer(clips: [cut(0, 2), cut(2, 3)]),
           ],
         ),
       );
 
       expect(s.layers, hasLength(2));
-      final bloco = s.layers.last.clips.single;
+      final block = s.layers.last.clips.single;
       expect(s.layers.last.isAudio, isTrue);
-      expect(bloco.mediaId, 'm1');
-      expect(bloco.atS, 0, reason: 'a música entrava com o vídeo');
-      expect(bloco.durationS, 5, reason: 'e cobria o vídeo inteiro');
-      expect(bloco.startS, 12, reason: 'do mesmo ponto da música');
+      expect(block.mediaId, 'm1');
+      expect(block.atS, 0, reason: 'the music came in with the video');
+      expect(block.durationS, 5, reason: 'and covered the whole video');
+      expect(block.startS, 12, reason: 'from the same point of the song');
     });
 
-    test('sem cortes não há vídeo a cobrir, e a faixa antiga se perde', () {
-      // um bloco de música sozinho não é montagem nenhuma: o que ele cobriria
-      final s = montagemDoRascunho(
+    test('without cuts there is no video to cover, and the old track is lost', () {
+      // a music block alone is no montage at all: what it would cover
+      final s = montageFromDraft(
         const Montage(trackId: 'm1', musicStartS: 3),
       );
       expect(s.layers.any((l) => l.isAudio), isFalse);
     });
 
-    test('a montagem convertida não manda a faixa de volta', () {
-      // mandá-la seria criar uma segunda música: ela já virou bloco
-      final s = montagemDoRascunho(
+    test('the converted montage does not send the track back', () {
+      // sending it would create a second song: it already became a block
+      final s = montageFromDraft(
         Montage(
           trackId: 'm1',
           musicStartS: 4,
           layers: [
-            Layer(clips: [corte(0, 2)]),
+            Layer(clips: [cut(0, 2)]),
           ],
         ),
       );
-      expect(s.paraEnvio().toJson().containsKey('track_id'), isFalse);
+      expect(s.toPayload().toJson().containsKey('track_id'), isFalse);
     });
 
-    test('som não sobe para camada de imagem', () {
-      // as duas coisas não se misturam: o servidor recusaria, e recusar aqui
-      // explica melhor
-      final s = porMusica(estadoCom([corte(0, 2)]), musica(), atS: 0);
-      final bloco = s.layers.last.clips.single.id;
+    test('sound does not go up to a picture layer', () {
+      // the two things do not mix: the server would refuse, and refusing here
+      // explains it better
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      final block = s.layers.last.clips.single.id;
       final video = s.clips.first.id;
 
-      expect(moverParaCamada(s, bloco, 0), same(s));
-      expect(moverParaCamada(s, video, 1), same(s));
+      expect(moveToLayer(s, block, 0), same(s));
+      expect(moveToLayer(s, video, 1), same(s));
     });
 
-    test('o bloco de música se move e se apara como qualquer outro', () {
-      // é o ponto da fase: depois de posto, ele é um clipe comum
-      final s = porMusica(
-        estadoCom([corte(0, 20)]),
-        musica(),
+    test('the music block moves and trims like any other', () {
+      // that is the point of the phase: once placed, it is a regular clip
+      final s = putMusic(
+        stateWith([cut(0, 20)]),
+        music(),
         atS: 0,
         durationS: 10,
       );
       final id = s.layers.last.clips.single.id;
 
-      final movido = moverBloco(s, id, 4, beats: const [], snap: false);
-      expect(movido.layers.last.clips.single.atS, 4);
+      final movedClip = moveBlock(s, id, 4, beats: const [], snap: false);
+      expect(movedClip.layers.last.clips.single.atS, 4);
 
-      final aparado = apararBloco(movido, id, 9, beats: const [], snap: false);
-      expect(aparado.layers.last.clips.single.durationS, 5);
+      final trimmed = trimBlock(movedClip, id, 9, beats: const [], snap: false);
+      expect(trimmed.layers.last.clips.single.durationS, 5);
     });
 
-    test('desfazer tira a música da régua', () {
-      final h = MontageHistory(estadoCom([corte(0, 2)]));
-      h.aplicar(porMusica(h.atual, musica(), atS: 0));
-      expect(h.atual.layers.last.clips, hasLength(1));
+    test('undo removes the music from the timeline', () {
+      final h = MontageHistory(stateWith([cut(0, 2)]));
+      h.apply(putMusic(h.present, music(), atS: 0));
+      expect(h.present.layers.last.clips, hasLength(1));
 
-      h.desfazer();
-      expect(h.atual.layers.any((l) => l.isAudio), isFalse);
-    });
-  });
-
-  group('posição no quadro', () {
-    test('mover o texto muda o transform, e nada mais', () {
-      // é o que o arrasto no monitor faz: a mesma conta do servidor, em
-      // fração da metade do quadro
-      final s = estadoCom([corte(0, 2)]);
-      final id = s.clips.first.id;
-
-      final depois = posicionarNoQuadro(s, id, x: 0.5, y: -0.25);
-
-      expect(depois.clips.first.transform.x, 0.5);
-      expect(depois.clips.first.transform.y, -0.25);
-      expect(depois.clips.first.transform.scale, 1.0);
-      expect(depois.clips.first.atS, 0, reason: 'a posição na régua não muda');
-      expect(s.clips.first.transform.x, 0, reason: 'o estado anterior ficou');
-    });
-
-    test('não deixa o conteúdo sair do quadro', () {
-      // um clipe que não aparece é indistinguível de um que sumiu
-      final s = estadoCom([corte(0, 2)]);
-      final id = s.clips.first.id;
-
-      final depois = posicionarNoQuadro(s, id, x: 9, y: -9);
-
-      expect(depois.clips.first.transform.x, 1.0);
-      expect(depois.clips.first.transform.y, -1.0);
-    });
-
-    test('mover um clipe que não existe mais não estoura', () {
-      final s = estadoCom([corte(0, 2)]);
-      expect(posicionarNoQuadro(s, 'fantasma', x: 0.5), same(s));
+      h.undo();
+      expect(h.present.layers.any((l) => l.isAudio), isFalse);
     });
   });
 
-  group('ordem das camadas', () {
-    test('reordenar troca quem fica por cima', () {
-      // a ordem da lista é a ordem em que o servidor desenha: a última ganha
-      final s = estadoEmCamadas([corte(0, 2)], [corte(0, 2)]);
-      final debaixo = s.layers[0].clips.first.id;
+  group('position in the frame', () {
+    test('moving the text changes the transform, and nothing else', () {
+      // that is what dragging on the monitor does: the same maths as the server, as
+      // a fraction of half the frame
+      final s = stateWith([cut(0, 2)]);
+      final id = s.clips.first.id;
 
-      final depois = reordenarCamadas(s, 0, 1);
+      final afterState = positionOnFrame(s, id, x: 0.5, y: -0.25);
 
-      expect(depois.layers[1].clips.first.id, debaixo);
-      expect(depois.camadaAtiva, 1, reason: 'o foco segue a camada movida');
-      expect(s.layers[0].clips.first.id, debaixo, reason: 'o anterior ficou');
+      expect(afterState.clips.first.transform.x, 0.5);
+      expect(afterState.clips.first.transform.y, -0.25);
+      expect(afterState.clips.first.transform.scale, 1.0);
+      expect(afterState.clips.first.atS, 0, reason: 'the position on the timeline does not change');
+      expect(s.clips.first.transform.x, 0, reason: 'the previous state stayed');
     });
 
-    test('o que o monitor mostra segue a ordem nova', () {
-      // dois clipes no mesmo instante: quem aparece é o da camada de cima
-      final s = estadoEmCamadas([corte(0, 2)], [corte(0, 2)]);
-      final deCima = s.layers[1].clips.first.id;
-      expect(s.clipesVisiveis.single.id, deCima);
+    test('does not let the content leave the frame', () {
+      // a clip that does not show is indistinguishable from one that vanished
+      final s = stateWith([cut(0, 2)]);
+      final id = s.clips.first.id;
 
-      final depois = reordenarCamadas(s, 1, 0);
-      expect(depois.clipesVisiveis.single.id, isNot(deCima));
+      final afterState = positionOnFrame(s, id, x: 9, y: -9);
+
+      expect(afterState.clips.first.transform.x, 1.0);
+      expect(afterState.clips.first.transform.y, -1.0);
     });
 
-    test('índice fora da lista não faz nada', () {
-      final s = estadoEmCamadas([corte(0, 2)], [corte(0, 2)]);
-      expect(reordenarCamadas(s, 0, 5), same(s));
-      expect(reordenarCamadas(s, -1, 0), same(s));
-      expect(reordenarCamadas(s, 1, 1), same(s));
-    });
-
-    test('reordenar entra no desfazer', () {
-      final h = MontageHistory(estadoEmCamadas([corte(0, 2)], [corte(4, 2)]));
-      final debaixo = h.atual.layers[0].clips.first.id;
-
-      h.aplicar(reordenarCamadas(h.atual, 0, 1));
-      expect(h.atual.layers[1].clips.first.id, debaixo);
-
-      h.desfazer();
-      expect(h.atual.layers[0].clips.first.id, debaixo);
+    test('moving a clip that no longer exists does not blow up', () {
+      final s = stateWith([cut(0, 2)]);
+      expect(positionOnFrame(s, 'ghost', x: 0.5), same(s));
     });
   });
 
-  group('alinhar a jogada', () {
-    /// Alinha e devolve o estado — a gravação é longa, e cabe deslizar.
-    MontageState alinhar(MontageState s, String id, double alvo) =>
-        alinharMomento(s, id, alvo, sourceDurationS: 600)!.estado;
+  group('layer order', () {
+    test('reordering swaps who stays on top', () {
+      // the list order is the order the server draws in: the last one wins
+      final s = layeredState([cut(0, 2)], [cut(0, 2)]);
+      final lowerId = s.layers[0].clips.first.id;
 
-    test('o bloco anda para pôr a jogada no ponto pedido', () {
-      // é a razão de existir: o corte começa antes da jogada, e mover pela
-      // borda deixaria o impacto meio segundo depois da batida
-      final s = estadoCom([corte(0, 2, t: 90)]); // jogada a 1,4s do começo
-      final id = s.clips.first.id;
+      final afterState = reorderLayers(s, 0, 1);
 
-      final depois = alinhar(s, id, 5);
-
-      expect(momentoNoVideo(depois.clips.first), closeTo(5, 1e-9));
-      expect(depois.clips.first.atS, closeTo(3.6, 1e-9));
-      expect(depois.clips.first.durationS, 2, reason: 'não estica nem apara');
-      expect(s.clips.first.atS, 0, reason: 'o estado anterior ficou');
+      expect(afterState.layers[1].clips.first.id, lowerId);
+      expect(afterState.activeLayer, 1, reason: 'the focus follows the moved layer');
+      expect(s.layers[0].clips.first.id, lowerId, reason: 'the previous one stayed');
     });
 
-    test('encostado no primeiro quadro, o trecho é que desliza', () {
-      // pedir a jogada em 0,5s levaria o começo do bloco para -0,9; em vez de
-      // parar na borda e não alinhar nada, o trecho anda dentro do bloco
-      final s = estadoCom([corte(0, 2, t: 90)]);
-      final feito = alinharMomento(
+    test('what the monitor shows follows the new order', () {
+      // two clips at the same instant: what shows is the top layer's
+      final s = layeredState([cut(0, 2)], [cut(0, 2)]);
+      final upperId = s.layers[1].clips.first.id;
+      expect(s.visibleClips.single.id, upperId);
+
+      final afterState = reorderLayers(s, 1, 0);
+      expect(afterState.visibleClips.single.id, isNot(upperId));
+    });
+
+    test('an index outside the list does nothing', () {
+      final s = layeredState([cut(0, 2)], [cut(0, 2)]);
+      expect(reorderLayers(s, 0, 5), same(s));
+      expect(reorderLayers(s, -1, 0), same(s));
+      expect(reorderLayers(s, 1, 1), same(s));
+    });
+
+    test('reordering goes into undo', () {
+      final h = MontageHistory(layeredState([cut(0, 2)], [cut(4, 2)]));
+      final lowerId = h.present.layers[0].clips.first.id;
+
+      h.apply(reorderLayers(h.present, 0, 1));
+      expect(h.present.layers[1].clips.first.id, lowerId);
+
+      h.undo();
+      expect(h.present.layers[0].clips.first.id, lowerId);
+    });
+  });
+
+  group('aligning the play', () {
+    /// Aligns and returns the state — the recording is long, and there is room to slide.
+    MontageState align(MontageState s, String id, double target) =>
+        alignMoment(s, id, target, sourceDurationS: 600)!.state;
+
+    test('the block moves to put the play at the requested point', () {
+      // it is the reason it exists: the cut starts before the play, and moving by
+      // the edge would leave the impact half a second after the beat
+      final s = stateWith([cut(0, 2, t: 90)]); // play 1.4s from the start
+      final id = s.clips.first.id;
+
+      final afterState = align(s, id, 5);
+
+      expect(momentInVideo(afterState.clips.first), closeTo(5, 1e-9));
+      expect(afterState.clips.first.atS, closeTo(3.6, 1e-9));
+      expect(afterState.clips.first.durationS, 2, reason: 'neither stretches nor trims');
+      expect(s.clips.first.atS, 0, reason: 'the previous state stayed');
+    });
+
+    test('against the first frame, it is the span that slides', () {
+      // asking for the play at 0.5s would take the block start to -0.9; instead of
+      // stopping at the edge and aligning nothing, the span moves inside the block
+      final s = stateWith([cut(0, 2, t: 90)]);
+      final done = alignMoment(
         s,
         s.clips.first.id,
         0.5,
         sourceDurationS: 600,
       )!;
 
-      expect(feito.deslizou, isTrue);
-      expect(feito.estado.clips.first.atS, 0);
-      expect(momentoNoVideo(feito.estado.clips.first), closeTo(0.5, 1e-9));
+      expect(done.didSlide, isTrue);
+      expect(done.state.clips.first.atS, 0);
+      expect(momentInVideo(done.state.clips.first), closeTo(0.5, 1e-9));
     });
 
-    test('com o vizinho no caminho, o trecho desliza dentro do bloco', () {
-      // numa montagem de blocos colados o bloco não tem para onde andar; o que
-      // sobra é trocar *qual* pedaço da gravação aparece ali, e a jogada vem
-      // até o cursor sem tocar em vizinho nenhum
-      final s = estadoCom([corte(0, 2, t: 90), corte(2, 2, t: 200)]);
+    test('with the neighbour in the way, the span slides inside the block', () {
+      // in a montage of back-to-back blocks the block has nowhere to go; what is
+      // left is changing *which* piece of the recording shows there, and the play
+      // comes to the cursor without touching any neighbour
+      final s = stateWith([cut(0, 2, t: 90), cut(2, 2, t: 200)]);
       final id = s.clips.first.id;
 
-      final feito = alinharMomento(s, id, 0.5, sourceDurationS: 600)!;
+      final done = alignMoment(s, id, 0.5, sourceDurationS: 600)!;
 
-      expect(feito.deslizou, isTrue);
-      expect(feito.estado.clips.first.atS, 0, reason: 'o bloco ficou');
-      expect(momentoNoVideo(feito.estado.clips.first), closeTo(0.5, 1e-9));
-      expect(feito.estado.clips.first.startS, closeTo(89.5, 1e-9));
-      expect(feito.estado.clips[1].atS, 2, reason: 'o vizinho não se mexeu');
+      expect(done.didSlide, isTrue);
+      expect(done.state.clips.first.atS, 0, reason: 'the block stayed');
+      expect(momentInVideo(done.state.clips.first), closeTo(0.5, 1e-9));
+      expect(done.state.clips.first.startS, closeTo(89.5, 1e-9));
+      expect(done.state.clips[1].atS, 2, reason: 'the neighbour did not move');
     });
 
-    test('andar com o bloco é o caminho preferido', () {
-      // ele mantém o embalo: o mesmo trecho da gravação, noutro instante
-      final s = estadoCom([corte(0, 2, t: 90)]);
-      final feito = alinharMomento(
+    test('moving the block is the preferred path', () {
+      // it keeps the run-up: the same span of the recording, at another instant
+      final s = stateWith([cut(0, 2, t: 90)]);
+      final done = alignMoment(
         s,
         s.clips.first.id,
         5,
         sourceDurationS: 600,
       )!;
 
-      expect(feito.deslizou, isFalse);
-      expect(feito.estado.clips.first.startS, s.clips.first.startS);
+      expect(done.didSlide, isFalse);
+      expect(done.state.clips.first.startS, s.clips.first.startS);
     });
 
-    test('sem gravação para deslizar, não há alinhamento a fazer', () {
-      // a jogada está a 1,4s do começo do bloco e a gravação acaba logo ali
-      final s = estadoCom([corte(0, 2, t: 1.4), corte(2, 2, t: 200)]);
+    test('without recording to slide, there is no alignment to do', () {
+      // the play is 1.4s from the block start and the recording ends right there
+      final s = stateWith([cut(0, 2, t: 1.4), cut(2, 2, t: 200)]);
       expect(
-        alinharMomento(s, s.clips.first.id, 1.9, sourceDurationS: 2.0),
+        alignMoment(s, s.clips.first.id, 1.9, sourceDurationS: 2.0),
         isNull,
       );
     });
 
-    test('bloco sem jogada não se alinha', () {
-      final s = porMusica(
-        estadoCom([corte(0, 2)]),
+    test('a block without a play is not aligned', () {
+      final s = putMusic(
+        stateWith([cut(0, 2)]),
         Track(
           id: 'm1',
           status: 'ready',
-          name: 'faixa.mp3',
+          name: 'track.mp3',
           durationS: 60,
           bpm: 120,
           beats: const [],
@@ -974,19 +974,19 @@ void main() {
         ),
         atS: 0,
       );
-      final bloco = s.layers.last.clips.single.id;
-      expect(alinharMomento(s, bloco, 3, sourceDurationS: 600), isNull);
+      final block = s.layers.last.clips.single.id;
+      expect(alignMoment(s, block, 3, sourceDurationS: 600), isNull);
     });
 
-    test('alinhar entra no desfazer', () {
-      final h = MontageHistory(estadoCom([corte(0, 2, t: 90)]));
-      final id = h.atual.clips.first.id;
+    test('aligning goes into undo', () {
+      final h = MontageHistory(stateWith([cut(0, 2, t: 90)]));
+      final id = h.present.clips.first.id;
 
-      h.aplicar(alinhar(h.atual, id, 5));
-      expect(h.atual.clips.first.atS, closeTo(3.6, 1e-9));
+      h.apply(align(h.present, id, 5));
+      expect(h.present.clips.first.atS, closeTo(3.6, 1e-9));
 
-      h.desfazer();
-      expect(h.atual.clips.first.atS, 0);
+      h.undo();
+      expect(h.present.clips.first.atS, 0);
     });
   });
 
@@ -994,28 +994,28 @@ void main() {
     const dissolve = ClipTransition(kind: 'dissolve', durationS: 0.5);
 
     test('applying sets the entrance on the given clips, and only them', () {
-      final s = estadoCom([corte(0, 2), corte(2, 2, t: 40)]);
+      final s = stateWith([cut(0, 2), cut(2, 2, t: 40)]);
       final [a, b] = s.clips;
 
       final after = applyTransition(s, [b.id], dissolve);
 
-      expect(after.clipe(b.id)!.transition, dissolve);
-      expect(after.clipe(a.id)!.transition, isNull);
-      expect(s.clipe(b.id)!.transition, isNull, reason: 'the old state stays');
+      expect(after.clipItem(b.id)!.transition, dissolve);
+      expect(after.clipItem(a.id)!.transition, isNull);
+      expect(s.clipItem(b.id)!.transition, isNull, reason: 'the old state stays');
     });
 
     test('null clears it', () {
-      var s = estadoCom([corte(0, 2)]);
+      var s = stateWith([cut(0, 2)]);
       final id = s.clips.single.id;
       s = applyTransition(s, [id], dissolve);
 
-      expect(applyTransition(s, [id], null).clipe(id)!.transition, isNull);
+      expect(applyTransition(s, [id], null).clipItem(id)!.transition, isNull);
     });
 
     test('a locked layer does not change', () {
-      var s = estadoCom([corte(0, 2)]);
+      var s = stateWith([cut(0, 2)]);
       final id = s.clips.single.id;
-      s = ajustarCamada(s, 0, locked: true);
+      s = adjustLayer(s, 0, locked: true);
 
       expect(applyTransition(s, [id], dissolve), same(s));
     });
@@ -1023,11 +1023,11 @@ void main() {
     test('splitting keeps the entrance on the left half only', () {
       // the right half carries on where the other stopped: a transition there
       // would show up mid-scene
-      var s = estadoCom([corte(0, 4)]);
+      var s = stateWith([cut(0, 4)]);
       final id = s.clips.single.id;
       s = applyTransition(s, [id], dissolve);
 
-      final [left, right] = dividir(s, id, 2).clips;
+      final [left, right] = split(s, id, 2).clips;
       expect(left.transition, dissolve);
       expect(right.transition, isNull);
     });

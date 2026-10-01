@@ -5,11 +5,11 @@ import '../api.dart';
 import '../main.dart' show PhoneWidth;
 import '../widgets/file_tile.dart';
 
-/// Primeira fase: só a gravação.
+/// First stage: just the recording.
 ///
-/// Nenhuma música e nenhum ajuste entram aqui. O sistema assiste à partida e
-/// anota o que aconteceu — eliminação, tiro na cabeça, dardo, pedrada — e é no
-/// editor, com os momentos na mão, que se decide o que vira vídeo.
+/// No music and no settings come in here. The system watches the match and
+/// notes what happened — kill, headshot, sleep dart, stun — and it is in the
+/// editor, with the moments at hand, that you decide what becomes a video.
 class NewJobScreen extends StatefulWidget {
   const NewJobScreen({super.key});
 
@@ -67,14 +67,14 @@ class _NewJobScreenState extends State<NewJobScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Nova partida')),
+      appBar: AppBar(title: const Text('New match')),
       body: PhoneWidth(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
           children: [
             FileTile(
               icon: Icons.videocam,
-              title: 'Gravação da partida',
+              title: 'Match recording',
               subtitle: _video == null
                   ? 'mp4, mkv, mov, avi, webm'
                   : '${_video!.name}  ·  ${_mb(_videoBytes)}',
@@ -98,10 +98,10 @@ class _NewJobScreenState extends State<NewJobScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'A música vem depois: o sistema separa os momentos da '
-                      'partida e você monta o vídeo no editor, encaixando '
-                      'cada corte na trilha que quiser. Sem trilha, o vídeo '
-                      'fica com o áudio original da partida.',
+                      'Music comes later: the system finds the moments of the '
+                      'match and you build the video in the editor, fitting '
+                      'each cut to the track you want. Without a track, the '
+                      'video keeps the original match audio.',
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
@@ -135,7 +135,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
               const SizedBox(height: 8),
               Center(
                 child: Text(
-                  'enviando… ${(_sent * 100).toStringAsFixed(0)}%',
+                  'uploading… ${(_sent * 100).toStringAsFixed(0)}%',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
@@ -143,7 +143,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
               FilledButton.icon(
                 onPressed: _video == null ? null : _submit,
                 icon: const Icon(Icons.auto_awesome),
-                label: const Text('Analisar a partida'),
+                label: const Text('Analyse the match'),
               ),
           ],
         ),

@@ -2,49 +2,51 @@ import 'dart:math' as math;
 
 import 'api.dart';
 
-/// As contas da montagem manual, longe de qualquer widget.
+/// The manual montage's computations, away from any widget.
 ///
-/// A tela desenha e arrasta; quem decide onde um bloco pode cair, quanto ele
-/// dura e onde o corte começa na gravação é este arquivo. Separado porque é a
-/// parte que tem resposta certa — e é a única que dá para testar sem pintar
-/// pixel nenhum.
+/// The screen draws and drags; what decides where a block can land, how long
+/// it lasts and where the cut starts in the recording is this file. Separate
+/// because it is the part with right answers — and the only one that can be
+/// tested without painting a single pixel.
 
-/// Onde o instante detectado cai dentro do corte.
+/// Where the detected instant falls inside the cut.
 ///
-/// 0.7 põe a eliminação a 70% do bloco: sobra embalo antes e o impacto cai
-/// perto do fim, que é onde ele funciona numa montagem. O usuário reposiciona
-/// depois se quiser — isto é só o palpite inicial.
+/// 0.7 puts the kill at 70% of the block: there is run-up before it and the
+/// impact lands near the end, which is where it works in a montage. The user
+/// repositions it later if they want — this is only the initial guess.
 const double kMomentAnchor = 0.7;
 
-/// Duração inicial de um bloco recém-posto, quando não há batida para sugerir
-/// outra coisa.
+/// Initial duration of a freshly placed block, when there is no beat to
+/// suggest anything else.
 const double kDefaultCutS = 1.2;
 
-/// Menor bloco que faz sentido. Abaixo disso o corte pisca e não se vê nada.
+/// The smallest block that makes sense. Below that the cut flickers and
+/// nothing is seen.
 const double kMinCutS = 0.2;
 
-/// O ímã só age quando a batida está perto: mais longe que isto, o usuário
-/// quis mesmo aquele ponto, e grudar seria desobedecer.
+/// The magnet only acts when the beat is close: further than this, the user
+/// really wanted that point, and snapping would be disobeying.
 const double kSnapToleranceS = 0.12;
 
-/// Gruda um instante na batida mais próxima, se houver uma ao alcance.
+/// Snaps an instant to the nearest beat, if there is one within reach.
 double snapToBeat(
   double value,
   List<double> beats, {
   double tolerance = kSnapToleranceS,
 }) {
   if (beats.isEmpty) return value;
-  var melhor = beats.first;
+  var best = beats.first;
   for (final b in beats) {
-    if ((b - value).abs() < (melhor - value).abs()) melhor = b;
+    if ((b - value).abs() < (best - value).abs()) best = b;
   }
-  return (melhor - value).abs() <= tolerance ? melhor : value;
+  return (best - value).abs() <= tolerance ? best : value;
 }
 
-/// Quanto dura o intervalo entre duas batidas — a unidade natural de corte.
+/// How long the interval between two beats lasts — the natural cutting unit.
 ///
-/// Vem da mediana, e não da média: uma batida perdida no começo da música
-/// esticaria a média e faria todo bloco sugerido nascer com o tamanho errado.
+/// It comes from the median, not the mean: a beat missed at the start of the
+/// music would stretch the mean and make every suggested block start out with
+/// the wrong size.
 double beatIntervalS(List<double> beats) {
   if (beats.length < 2) return kDefaultCutS;
   final gaps = <double>[
@@ -53,63 +55,66 @@ double beatIntervalS(List<double> beats) {
   return gaps[gaps.length ~/ 2];
 }
 
-/// A grade de batidas depois dos ajustes do usuário.
+/// The beat grid after the user's adjustments.
 ///
-/// O detector de ritmo acerta o andamento quase sempre e erra de duas maneiras
-/// previsíveis: pega o contratempo (a grade fica meio tempo adiantada) ou conta
-/// o dobro/metade das batidas. Nenhuma das duas dá para consertar arrastando
-/// blocos — é a régua que está errada, e corrigi-la conserta todos de uma vez.
+/// The rhythm detector gets the tempo right almost always and gets it wrong in
+/// two predictable ways: it picks the offbeat (the grid ends up half a beat
+/// early) or counts double/half the beats. Neither can be fixed by dragging
+/// blocks — it is the ruler that is wrong, and fixing it fixes all of them at
+/// once.
 ///
-/// [multiplicador] dobra (2) ou reduz à metade (0.5) a densidade;
-/// [offsetS] desloca a grade inteira; [compasso] maior que 1 deixa só o tempo
-/// forte de cada N batidas, que é onde a troca de cena costuma cair melhor.
-List<double> gradeAjustada(
+/// [multiplier] doubles (2) or halves (0.5) the density; [offsetS] shifts the
+/// whole grid; [bar] above 1 keeps only the downbeat of every N beats, which
+/// is where a scene change usually lands best.
+List<double> adjustedGrid(
   List<double> beats, {
   double offsetS = 0,
-  double multiplicador = 1,
-  int compasso = 1,
+  double multiplier = 1,
+  int bar = 1,
 }) {
   if (beats.isEmpty) return const [];
 
-  var grade = [...beats]..sort();
+  var grid = [...beats]..sort();
 
-  if (multiplicador >= 2) {
-    // uma batida no meio de cada par: o dobro da densidade
-    final densa = <double>[];
-    for (var i = 0; i < grade.length; i++) {
-      densa.add(grade[i]);
-      if (i + 1 < grade.length) densa.add((grade[i] + grade[i + 1]) / 2);
+  if (multiplier >= 2) {
+    // a beat in the middle of each pair: double the density
+    final dense = <double>[];
+    for (var i = 0; i < grid.length; i++) {
+      dense.add(grid[i]);
+      if (i + 1 < grid.length) dense.add((grid[i] + grid[i + 1]) / 2);
     }
-    grade = densa;
-  } else if (multiplicador <= 0.5) {
-    grade = [for (var i = 0; i < grade.length; i += 2) grade[i]];
+    grid = dense;
+  } else if (multiplier <= 0.5) {
+    grid = [for (var i = 0; i < grid.length; i += 2) grid[i]];
   }
 
-  if (compasso > 1) {
-    grade = [for (var i = 0; i < grade.length; i += compasso) grade[i]];
+  if (bar > 1) {
+    grid = [for (var i = 0; i < grid.length; i += bar) grid[i]];
   }
 
   if (offsetS != 0) {
-    grade = [
-      for (final b in grade)
+    grid = [
+      for (final b in grid)
         if (b + offsetS >= 0) b + offsetS,
     ];
   }
-  return grade;
+  return grid;
 }
 
-/// Como se identifica um momento da partida sem ambiguidade.
+/// How a match moment is identified without ambiguity.
 ///
-/// O instante sozinho não basta: uma eliminação na cabeça acende o detector de
-/// eliminações e o de acertos críticos quase no mesmo quadro, e os dois eventos
-/// podem cair no mesmo tempo arredondado. Com o tipo junto, cada cartão da
-/// prateleira tem chave própria e sabe sozinho se já foi para a régua.
-String chaveDoMomento(String kind, double t) => '$kind@${t.toStringAsFixed(3)}';
+/// The instant alone is not enough: a headshot kill lights up the kills
+/// detector and the critical hits one almost on the same frame, and both
+/// events can fall at the same rounded time. With the kind included, each card
+/// on the shelf has its own key and knows by itself whether it is already on
+/// the ruler.
+String momentKey(String kind, double t) => '$kind@${t.toStringAsFixed(3)}';
 
-/// O bloco que nasce quando o usuário joga um momento na linha do tempo.
+/// The block born when the user drops a moment on the timeline.
 ///
-/// A duração sai de um número inteiro de batidas quando há batidas: assim o
-/// bloco já nasce no ritmo, e o ímã tem onde grudar as bordas.
+/// The duration comes from a whole number of beats when there are beats: that
+/// way the block is born on the rhythm, and the magnet has somewhere to snap
+/// its edges.
 TimelineClip cutForMoment(
   DetectionEvent event, {
   required double atS,
@@ -117,94 +122,96 @@ TimelineClip cutForMoment(
   int beatsPerCut = 2,
   double? sourceDurationS,
 }) {
-  final duracao = beats.length >= 2
+  final durationValue = beats.length >= 2
       ? beatIntervalS(beats) * beatsPerCut
       : kDefaultCutS;
   return TimelineClip(
     sourceT: event.t,
     kind: event.kind,
     atS: math.max(0, atS),
-    durationS: duracao,
-    startS: sourceStartFor(event.t, duracao, sourceDurationS: sourceDurationS),
+    durationS: durationValue,
+    startS: sourceStartFor(event.t, durationValue, sourceDurationS: sourceDurationS),
   );
 }
 
-/// O clipe que nasce quando o usuário traz um item da biblioteca para a régua.
+/// The clip born when the user brings a library item to the ruler.
 ///
-/// Diferente de um momento da partida, aqui não há instante a enquadrar: o
-/// arquivo começa onde começa. O que se escolhe é quanto tempo ele fica.
-TimelineClip clipeDeMidia(
+/// Unlike a match moment, there is no instant to frame here: the file starts
+/// where it starts. What is chosen is how long it stays.
+TimelineClip mediaClip(
   Media item, {
   required double atS,
   required List<double> beats,
   int beatsPerCut = 2,
 }) {
-  final naBatida = beats.length >= 2 ? beatIntervalS(beats) * beatsPerCut : 0.0;
-  // um item curto manda na duração; senão, um número inteiro de batidas
-  final duracao = naBatida > 0
-      ? math.min(naBatida, item.duracaoSugerida)
-      : item.duracaoSugerida;
+  final onBeat = beats.length >= 2 ? beatIntervalS(beats) * beatsPerCut : 0.0;
+  // a short item rules the duration; otherwise, a whole number of beats
+  final durationValue = onBeat > 0
+      ? math.min(onBeat, item.suggestedDuration)
+      : item.suggestedDuration;
   return TimelineClip(
     atS: math.max(0, atS),
-    durationS: math.max(kMinCutS, duracao),
+    durationS: math.max(kMinCutS, durationValue),
     startS: 0,
     source: 'media',
     kind: item.kind,
   );
 }
 
-/// Onde o corte começa na gravação para que o instante caia em [kMomentAnchor].
+/// Where the cut starts in the recording so the instant lands at
+/// [kMomentAnchor].
 double sourceStartFor(
   double momentT,
   double durationS, {
   double? sourceDurationS,
 }) {
-  var inicio = momentT - durationS * kMomentAnchor;
-  if (sourceDurationS != null && inicio + durationS > sourceDurationS) {
-    inicio = sourceDurationS - durationS;
+  var startTime = momentT - durationS * kMomentAnchor;
+  if (sourceDurationS != null && startTime + durationS > sourceDurationS) {
+    startTime = sourceDurationS - durationS;
   }
-  return math.max(0, inicio);
+  return math.max(0, startTime);
 }
 
-/// Um bloco cabe em [atS] sem encostar nos vizinhos?
+/// Does a block fit at [atS] without touching its neighbours?
 ///
-/// [ignore] é o índice do próprio bloco quando ele está sendo arrastado — sem
-/// isso ele colidiria consigo mesmo e nunca sairia do lugar.
-bool cabe(
+/// [ignore] is the block's own index while it is being dragged — without it
+/// the block would collide with itself and never leave its place.
+bool fits(
   List<TimelineClip> cuts,
   double atS,
   double durationS, {
   int? ignore,
-}) => cabeIgnorando(cuts, atS, durationS, ignore == null ? const {} : {ignore});
+}) => fitsIgnoring(cuts, atS, durationS, ignore == null ? const {} : {ignore});
 
-/// Como [cabe], mas ignorando vários blocos de uma vez.
+/// Like [fits], but ignoring several blocks at once.
 ///
-/// É o que o movimento em lote precisa: os blocos que andam juntos não podem
-/// colidir entre si — eles mantêm a distância —, só com os que ficaram parados.
-bool cabeIgnorando(
+/// It is what a batch move needs: the blocks moving together must not collide
+/// with each other — they keep their distance — only with the ones that stayed
+/// still.
+bool fitsIgnoring(
   List<TimelineClip> cuts,
   double atS,
   double durationS,
-  Set<int> ignorar,
+  Set<int> ignored,
 ) {
   if (atS < 0) return false;
   for (var i = 0; i < cuts.length; i++) {
-    if (ignorar.contains(i)) continue;
-    final outro = cuts[i];
-    if (atS < outro.untilS - 1e-6 && outro.atS < atS + durationS - 1e-6) {
+    if (ignored.contains(i)) continue;
+    final other = cuts[i];
+    if (atS < other.untilS - 1e-6 && other.atS < atS + durationS - 1e-6) {
       return false;
     }
   }
   return true;
 }
 
-/// Onde pôr o próximo bloco: logo depois do último, ou no ponto pedido se ele
-/// estiver livre.
+/// Where to put the next block: right after the last one, or at the requested
+/// point if it is free.
 ///
-/// Serve ao caso comum de encher a montagem em sequência sem ter de mirar o
-/// cursor em cada encaixe.
-double proximaVaga(List<TimelineClip> cuts, double desejado, double duracao) {
-  if (cabe(cuts, desejado, duracao)) return desejado;
+/// It serves the common case of filling the montage in sequence without having
+/// to aim the cursor at each slot.
+double nextSlot(List<TimelineClip> cuts, double desired, double durationValue) {
+  if (fits(cuts, desired, durationValue)) return desired;
   var t = 0.0;
   for (final c in [...cuts]..sort((a, b) => a.atS.compareTo(b.atS))) {
     t = math.max(t, c.untilS);
@@ -212,176 +219,178 @@ double proximaVaga(List<TimelineClip> cuts, double desejado, double duracao) {
   return t;
 }
 
-/// Move um bloco para [atS], grudando na batida e recusando sobreposição.
+/// Moves a block to [atS], snapping to the beat and refusing overlap.
 ///
-/// Devolve o bloco parado no lugar antigo quando o destino está ocupado: é
-/// menos surpreendente do que empurrar o vizinho, que moveria um corte que o
-/// usuário já tinha encaixado.
-TimelineClip mover(
+/// It returns the block standing in its old place when the target is taken:
+/// that is less surprising than pushing the neighbour, which would move a cut
+/// the user had already fitted.
+TimelineClip move(
   List<TimelineClip> cuts,
   int index,
   double atS, {
   required List<double> beats,
   required bool snap,
 }) {
-  final atual = cuts[index];
-  var destino = math.max(0.0, atS);
+  final present = cuts[index];
+  var destination = math.max(0.0, atS);
   if (snap) {
-    // Gruda pelo começo, mas se o fim é que está perto de uma batida, é ele que
-    // manda: numa montagem o que se ouve é a troca de cena.
+    // It snaps by the start, but if it is the end that is close to a beat, the
+    // end rules: in a montage, what is heard is the scene change.
     //
-    // Só entram na disputa as bordas que **grudaram** em alguma coisa. Comparar
-    // as duas distâncias direto tinha um efeito escondido: a borda que não
-    // grudou fica exatamente onde o dedo largou, distância zero, e ganhava
-    // sempre — o ímã deixava de existir para qualquer bloco cuja duração não
-    // fosse múltipla do compasso.
-    // Três candidatos: as duas bordas e a **jogada**. A jogada é o que se
-    // alinha com a percussão numa montagem — a borda pode estar meio segundo
-    // antes dela —, e sem ela na disputa encaixar a eliminação na batida era
-    // mirar de olho na marca desenhada dentro do bloco.
-    final daMarca = atual.sourceT > 0
-        ? atual.sourceT - atual.startS
+    // Only the edges that **snapped** to something enter the contest.
+    // Comparing both distances directly had a hidden effect: the edge that did
+    // not snap stays exactly where the finger let go, distance zero, and always
+    // won — the magnet stopped existing for any block whose duration was not a
+    // multiple of the bar.
+    // Three candidates: the two edges and the **play**. The play is what lines
+    // up with the percussion in a montage — the edge can be half a second
+    // before it — and without it in the contest, fitting the kill to the beat
+    // meant eyeballing the mark drawn inside the block.
+    final fromMark = present.sourceT > 0
+        ? present.sourceT - present.startS
         : null;
-    final candidatos = <double>[
-      snapToBeat(destino, beats),
-      snapToBeat(destino + atual.durationS, beats) - atual.durationS,
-      if (daMarca != null && daMarca >= 0 && daMarca <= atual.durationS)
-        snapToBeat(destino + daMarca, beats) - daMarca,
+    final candidates = <double>[
+      snapToBeat(destination, beats),
+      snapToBeat(destination + present.durationS, beats) - present.durationS,
+      if (fromMark != null && fromMark >= 0 && fromMark <= present.durationS)
+        snapToBeat(destination + fromMark, beats) - fromMark,
     ];
 
-    // só entram os que grudaram: quem não grudou fica exatamente onde o dedo
-    // largou, distância zero, e ganharia sempre
-    final grudaram = [
-      for (final c in candidatos)
-        if ((c - destino).abs() > 1e-9) c,
+    // only the ones that snapped count: whoever did not snap stays exactly
+    // where the finger let go, distance zero, and would always win
+    final snapped = [
+      for (final c in candidates)
+        if ((c - destination).abs() > 1e-9) c,
     ];
-    if (grudaram.isNotEmpty) {
-      destino = grudaram.reduce(
-        (a, b) => (a - destino).abs() <= (b - destino).abs() ? a : b,
+    if (snapped.isNotEmpty) {
+      destination = snapped.reduce(
+        (a, b) => (a - destination).abs() <= (b - destination).abs() ? a : b,
       );
     }
-    destino = math.max(0, destino);
+    destination = math.max(0, destination);
   }
-  if (!cabe(cuts, destino, atual.durationS, ignore: index)) return atual;
-  return atual.copyWith(atS: destino);
+  if (!fits(cuts, destination, present.durationS, ignore: index)) return present;
+  return present.copyWith(atS: destination);
 }
 
-/// Estica ou encurta um bloco pela **borda direita**.
+/// Stretches or shortens a block by its **right edge**.
 ///
-/// O começo do corte não se move: cresce o rabo. É o que qualquer editor faz
-/// ao arrastar a borda, e é o que faz o gesto ser previsível — se o conteúdo
-/// se reenquadrasse a cada pixel, a imagem escorregaria debaixo do dedo.
+/// The cut's start does not move: the tail grows. It is what any editor does
+/// when dragging the edge, and it is what makes the gesture predictable — if
+/// the content reframed on every pixel, the picture would slide under the
+/// finger.
 ///
-/// (Na *criação* do bloco o enquadramento é ancorado a 70% — veja
-/// [cutForMoment]. Depois disso, quem reposiciona o conteúdo dentro do bloco é
-/// o controle de enquadramento, não a duração.)
-TimelineClip esticar(
+/// (When the block is *created*, the framing is anchored at 70% — see
+/// [cutForMoment]. After that, what repositions the content inside the block
+/// is the framing control, not the duration.)
+TimelineClip stretchRight(
   List<TimelineClip> cuts,
   int index,
-  double duracao, {
+  double durationValue, {
   required List<double> beats,
   required bool snap,
   double? sourceDurationS,
 }) {
-  final atual = cuts[index];
-  var nova = math.max(kMinCutS, duracao);
+  final present = cuts[index];
+  var fresh = math.max(kMinCutS, durationValue);
 
-  // não dá para mostrar o que não foi gravado
+  // what was not recorded cannot be shown
   if (sourceDurationS != null) {
-    nova = math.min(nova, math.max(kMinCutS, sourceDurationS - atual.startS));
+    fresh = math.min(fresh, math.max(kMinCutS, sourceDurationS - present.startS));
   }
   if (snap) {
-    final fim = snapToBeat(atual.atS + nova, beats);
-    if (fim - atual.atS >= kMinCutS) nova = fim - atual.atS;
+    final endTime = snapToBeat(present.atS + fresh, beats);
+    if (endTime - present.atS >= kMinCutS) fresh = endTime - present.atS;
   }
 
-  // encosta no vizinho em vez de recusar: parar exatamente no limite é o que o
-  // usuário está tentando fazer quando estica até lá
-  final vizinho = _proximoDepois(cuts, index, atual.atS);
-  if (vizinho != null) nova = math.min(nova, vizinho - atual.atS);
-  if (nova < kMinCutS) return atual;
+  // it stops against the neighbour instead of refusing: stopping exactly at
+  // the limit is what the user is trying to do when stretching up to it
+  final neighbour = _nextAfter(cuts, index, present.atS);
+  if (neighbour != null) fresh = math.min(fresh, neighbour - present.atS);
+  if (fresh < kMinCutS) return present;
 
-  return atual.copyWith(durationS: nova);
+  return present.copyWith(durationS: fresh);
 }
 
-/// Apara o bloco pela **borda esquerda**, sem mover o que já está enquadrado.
+/// Trims the block by its **left edge**, without moving what is already
+/// framed.
 ///
-/// Arrastar a esquerda come o começo do corte: a borda anda, o conteúdo fica
-/// no lugar. Por isso o início na gravação anda junto, na mesma medida — é
-/// isso que distingue *aparar* de *mover*.
-TimelineClip aparar(
+/// Dragging the left edge eats the cut's start: the edge moves, the content
+/// stays in place. That is why the start in the recording moves along, by the
+/// same amount — it is what tells *trimming* apart from *moving*.
+TimelineClip trimLeft(
   List<TimelineClip> cuts,
   int index,
-  double novoAt, {
+  double newAt, {
   required List<double> beats,
   required bool snap,
 }) {
-  final atual = cuts[index];
-  var destino = math.max(0.0, novoAt);
-  if (snap) destino = math.max(0, snapToBeat(destino, beats));
+  final present = cuts[index];
+  var destination = math.max(0.0, newAt);
+  if (snap) destination = math.max(0, snapToBeat(destination, beats));
 
-  // não pode invadir o vizinho de trás nem começar antes da gravação
-  final anterior = _anteriorAntes(cuts, index, atual.atS);
-  if (anterior != null) destino = math.max(destino, anterior);
-  destino = math.max(destino, atual.atS - atual.startS);
+  // it cannot run into the neighbour behind nor start before the recording
+  final previous = _previousBefore(cuts, index, present.atS);
+  if (previous != null) destination = math.max(destination, previous);
+  destination = math.max(destination, present.atS - present.startS);
 
-  final nova = atual.untilS - destino;
-  if (nova < kMinCutS) return atual;
+  final fresh = present.untilS - destination;
+  if (fresh < kMinCutS) return present;
 
-  return atual.copyWith(
-    atS: destino,
-    durationS: nova,
-    startS: atual.startS + (destino - atual.atS),
+  return present.copyWith(
+    atS: destination,
+    durationS: fresh,
+    startS: present.startS + (destination - present.atS),
   );
 }
 
-/// Onde começa o bloco seguinte — o teto de quem estica para a direita.
-double? _proximoDepois(List<TimelineClip> cuts, int index, double at) {
-  double? menor;
+/// Where the next block starts — the ceiling for whoever stretches right.
+double? _nextAfter(List<TimelineClip> cuts, int index, double at) {
+  double? smaller;
   for (var i = 0; i < cuts.length; i++) {
     if (i == index) continue;
-    final outro = cuts[i].atS;
-    if (outro >= at - 1e-6 && (menor == null || outro < menor)) menor = outro;
+    final other = cuts[i].atS;
+    if (other >= at - 1e-6 && (smaller == null || other < smaller)) smaller = other;
   }
-  return menor;
+  return smaller;
 }
 
-/// Onde termina o bloco anterior — o piso de quem apara pela esquerda.
-double? _anteriorAntes(List<TimelineClip> cuts, int index, double at) {
-  double? maior;
+/// Where the previous block ends — the floor for whoever trims from the left.
+double? _previousBefore(List<TimelineClip> cuts, int index, double at) {
+  double? larger;
   for (var i = 0; i < cuts.length; i++) {
     if (i == index) continue;
-    final fim = cuts[i].untilS;
-    if (fim <= at + 1e-6 && (maior == null || fim > maior)) maior = fim;
+    final endTime = cuts[i].untilS;
+    if (endTime <= at + 1e-6 && (larger == null || endTime > larger)) larger = endTime;
   }
-  return maior;
+  return larger;
 }
 
-/// Onde, de 0 a 1 do bloco, cai o instante que o originou.
+/// Where, from 0 to 1 of the block, the instant it came from falls.
 ///
-/// É a marca desenhada dentro do bloco. Sem ela, encaixar a eliminação na
-/// batida seria adivinhar: o que se alinha com a percussão é a jogada, não a
-/// borda do corte — e a borda pode estar meio segundo antes dela.
+/// It is the mark drawn inside the block. Without it, fitting the kill to the
+/// beat would be guessing: what lines up with the percussion is the play, not
+/// the cut's edge — and the edge can be half a second before it.
 ///
-/// `null` quando o momento ficou fora do bloco: dá para aparar até ele sair, e
-/// aí não há o que marcar.
-double? marcaDoMomento(TimelineClip cut) {
+/// `null` when the moment ended up outside the block: you can trim until it
+/// leaves, and then there is nothing to mark.
+double? momentMark(TimelineClip cut) {
   if (cut.durationS <= 0) return null;
   final f = (cut.sourceT - cut.startS) / cut.durationS;
   return f < 0 || f > 1 ? null : f;
 }
 
-/// Onde o momento que originou o bloco cai no **vídeo**, em segundos.
+/// Where the moment the block came from falls in the **video**, in seconds.
 ///
-/// `null` quando o momento ficou fora do bloco — dá para aparar até ele sair —
-/// ou quando o bloco não veio de momento nenhum (música, texto, mídia).
-double? momentoNoVideo(TimelineClip cut) {
-  if (cut.sourceT <= 0 || marcaDoMomento(cut) == null) return null;
+/// `null` when the moment ended up outside the block — you can trim until it
+/// leaves — or when the block came from no moment at all (music, text, media).
+double? momentInVideo(TimelineClip cut) {
+  if (cut.sourceT <= 0 || momentMark(cut) == null) return null;
   return cut.atS + (cut.sourceT - cut.startS);
 }
 
-/// O bloco que está sob a cabeça de leitura em [atS], ou `null` se ali é buraco.
-int? blocoEm(List<TimelineClip> cuts, double atS) {
+/// The block under the playhead at [atS], or `null` if it is a gap there.
+int? blockAt(List<TimelineClip> cuts, double atS) {
   for (var i = 0; i < cuts.length; i++) {
     if (atS >= cuts[i].atS - 1e-6 && atS < cuts[i].untilS - 1e-6) return i;
   }
@@ -397,7 +406,7 @@ int? blocoEm(List<TimelineClip> cuts, double atS) {
   List<TimelineClip> cuts,
   double t,
 ) {
-  final i = blocoEm(cuts, t);
+  final i = blockAt(cuts, t);
   if (i == null) return null;
   final c = cuts[i];
   final tr = c.transition;
@@ -425,35 +434,36 @@ int? blocoEm(List<TimelineClip> cuts, double atS) {
   return null;
 }
 
-/// Que instante da **gravação** o preview deve mostrar em [atS] do vídeo.
+/// Which instant of the **recording** the preview should show at [atS] of the
+/// video.
 ///
-/// `null` quer dizer tela preta — o mesmo que o servidor vai gerar ali. É esta
-/// função que faz o preview e o arquivo final contarem a mesma história: ela é
-/// a versão de leitura do `plan()` que o backend usa para cortar.
-double? origemEm(List<TimelineClip> cuts, double atS) {
-  final i = blocoEm(cuts, atS);
+/// `null` means a black screen — the same the server will render there. It is
+/// this function that makes the preview and the final file tell the same
+/// story: it is the read version of the `plan()` the backend uses to cut.
+double? sourceAt(List<TimelineClip> cuts, double atS) {
+  final i = blockAt(cuts, atS);
   if (i == null) return null;
   return cuts[i].startS + (atS - cuts[i].atS);
 }
 
-/// Duração do vídeo que vai sair — buracos incluídos.
+/// Duration of the video that will come out — gaps included.
 ///
-/// É o número que a tela mostra, e tem de bater com o que o servidor vai
-/// produzir: espaço vazio vira preto com a música tocando, não encurtamento.
-double duracaoDoVideo(List<TimelineClip> cuts) {
-  var fim = 0.0;
+/// It is the number the screen shows, and it must match what the server will
+/// produce: empty space becomes black with the music playing, not shortening.
+double videoDuration(List<TimelineClip> cuts) {
+  var endTime = 0.0;
   for (final c in cuts) {
-    fim = math.max(fim, c.untilS);
+    endTime = math.max(endTime, c.untilS);
   }
-  return fim;
+  return endTime;
 }
 
-/// Quanto do vídeo é preto — o que o usuário deixou vazio entre os blocos.
-double duracaoEmPreto(List<TimelineClip> cuts) {
-  final total = duracaoDoVideo(cuts);
-  var comImagem = 0.0;
+/// How much of the video is black — what the user left empty between blocks.
+double blackDuration(List<TimelineClip> cuts) {
+  final total = videoDuration(cuts);
+  var withPicture = 0.0;
   for (final c in cuts) {
-    comImagem += c.durationS;
+    withPicture += c.durationS;
   }
-  return math.max(0, total - comImagem);
+  return math.max(0, total - withPicture);
 }

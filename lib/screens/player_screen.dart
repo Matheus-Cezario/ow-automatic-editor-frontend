@@ -28,7 +28,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _open() async {
     final url = widget.clip.videoUrl;
-    if (url == null) return; // montagem falhou: só há os cortes
+    if (url == null) return; // the montage failed: only the cuts exist
     final c = VideoPlayerController.networkUrl(Uri.parse(url));
     try {
       await c.initialize();
@@ -65,13 +65,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         actions: [
           if (widget.clip.videoUrl != null)
             IconButton(
-              tooltip: 'Copiar link do vídeo',
+              tooltip: 'Copy video link',
               icon: const Icon(Icons.link),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: widget.clip.videoUrl!));
                 ScaffoldMessenger.of(
                   context,
-                ).showSnackBar(const SnackBar(content: Text('Link copiado')));
+                ).showSnackBar(const SnackBar(content: Text('Link copied')));
               },
             ),
         ],
@@ -83,12 +83,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Expanded(
               child: Center(
                 child: widget.clip.onlyCuts
-                    ? _SemVideo(clip: widget.clip)
+                    ? _NoVideo(clip: widget.clip)
                     : _error != null
                     ? Padding(
                         padding: const EdgeInsets.all(24),
                         child: Text(
-                          'Não consegui abrir o vídeo.\n$_error',
+                          'Could not open the video.\n$_error',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: theme.colorScheme.error),
                         ),
@@ -123,13 +123,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   const SizedBox(height: 8),
                   Text(
                     [
-                      'trecho ${formatClock(widget.clip.startS)}'
-                          '–${formatClock(widget.clip.endS)} da partida',
+                      'span ${formatClock(widget.clip.startS)}'
+                          '–${formatClock(widget.clip.endS)} of the match',
                       formatDuration(widget.clip.durationS),
                       if (widget.clip.segments > 1)
-                        '${widget.clip.segments} cortes',
+                        '${widget.clip.segments} cuts',
                       if (widget.clip.isBeatSynced)
-                        'cortado na batida'
+                        'cut to the beat'
                             '${widget.clip.meta['bpm'] != null ? ' (${(widget.clip.meta['bpm'] as num).toStringAsFixed(0)} BPM)' : ''}',
                     ].join('  ·  '),
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -152,12 +152,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         IconButton(
                           onPressed: () => c.seekTo(Duration.zero),
                           icon: const Icon(Icons.replay),
-                          tooltip: 'Do começo',
+                          tooltip: 'From the start',
                         ),
                         const Spacer(),
-                        BotaoBaixar(
+                        DownloadButton(
                           url: widget.clip.videoUrl!,
-                          label: 'Baixar o vídeo',
+                          label: 'Download the video',
                           compact: true,
                         ),
                       ],
@@ -165,15 +165,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ],
                   if (widget.clip.segmentsZipUrl != null) ...[
                     const SizedBox(height: 14),
-                    BotaoBaixar(
+                    DownloadButton(
                       url: widget.clip.segmentsZipUrl!,
                       icon: Icons.folder_zip_outlined,
-                      label: 'Baixar os cortes desta montagem (.zip)',
+                      label: 'Download this montage\'s cuts (.zip)',
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Cada corte vem num arquivo, nomeado pelo instante de onde '
-                      'saiu na gravação — para reeditar do seu jeito.',
+                      'Each cut comes in its own file, named after the instant it '
+                      'came from in the recording — to re-edit your own way.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.hintColor,
                       ),
@@ -189,9 +189,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-/// Mostrado quando a montagem falhou mas os cortes sobreviveram.
-class _SemVideo extends StatelessWidget {
-  const _SemVideo({required this.clip});
+/// Shown when the montage failed but the cuts survived.
+class _NoVideo extends StatelessWidget {
+  const _NoVideo({required this.clip});
 
   final Clip clip;
 
@@ -206,13 +206,13 @@ class _SemVideo extends StatelessWidget {
           Icon(Icons.folder_zip_outlined, size: 56, color: theme.hintColor),
           const SizedBox(height: 16),
           Text(
-            'O vídeo final não foi gerado',
+            'The final video was not generated',
             style: theme.textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
           Text(
-            'A junção dos trechos falhou, mas os ${clip.segments} cortes foram '
-            'feitos e estão disponíveis abaixo.',
+            'Joining the pieces failed, but the ${clip.segments} cuts were '
+            'made and are available below.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),

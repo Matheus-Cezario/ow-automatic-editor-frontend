@@ -54,14 +54,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  Future<void> _montar(Job job) async {
-    final feito = await Navigator.of(
+  Future<void> _assemble(Job job) async {
+    final done = await Navigator.of(
       context,
     ).push<bool>(MaterialPageRoute(builder: (_) => TimelineScreen(job: job)));
-    if (feito == true) await _refresh();
+    if (done == true) await _refresh();
   }
 
-  Future<void> _apagarPedido(Render r) async {
+  Future<void> _deleteRequest(Render r) async {
     try {
       await _api.deleteRender(r.id);
     } catch (e) {
@@ -80,7 +80,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text(job?.videoName ?? 'Partida')),
+      appBar: AppBar(title: Text(job?.videoName ?? 'Match')),
       body: PhoneWidth(
         child: job == null
             ? Center(
@@ -97,7 +97,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     if (job.isFailed && job.error != null) _Failure(job: job),
                     const SizedBox(height: 20),
                     if (job.events.isNotEmpty) ...[
-                      Text('Linha do tempo', style: theme.textTheme.titleSmall),
+                      Text('Timeline', style: theme.textTheme.titleSmall),
                       const SizedBox(height: 10),
                       EventTimeline(
                         events: job.events,
@@ -110,41 +110,41 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       const SizedBox(height: 20),
                     ],
 
-                    // ── o editor ──────────────────────────────────────────
-                    // Não há mais lista de vídeos prontos para escolher: a
-                    // análise entrega os momentos e o editor é o que se faz
-                    // com eles.
+                    // ── the editor ────────────────────────────────────────
+                    // There is no longer a list of finished videos to choose
+                    // from: the analysis delivers the moments and the editor
+                    // is what you do with them.
                     if (job.isReady && job.events.isNotEmpty) ...[
                       FilledButton.icon(
-                        onPressed: () => _montar(job),
+                        onPressed: () => _assemble(job),
                         icon: const Icon(Icons.timeline),
                         label: Text(
                           job.montages.isEmpty
-                              ? 'Abrir o editor'
-                              : 'Continuar editando',
+                              ? 'Open the editor'
+                              : 'Keep editing',
                         ),
                       ),
                       const SizedBox(height: 24),
                     ] else if (job.isReady)
                       const _NothingFound(),
 
-                    // ── o que já foi gerado ───────────────────────────────
+                    // ── what was already generated ────────────────────────
                     if (job.renders.isNotEmpty) ...[
                       Row(
                         children: [
                           Expanded(
                             child: Text(
-                              'Vídeos gerados',
+                              'Generated videos',
                               style: theme.textTheme.titleSmall,
                             ),
                           ),
                           if (job.zipUrl != null)
-                            BotaoBaixar(
+                            DownloadButton(
                               url: job.zipUrl!,
                               icon: Icons.folder_zip_outlined,
                               label: job.hasCuts
-                                  ? 'Baixar tudo: vídeos + cortes (.zip)'
-                                  : 'Baixar os vídeos (.zip)',
+                                  ? 'Download all: videos + cuts (.zip)'
+                                  : 'Download the videos (.zip)',
                             ),
                         ],
                       ),
@@ -152,7 +152,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       for (final r in job.renders)
                         _RenderCard(
                           render: r,
-                          onDelete: () => _apagarPedido(r),
+                          onDelete: () => _deleteRequest(r),
                           onOpen: (c) => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => PlayerScreen(clip: c),
@@ -206,11 +206,11 @@ class _RenderCard extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         [
-                          _quando(render.createdAt),
+                          _when(render.createdAt),
                           if (render.musicNames.isNotEmpty)
                             render.musicNames.join(', ')
                           else
-                            'áudio da partida',
+                            'match audio',
                         ].join('  ·  '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -222,7 +222,7 @@ class _RenderCard extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Apagar este pedido',
+                  tooltip: 'Delete this request',
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline),
                 ),
@@ -254,10 +254,10 @@ class _RenderCard extends StatelessWidget {
     );
   }
 
-  static String _quando(DateTime t) {
+  static String _when(DateTime t) {
     final d = t.toLocal();
-    String dois(int n) => n.toString().padLeft(2, '0');
-    return '${dois(d.day)}/${dois(d.month)} ${dois(d.hour)}:${dois(d.minute)}';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)}';
   }
 }
 
@@ -281,9 +281,9 @@ class _Progress extends StatelessWidget {
               ),
             ),
             if (job.isAnalyzing) ...[
-              if (formatRestante(job.restante) case final falta?) ...[
+              if (formatRemaining(job.remaining) case final missing?) ...[
                 Text(
-                  'falta $falta',
+                  '$missing left',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.hintColor,
                   ),
@@ -314,16 +314,16 @@ class _Progress extends StatelessWidget {
           runSpacing: 6,
           children: [
             _Fact(icon: Icons.schedule, text: formatDuration(job.durationS)),
-            _Fact(icon: Icons.flash_on, text: '${job.events.length} momentos'),
+            _Fact(icon: Icons.flash_on, text: '${job.events.length} moments'),
             if (job.montages.isNotEmpty)
               _Fact(
                 icon: Icons.playlist_add_check,
-                text: '${job.montages.length} montagem(ns)',
+                text: '${job.montages.length} montage(s)',
               ),
             if (job.renders.isNotEmpty)
               _Fact(
                 icon: Icons.movie_creation_outlined,
-                text: '${job.renders.length} pedido(s)',
+                text: '${job.renders.length} request(s)',
               ),
           ],
         ),
@@ -375,10 +375,10 @@ class _Detectors extends StatelessWidget {
   final Job job;
 
   static const _labels = {
-    'kills': 'Eliminações',
-    'survival': 'Vida e sobrevivência',
+    'kills': 'Kills',
+    'survival': 'Health and survival',
     'ults': 'Ultimates',
-    'banner': 'Habilidades (rodapé)',
+    'banner': 'Abilities (banner)',
   };
 
   @override
@@ -387,7 +387,7 @@ class _Detectors extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Detectores', style: theme.textTheme.titleSmall),
+        Text('Detectors', style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
         for (final d in job.detectors)
           Padding(
@@ -404,7 +404,7 @@ class _Detectors extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(child: Text(_labels[d.detector] ?? d.detector)),
                 Text(
-                  d.ok ? '${d.nEvents}' : 'falhou',
+                  d.ok ? '${d.nEvents}' : 'failed',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.hintColor,
                   ),
@@ -490,14 +490,14 @@ class _ClipCard extends StatelessWidget {
                     Text(
                       [
                         if (clip.onlyCuts)
-                          'vídeo não gerado — cortes disponíveis'
+                          'video not generated — cuts available'
                         else
                           formatDuration(clip.durationS),
-                        if (clip.segments > 1) '${clip.segments} cortes',
-                        if (clip.isBeatSynced && !clip.onlyCuts) 'no ritmo',
-                        if (clip.isLooped && !clip.onlyCuts) 'sorteado',
+                        if (clip.segments > 1) '${clip.segments} cuts',
+                        if (clip.isBeatSynced && !clip.onlyCuts) 'on the beat',
+                        if (clip.isLooped && !clip.onlyCuts) 'shuffled',
                         if (clip.keepsOriginalAudio && !clip.onlyCuts)
-                          'áudio da partida',
+                          'match audio',
                       ].join('  ·  '),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: clip.onlyCuts
@@ -528,12 +528,12 @@ class _NothingFound extends StatelessWidget {
         children: [
           Icon(Icons.search_off, size: 44, color: theme.hintColor),
           const SizedBox(height: 12),
-          Text('Nenhum momento encontrado', style: theme.textTheme.titleSmall),
+          Text('No moments found', style: theme.textTheme.titleSmall),
           const SizedBox(height: 6),
           Text(
-            'Se a partida claramente tinha bons momentos, a HUD provavelmente '
-            'está em posição diferente da esperada — dá para ajustar isso no '
-            'perfil de calibração.',
+            'If the match clearly had good moments, the HUD is probably in a '
+            'different position than expected — you can adjust that in the '
+            'calibration profile.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),

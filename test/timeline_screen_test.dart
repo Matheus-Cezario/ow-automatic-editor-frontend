@@ -7,20 +7,20 @@ import 'package:ow_editor/screens/timeline_screen.dart';
 import 'package:ow_editor/widgets/music_timeline.dart';
 import 'package:ow_editor/widgets/preview_player.dart';
 
-/// A tela de montagem, sem servidor nenhum.
+/// The montage screen, with no server at all.
 ///
-/// O que se verifica é o caminho de quem chega nela: os momentos da partida
-/// aparecem, tocar num deles põe um bloco, e a tela passa a dizer que vídeo vai
-/// sair. Nada aqui toca a rede — a partida vem montada à mão.
-/// Uma música já analisada, com batida a cada meio segundo.
+/// What is checked is the path of whoever arrives at it: the match moments
+/// show up, tapping one places a block, and the screen starts saying what video
+/// will come out. Nothing here touches the network — the match is built by hand.
+/// A song already analysed, with a beat every half second.
 ///
-/// Serve para exercitar o ímã: é justamente com ele ligado que o arrasto
+/// It exercises the magnet: it is precisely with it on that dragging
 /// quebrava.
-Map<String, dynamic> musicaPronta() => {
+Map<String, dynamic> readyMusic() => {
   'id': 'm1',
   'kind': 'audio',
   'status': 'ready',
-  'name': 'musica.mp3',
+  'name': 'song.mp3',
   'duration_s': 120.0,
   'bpm': 120.0,
   'beats': [for (var i = 0; i < 240; i++) i * 0.5],
@@ -28,18 +28,18 @@ Map<String, dynamic> musicaPronta() => {
   'audio_url': '/api/tracks/m1/audio',
 };
 
-Map<String, dynamic> jobJson({bool comMusica = false}) => {
-  // no servidor a música é mídia de áudio da biblioteca, e aparece nas duas
-  // listas: `media` é a biblioteca inteira, `tracks` é o recorte de áudio
-  if (comMusica) 'tracks': [musicaPronta()],
-  if (comMusica) 'media': [musicaPronta()],
-  // sem a gravação não há monitor: é dela que o preview busca os quadros
+Map<String, dynamic> jobJson({bool withMusic = false}) => {
+  // on the server the song is audio media in the library, and shows up in both
+  // lists: `media` is the whole library, `tracks` is the audio subset
+  if (withMusic) 'tracks': [readyMusic()],
+  if (withMusic) 'media': [readyMusic()],
+  // without the recording there is no monitor: the preview seeks frames from it
   'video_url': '/api/jobs/j1/video',
   'id': 'j1',
   'status': 'ready',
-  'stage': 'escolha o que gerar',
+  'stage': 'choose what to render',
   'progress': 1.0,
-  'video_name': 'partida.mp4',
+  'video_name': 'match.mp4',
   'duration_s': 600.0,
   'width': 1920,
   'height': 1080,
@@ -49,8 +49,8 @@ Map<String, dynamic> jobJson({bool comMusica = false}) => {
     {'kind': 'kill', 't': 30.0, 'confidence': 1.0},
     {'kind': 'sleep', 't': 75.0, 'confidence': 1.0},
     {'kind': 'stun', 't': 120.0, 'confidence': 1.0},
-    // o tiro na cabeça e a morte por habilidade são a jogada que se procura
-    // numa montagem — ficaram de fora da prateleira por engano
+    // the headshot and the ability kill are the play you look for
+    // in a montage — they were left off the shelf by mistake
     {'kind': 'headshot', 't': 140.0, 'confidence': 1.0},
     {
       'kind': 'ability_kill',
@@ -58,376 +58,376 @@ Map<String, dynamic> jobJson({bool comMusica = false}) => {
       'confidence': 1.0,
       'meta': {'ability': 'orisa/energy_javelin'},
     },
-    // contexto, não jogada: não deve virar bloco
+    // context, not a play: it must not become a block
     {'kind': 'death', 't': 200.0, 'confidence': 1.0},
     {'kind': 'low_hp', 't': 210.0, 'confidence': 1.0},
   ],
 };
 
-Job jobComMomentos({bool comMusica = false}) =>
-    Job.fromJson(jobJson(comMusica: comMusica));
+Job jobWithMoments({bool withMusic = false}) =>
+    Job.fromJson(jobJson(withMusic: withMusic));
 
 void main() {
-  Future<void> abrir(WidgetTester tester, {bool comMusica = false}) async {
-    // A tela é uma lista comprida, e a `ListView` só constrói o que caberia na
-    // viewport. Numa janela de teste padrão (800x600) o botão de gerar nem
-    // existiria no widget tree, e o teste falharia por um motivo que não é o
-    // dele. Uma janela alta põe a tela inteira à vista.
+  Future<void> open(WidgetTester tester, {bool withMusic = false}) async {
+    // The screen is a long list, and `ListView` only builds what would fit in the
+    // viewport. In a default test window (800x600) the render button would not
+    // even exist in the widget tree, and the test would fail for a reason that is
+    // not its own. A tall window puts the whole screen in view.
     await tester.binding.setSurfaceSize(const Size(1000, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
       MaterialApp(
-        home: TimelineScreen(job: jobComMomentos(comMusica: comMusica)),
+        home: TimelineScreen(job: jobWithMoments(withMusic: withMusic)),
       ),
     );
     await tester.pump();
   }
 
-  /// Os clipes de todas as camadas, na ordem em que o vídeo os mostra.
-  List<TimelineClip> cortes(WidgetTester tester) => [
+  /// The clips of every layer, in the order the video shows them.
+  List<TimelineClip> cutList(WidgetTester tester) => [
     for (final l
         in tester.widget<MusicTimeline>(find.byType(MusicTimeline)).layers)
       ...l.clips,
   ];
 
-  TimelineClip primeiroCorte(WidgetTester tester) => cortes(tester).first;
+  TimelineClip firstCut(WidgetTester tester) => cutList(tester).first;
 
-  /// Põe a cabeça de leitura em [segundos] clicando na régua.
+  /// Puts the playhead at [seconds] by clicking the ruler.
   ///
-  /// A conta desconta a coluna de cabeçalhos, que fica fora da rolagem: sem
-  /// isso o toque cai uns dois segundos e meio antes do pretendido.
-  Future<void> cursorEm(WidgetTester tester, double segundos) async {
-    final regua = tester.getRect(find.byType(MusicTimeline));
+  /// The maths discounts the header column, which sits outside the scroll: without
+  /// it the tap lands about two and a half seconds before the intended point.
+  Future<void> cursorAt(WidgetTester tester, double seconds) async {
+    final timelineWidget = tester.getRect(find.byType(MusicTimeline));
     await tester.tapAt(
       Offset(
-        regua.left + MusicTimeline.larguraDosCabecalhos + 1 + segundos * 60,
-        regua.top + 20,
+        timelineWidget.left + MusicTimeline.headerWidth + 1 + seconds * 60,
+        timelineWidget.top + 20,
       ),
     );
     await tester.pump();
   }
 
-  /// Troca para a aba da lateral, dando tempo à animação.
-  /// Deixa a tela reagir sem esperar que ela pare de todo.
+  /// Switches to the sidebar tab, giving the animation time.
+  /// Lets the screen react without waiting for it to stop entirely.
   ///
-  /// `pumpAndSettle` não serve aqui: o monitor mantém temporizadores vivos e a
-  /// tela nunca "assenta".
-  Future<void> assentar(WidgetTester tester) async {
+  /// `pumpAndSettle` does not work here: the monitor keeps timers alive and the
+  /// screen never "settles".
+  Future<void> settle(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
   }
 
-  Future<void> aba(WidgetTester tester, String nome) async {
-    await tester.tap(find.text(nome));
+  Future<void> tab(WidgetTester tester, String displayName) async {
+    await tester.tap(find.text(displayName));
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
   }
 
-  /// O bloco na régua, pela ordem em que está na montagem.
+  /// The block on the ruler, by its order in the montage.
   ///
-  /// A chave é o id do bloco, que é gerado em tempo de execução — então o teste
-  /// pergunta ao widget quem está lá em vez de tentar adivinhar.
-  Finder bloco(WidgetTester tester, int i) =>
-      find.byKey(ValueKey('bloco-${cortes(tester)[i].id}'));
+  /// The key is the block id, which is generated at runtime — so the test
+  /// asks the widget who is there instead of trying to guess.
+  Finder block(WidgetTester tester, int i) =>
+      find.byKey(ValueKey('block-${cutList(tester)[i].id}'));
 
-  /// O item na prateleira de momentos, pelo instante em que aconteceu.
+  /// The item on the moment shelf, by the instant it happened.
   ///
-  /// A chave traz o tipo junto — uma eliminação na cabeça acende dois
-  /// detectores quase no mesmo quadro, e só o instante não identificaria o
-  /// cartão. O tipo sai da mesma lista de eventos que abasteceu a tela, para o
-  /// teste não ter de repeti-la.
-  Finder momento(double t) {
-    final evento = (jobJson()['events'] as List)
+  /// The key carries the kind too — a headshot kill lights up two
+  /// detectors almost on the same frame, and the instant alone would not identify
+  /// the card. The kind comes from the same event list that fed the screen, so the
+  /// test does not have to repeat it.
+  Finder moment(double t) {
+    final event = (jobJson()['events'] as List)
         .cast<Map<String, dynamic>>()
         .firstWhere((e) => e['t'] == t);
-    final chave = chaveDoMomento(evento['kind'] as String, t);
-    return find.byKey(ValueKey('momento-$chave'));
+    final keyValue = momentKey(event['kind'] as String, t);
+    return find.byKey(ValueKey('moment-$keyValue'));
   }
 
-  testWidgets('oferece os momentos da partida, e só os que viram corte', (
+  testWidgets('offers the match moments, and only those that become cuts', (
     tester,
   ) async {
-    await abrir(tester);
+    await open(tester);
 
-    expect(momento(30.0), findsOneWidget);
-    expect(momento(75.0), findsOneWidget);
-    expect(momento(120.0), findsOneWidget);
-    expect(momento(140.0), findsOneWidget);
-    expect(momento(160.0), findsOneWidget);
-    // vida baixa e interrupção são o contexto da jogada, não a jogada
-    expect(find.textContaining('Interrupção'), findsNothing);
-    expect(find.textContaining('Vida baixa'), findsNothing);
+    expect(moment(30.0), findsOneWidget);
+    expect(moment(75.0), findsOneWidget);
+    expect(moment(120.0), findsOneWidget);
+    expect(moment(140.0), findsOneWidget);
+    expect(moment(160.0), findsOneWidget);
+    // low health and interruption are the play's context, not the play
+    expect(find.textContaining('Interruption'), findsNothing);
+    expect(find.textContaining('Low health'), findsNothing);
   });
 
-  testWidgets('a eliminação com habilidade diz qual habilidade foi', (
+  testWidgets('the ability kill says which ability it was', (
     tester,
   ) async {
-    await abrir(tester);
+    await open(tester);
 
-    // "Orisa: Energy Javelin", e não "Morte por habilidade": numa partida com
-    // cinco habilidades diferentes o rótulo genérico daria cinco cartões
-    // idênticos, e escolher entre eles seria escolher no escuro
+    // "Orisa: Energy Javelin", and not "Ability kill": in a match with
+    // five different abilities the generic label would give five identical
+    // cards, and choosing among them would be choosing in the dark
     expect(
       find.descendant(
-        of: momento(160.0),
+        of: moment(160.0),
         matching: find.text('Orisa: Energy Javelin'),
       ),
       findsOneWidget,
     );
   });
 
-  testWidgets('o tiro na cabeça vira bloco como qualquer outra jogada', (
+  testWidgets('the headshot becomes a block like any other play', (
     tester,
   ) async {
-    await abrir(tester);
-    await tester.tap(momento(140.0));
+    await open(tester);
+    await tester.tap(moment(140.0));
     await tester.pump();
 
-    final blocos = cortes(tester);
-    expect(blocos, hasLength(1));
-    expect(blocos.first.sourceT, 140.0);
-    expect(blocos.first.kind, 'headshot');
+    final blocks = cutList(tester);
+    expect(blocks, hasLength(1));
+    expect(blocks.first.sourceT, 140.0);
+    expect(blocks.first.kind, 'headshot');
   });
 
-  testWidgets('sem cortes, não há o que gerar', (tester) async {
-    await abrir(tester);
+  testWidgets('without cuts, there is nothing to render', (tester) async {
+    await open(tester);
 
-    expect(find.text('Ponha ao menos um corte'), findsOneWidget);
-    final botao = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(botao.onPressed, isNull);
+    expect(find.text('Add at least one cut'), findsOneWidget);
+    final button = tester.widget<FilledButton>(find.byType(FilledButton));
+    expect(button.onPressed, isNull);
   });
 
-  testWidgets('tocar num momento põe um corte e o vídeo passa a existir', (
+  testWidgets('tapping a moment places a cut and the video comes to exist', (
     tester,
   ) async {
-    await abrir(tester);
-    await tester.tap(momento(30.0));
+    await open(tester);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    expect(find.textContaining('1 corte(s)'), findsOneWidget);
-    expect(find.text('Gerar este vídeo'), findsOneWidget);
-    final botao = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(botao.onPressed, isNotNull);
+    expect(find.textContaining('1 cut(s)'), findsOneWidget);
+    expect(find.text('Render this video'), findsOneWidget);
+    final button = tester.widget<FilledButton>(find.byType(FilledButton));
+    expect(button.onPressed, isNotNull);
   });
 
-  testWidgets('o mesmo momento pode entrar mais de uma vez', (tester) async {
-    // usar um momento num vídeo não o consome — é a mesma promessa das
-    // propostas, e vale igual na montagem manual
-    await abrir(tester);
-    await tester.tap(momento(30.0));
+  testWidgets('the same moment can go in more than once', (tester) async {
+    // using a moment in a video does not consume it — it is the same promise as
+    // the proposals, and it holds just the same in the manual montage
+    await open(tester);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await tester.tap(momento(30.0));
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    expect(find.textContaining('2 corte(s)'), findsOneWidget);
+    expect(find.textContaining('2 cut(s)'), findsOneWidget);
   });
 
-  testWidgets('o bloco escolhido mostra de onde saiu e onde entra', (
+  testWidgets('the selected block shows where it came from and where it enters', (
     tester,
   ) async {
-    await abrir(tester);
-    await tester.tap(momento(75.0));
+    await open(tester);
+    await tester.tap(moment(75.0));
     await tester.pump();
 
-    expect(find.textContaining('Dardo no alvo de 01:15'), findsOneWidget);
-    expect(find.textContaining('entra em 00:00 do vídeo'), findsOneWidget);
-    expect(find.text('Duração'), findsOneWidget);
-    expect(find.text('Enquadramento'), findsOneWidget);
+    expect(find.textContaining('Sleep dart at 01:15'), findsOneWidget);
+    expect(find.textContaining('enters at 00:00 of the video'), findsOneWidget);
+    expect(find.text('Duration'), findsOneWidget);
+    expect(find.text('Framing'), findsOneWidget);
   });
 
-  testWidgets('a música vem pela Biblioteca, e só por ela', (tester) async {
-    // havia dois jeitos de pôr som, e eles não funcionavam igual. Sobrou um: a
-    // música é mídia de fora da partida como qualquer outra
-    await abrir(tester, comMusica: true);
+  testWidgets('music comes through the Library, and only through it', (tester) async {
+    // there were two ways of adding sound, and they did not work the same. One was
+    // left: music is media from outside the match like any other
+    await open(tester, withMusic: true);
 
-    expect(find.text('Sem música'), findsNothing);
-    expect(find.text('Pôr na régua'), findsNothing);
+    expect(find.text('No music'), findsNothing);
+    expect(find.text('Put on the timeline'), findsNothing);
 
-    await aba(tester, 'Biblioteca');
-    expect(find.byKey(const ValueKey('midia-m1')), findsOneWidget);
+    await tab(tester, 'Library');
+    expect(find.byKey(const ValueKey('media-m1')), findsOneWidget);
     expect(find.textContaining('120 BPM'), findsOneWidget);
   });
 
   // ── arrastar ──────────────────────────────────────────────────────────────
   //
-  // O bloco de testes que faltava quando o arrasto não funcionava. Aplicando
-  // `delta.dx` quadro a quadro, cada passo de 3px virava 0,05s e o ímã grudava
-  // de volta na mesma batida: o bloco não saía do lugar. O gesto agora acumula
-  // desde onde partiu, e é isso que estes testes travam.
+  // The test block that was missing when dragging did not work. Applying
+  // `delta.dx` frame by frame, each 3px step became 0.05s and the magnet snapped
+  // back to the same beat: the block did not move. The gesture now accumulates
+  // from where it started, and that is what these tests lock down.
 
-  /// O reconhecedor de gestos só aceita o arrasto depois de vencer o
-  /// `kTouchSlop` (18px), e o que o dedo andou até lá não conta. Em passos de
-  /// 3px isso come 21px — sem descontá-los, as contas dos testes abaixo erram
-  /// por um terço de segundo.
-  const comidoPeloSlop = 21.0;
-  const px = 60.0; // o zoom padrão da tela
+  /// The gesture recogniser only accepts the drag after beating
+  /// `kTouchSlop` (18px), and what the finger moved until then does not count. In
+  /// 3px steps that eats 21px — without discounting them, the maths of the tests
+  /// below is off by a third of a second.
+  const eatenBySlop = 21.0;
+  const px = 60.0; // the screen's default zoom
 
-  /// Arrasta em passos pequenos, como um dedo andando devagar.
+  /// Drags in small steps, like a finger moving slowly.
   ///
-  /// É esta a forma que importa: `tester.drag` entrega o movimento em dois
-  /// saltos grandes, e com saltos grandes até o código quebrado funcionava. O
-  /// bug só aparecia no arrasto lento, em que cada quadro anda poucos pixels.
-  Future<void> arrastarDevagar(
+  /// This is the shape that matters: `tester.drag` delivers the movement in two
+  /// big jumps, and with big jumps even the broken code worked. The bug only
+  /// showed up on the slow drag, where each frame moves a few pixels.
+  Future<void> dragSlowly(
     WidgetTester tester,
-    Finder alvo,
+    Finder target,
     double total, {
-    double passo = 3,
+    double step = 3,
   }) async {
-    final gesto = await tester.startGesture(tester.getCenter(alvo));
-    for (var andou = 0.0; andou < total.abs(); andou += passo) {
-      await gesto.moveBy(Offset(total.isNegative ? -passo : passo, 0));
+    final gesture = await tester.startGesture(tester.getCenter(target));
+    for (var moved = 0.0; moved < total.abs(); moved += step) {
+      await gesture.moveBy(Offset(total.isNegative ? -step : step, 0));
       await tester.pump();
     }
-    await gesto.up();
+    await gesture.up();
     await tester.pump();
   }
 
-  testWidgets('arrastar devagar move o bloco, com o ímã ligado', (
+  testWidgets('dragging slowly moves the block, with the magnet on', (
     tester,
   ) async {
-    // Com o ímã ligado e o bloco já em cima de uma batida, cada passo de 3px
-    // vale 0,05s — dentro da tolerância do ímã. Aplicando passo a passo, ele
-    // grudava de volta e o bloco não saía do lugar por mais que se arrastasse.
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+    // With the magnet on and the block already on a beat, each 3px step
+    // is worth 0.05s — within the magnet tolerance. Applied step by step, it
+    // snapped back and the block did not move however much you dragged.
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    expect(primeiroCorte(tester).atS, 0);
+    expect(firstCut(tester).atS, 0);
 
-    await arrastarDevagar(tester, bloco(tester, 0), 120);
+    await dragSlowly(tester, block(tester, 0), 120);
 
     expect(
-      primeiroCorte(tester).atS,
-      closeTo((120 - comidoPeloSlop) / px, 0.05),
+      firstCut(tester).atS,
+      closeTo((120 - eatenBySlop) / px, 0.05),
     );
   });
 
-  testWidgets('arrastar para perto de uma batida gruda nela', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(75.0));
+  testWidgets('dragging near a beat snaps to it', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(75.0));
     await tester.pump();
-    // a grade vem da música que está tocando ali: sem música na régua não há
-    // batida a que grudar
-    await aba(tester, 'Biblioteca');
-    await tester.tap(find.byKey(const ValueKey('midia-m1')));
-    await assentar(tester);
-    await aba(tester, 'Momentos');
+    // the grid comes from the song playing there: without music on the ruler there
+    // is no beat to snap to
+    await tab(tester, 'Library');
+    await tester.tap(find.byKey(const ValueKey('media-m1')));
+    await settle(tester);
+    await tab(tester, 'Moments');
 
-    // Solto a 1,55s: 0,05 depois da batida de 1,5s, dentro da tolerância do
-    // ímã. Sem ímã pararia em 1,55; com ímã tem de cair exatamente na batida.
-    const solto = 1.55;
-    await arrastarDevagar(
+    // Dropped at 1.55s: 0.05 after the 1.5s beat, within the magnet tolerance.
+    // Without the magnet it would stop at 1.55; with it, it must land exactly on the beat.
+    const loose = 1.55;
+    await dragSlowly(
       tester,
-      bloco(tester, 0),
-      solto * px + comidoPeloSlop,
+      block(tester, 0),
+      loose * px + eatenBySlop,
     );
 
-    expect(primeiroCorte(tester).atS, closeTo(1.5, 1e-9));
+    expect(firstCut(tester).atS, closeTo(1.5, 1e-9));
   });
 
-  testWidgets('arrastar não deixa o bloco sair pela esquerda', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('dragging does not let the block leave on the left', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    await arrastarDevagar(tester, bloco(tester, 0), -200);
+    await dragSlowly(tester, block(tester, 0), -200);
 
-    expect(primeiroCorte(tester).atS, 0);
+    expect(firstCut(tester).atS, 0);
   });
 
-  testWidgets('arrastar a alça direita estica o corte', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('dragging the right handle stretches the cut', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    final antes = primeiroCorte(tester).durationS;
+    final beforeState = firstCut(tester).durationS;
 
-    // a alça fica na borda direita do bloco selecionado
-    final caixa = tester.getRect(bloco(tester, 0));
+    // the handle sits on the right edge of the selected block
+    final box = tester.getRect(block(tester, 0));
     await tester.dragFrom(
-      Offset(caixa.right - 8, caixa.center.dy),
+      Offset(box.right - 8, box.center.dy),
       const Offset(60, 0),
     );
     await tester.pump();
 
-    final depois = primeiroCorte(tester);
-    expect(depois.durationS, greaterThan(antes));
-    expect(depois.atS, 0, reason: 'esticar não move o bloco');
+    final afterState = firstCut(tester);
+    expect(afterState.durationS, greaterThan(beforeState));
+    expect(afterState.atS, 0, reason: 'stretching does not move the block');
   });
 
-  testWidgets('o monitor avisa quando a cabeça de leitura está no vazio', (
+  testWidgets('the monitor warns when the playhead is on empty space', (
     tester,
   ) async {
-    await abrir(tester);
-    expect(find.text('sem cortes ainda'), findsOneWidget);
+    await open(tester);
+    expect(find.text('no cuts yet'), findsOneWidget);
   });
 
   // ── a prateleira e o monitor ──────────────────────────────────────────────
 
-  testWidgets('cada momento aparece com o quadro dele', (tester) async {
-    // sem imagem, escolher entre trinta eliminações é escolher entre trinta
-    // relógios iguais
-    await abrir(tester);
+  testWidgets('each moment shows up with its frame', (tester) async {
+    // without a picture, choosing among thirty kills is choosing among thirty
+    // identical clocks
+    await open(tester);
 
-    final imagem = tester.widget<Image>(
-      find.descendant(of: momento(30.0), matching: find.byType(Image)),
+    final picture = tester.widget<Image>(
+      find.descendant(of: moment(30.0), matching: find.byType(Image)),
     );
-    final rede = imagem.image as NetworkImage;
-    expect(rede.url, contains('/api/jobs/j1/frame'));
-    expect(rede.url, contains('t=30.00'));
+    final network = picture.image as NetworkImage;
+    expect(network.url, contains('/api/jobs/j1/frame'));
+    expect(network.url, contains('t=30.00'));
   });
 
-  testWidgets('numa tela larga a prateleira fica na lateral', (tester) async {
-    await abrir(tester); // a janela de teste tem 1000px
-    final lateral = tester.getTopLeft(momento(30.0));
-    final regua = tester.getTopLeft(find.byType(MusicTimeline));
+  testWidgets('on a wide screen the shelf sits on the side', (tester) async {
+    await open(tester); // the test window is 1000px
+    final sidebar = tester.getTopLeft(moment(30.0));
+    final timelineWidget = tester.getTopLeft(find.byType(MusicTimeline));
 
     expect(
-      lateral.dx,
-      lessThan(regua.dx),
-      reason: 'a prateleira tem de estar à esquerda da régua',
+      sidebar.dx,
+      lessThan(timelineWidget.dx),
+      reason: 'the shelf has to be to the left of the ruler',
     );
   });
 
-  testWidgets('numa tela estreita ela volta para baixo da régua', (
+  testWidgets('on a narrow screen it goes back below the ruler', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(500, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
-      MaterialApp(home: TimelineScreen(job: jobComMomentos())),
+      MaterialApp(home: TimelineScreen(job: jobWithMoments())),
     );
     await tester.pump();
 
     expect(
-      tester.getTopLeft(momento(30.0)).dy,
+      tester.getTopLeft(moment(30.0)).dy,
       greaterThan(tester.getTopLeft(find.byType(MusicTimeline)).dy),
     );
   });
 
-  testWidgets('a alça arrasta a altura do monitor', (tester) async {
-    await abrir(tester);
-    final antes = tester.getSize(find.byType(PreviewPlayer)).height;
+  testWidgets('the handle drags the monitor height', (tester) async {
+    await open(tester);
+    final beforeState = tester.getSize(find.byType(PreviewPlayer)).height;
 
     await tester.drag(
-      find.byKey(const Key('alca-monitor')),
+      find.byKey(const Key('monitor-handle')),
       const Offset(0, 120),
     );
     await tester.pump();
 
     expect(
       tester.getSize(find.byType(PreviewPlayer)).height,
-      greaterThan(antes),
+      greaterThan(beforeState),
     );
   });
 
-  testWidgets('o monitor não encolhe além do mínimo', (tester) async {
-    await abrir(tester);
+  testWidgets('the monitor does not shrink below the minimum', (tester) async {
+    await open(tester);
 
     await tester.drag(
-      find.byKey(const Key('alca-monitor')),
+      find.byKey(const Key('monitor-handle')),
       const Offset(0, -900),
     );
     await tester.pump();
@@ -440,17 +440,17 @@ void main() {
 
   // ── o rascunho ────────────────────────────────────────────────────────────
   //
-  // Recarregar a página custava a montagem inteira. Agora ela vive no servidor
-  // e volta junto com a partida.
+  // Reloading the page used to cost the whole montage. Now it lives on the server
+  // and comes back with the match.
 
-  testWidgets('a montagem de antes volta ao abrir a tela', (tester) async {
+  testWidgets('the earlier montage comes back when the screen opens', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1000, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final job = Job.fromJson({
-      ...jobJson(comMusica: true),
+      ...jobJson(withMusic: true),
       'draft': {
-        'title': 'Minha montagem de ontem',
+        'title': 'My montage from yesterday',
         'track_id': 'm1',
         'music_start_s': 8.0,
         'cuts': [
@@ -475,314 +475,314 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: TimelineScreen(job: job)));
     await tester.pump();
 
-    final cuts = cortes(tester);
-    // dois cortes e o bloco de música em que a faixa contínua se converteu
-    final daGravacao = cuts.where((c) => c.source == 'recording').toList();
-    expect(daGravacao, hasLength(2));
-    expect(daGravacao[0].sourceT, 30.0);
-    expect(daGravacao[1].atS, 2.0);
-    expect(find.textContaining('2 corte(s)'), findsOneWidget);
+    final cuts = cutList(tester);
+    // two cuts and the music block the continuous track was converted into
+    final fromRecording = cuts.where((c) => c.source == 'recording').toList();
+    expect(fromRecording, hasLength(2));
+    expect(fromRecording[0].sourceT, 30.0);
+    expect(fromRecording[1].atS, 2.0);
+    expect(find.textContaining('2 cut(s)'), findsOneWidget);
 
-    // o nome sobrevive, e a música de antes volta como bloco na régua: ela
-    // entrava aos 8s da faixa e cobria o vídeo inteiro
+    // the name survives, and the earlier song comes back as a block on the ruler: it
+    // came in at 8s of the track and covered the whole video
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
-      'Minha montagem de ontem',
+      'My montage from yesterday',
     );
-    final musica = cuts.singleWhere((c) => c.source == 'media');
-    expect(musica.mediaId, 'm1');
-    expect(musica.atS, 0);
-    expect(musica.startS, 8.0);
-    expect(musica.durationS, closeTo(3.0, 1e-6));
+    final music = cuts.singleWhere((c) => c.source == 'media');
+    expect(music.mediaId, 'm1');
+    expect(music.atS, 0);
+    expect(music.startS, 8.0);
+    expect(music.durationS, closeTo(3.0, 1e-6));
   });
 
-  testWidgets('sem rascunho, a tela abre vazia', (tester) async {
-    await abrir(tester);
-    expect(cortes(tester), isEmpty);
+  testWidgets('without a draft, the screen opens empty', (tester) async {
+    await open(tester);
+    expect(cutList(tester), isEmpty);
   });
 
-  // ── o que a Fase 1 trouxe ─────────────────────────────────────────────────
+  // ── what Phase 1 brought ──────────────────────────────────────────────────
   //
-  // A V1 não tinha nada disto: cada mexida sobrescrevia a anterior, e um bloco
-  // era o único que dava para tocar de cada vez.
+  // V1 had none of this: every change overwrote the previous one, and a single
+  // block was the only one you could touch at a time.
 
-  /// Aperta uma tecla, com os modificadores que vierem.
-  Future<void> teclar(
+  /// Presses a key, with whatever modifiers come.
+  Future<void> press(
     WidgetTester tester,
-    LogicalKeyboardKey tecla, {
+    LogicalKeyboardKey keyName, {
     bool ctrl = false,
     bool shift = false,
   }) async {
     if (ctrl) await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
     if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
-    await tester.sendKeyEvent(tecla);
+    await tester.sendKeyEvent(keyName);
     if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
     if (ctrl) await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
     await tester.pump();
   }
 
-  /// Os clipes de todas as camadas, na ordem em que o vídeo os mostra.
-  testWidgets('Ctrl+Z desfaz um arrasto inteiro, não pixel a pixel', (
+  /// The clips of every layer, in the order the video shows them.
+  testWidgets('Ctrl+Z undoes a whole drag, not pixel by pixel', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    expect(cortes(tester).first.atS, 0);
+    expect(cutList(tester).first.atS, 0);
 
-    await arrastarDevagar(tester, bloco(tester, 0), 120);
-    expect(cortes(tester).first.atS, greaterThan(1.0));
+    await dragSlowly(tester, block(tester, 0), 120);
+    expect(cutList(tester).first.atS, greaterThan(1.0));
 
-    await teclar(tester, LogicalKeyboardKey.keyZ, ctrl: true);
+    await press(tester, LogicalKeyboardKey.keyZ, ctrl: true);
 
-    expect(cortes(tester).first.atS, 0, reason: 'um passo devolveu tudo');
+    expect(cutList(tester).first.atS, 0, reason: 'one step brought everything back');
   });
 
-  testWidgets('Ctrl+Shift+Z refaz o que foi desfeito', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('Ctrl+Shift+Z redoes what was undone', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await arrastarDevagar(tester, bloco(tester, 0), 120);
-    final depoisDoArrasto = cortes(tester).first.atS;
+    await dragSlowly(tester, block(tester, 0), 120);
+    final afterDrag = cutList(tester).first.atS;
 
-    await teclar(tester, LogicalKeyboardKey.keyZ, ctrl: true);
-    await teclar(tester, LogicalKeyboardKey.keyZ, ctrl: true, shift: true);
+    await press(tester, LogicalKeyboardKey.keyZ, ctrl: true);
+    await press(tester, LogicalKeyboardKey.keyZ, ctrl: true, shift: true);
 
-    expect(cortes(tester).first.atS, depoisDoArrasto);
+    expect(cutList(tester).first.atS, afterDrag);
   });
 
-  testWidgets('desfazer também volta um bloco recém-posto', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('undo also takes back a freshly placed block', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    expect(cortes(tester), hasLength(1));
+    expect(cutList(tester), hasLength(1));
 
-    await teclar(tester, LogicalKeyboardKey.keyZ, ctrl: true);
+    await press(tester, LogicalKeyboardKey.keyZ, ctrl: true);
 
-    expect(cortes(tester), isEmpty);
-    expect(find.text('Ponha ao menos um corte'), findsOneWidget);
+    expect(cutList(tester), isEmpty);
+    expect(find.text('Add at least one cut'), findsOneWidget);
   });
 
   testWidgets(
-    'os botões de desfazer só ficam ativos quando há o que desfazer',
+    'the undo buttons are only active when there is something to undo',
     (tester) async {
-      await abrir(tester, comMusica: true);
-      IconButton botao(IconData icone) =>
-          tester.widget<IconButton>(find.widgetWithIcon(IconButton, icone));
+      await open(tester, withMusic: true);
+      IconButton button(IconData icon) =>
+          tester.widget<IconButton>(find.widgetWithIcon(IconButton, icon));
 
-      expect(botao(Icons.undo).onPressed, isNull);
-      expect(botao(Icons.redo).onPressed, isNull);
+      expect(button(Icons.undo).onPressed, isNull);
+      expect(button(Icons.redo).onPressed, isNull);
 
-      await tester.tap(momento(30.0));
+      await tester.tap(moment(30.0));
       await tester.pump();
 
-      expect(botao(Icons.undo).onPressed, isNotNull);
-      expect(botao(Icons.redo).onPressed, isNull);
+      expect(button(Icons.undo).onPressed, isNotNull);
+      expect(button(Icons.redo).onPressed, isNull);
     },
   );
 
-  testWidgets('S divide o corte sob a cabeça de leitura', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('S splits the cut under the playhead', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    final original = cortes(tester).first;
+    final original = cutList(tester).first;
 
-    // leva o cursor para o meio do bloco e corta
-    await cursorEm(tester, original.durationS / 2);
-    await teclar(tester, LogicalKeyboardKey.keyS);
+    // moves the cursor to the middle of the block and cuts
+    await cursorAt(tester, original.durationS / 2);
+    await press(tester, LogicalKeyboardKey.keyS);
 
-    final depois = cortes(tester);
-    expect(depois, hasLength(2));
-    // a emenda é invisível: a segunda metade continua de onde a primeira parou
-    expect(depois[1].startS, closeTo(depois[0].endS, 1e-6));
-    expect(depois[1].untilS, closeTo(original.untilS, 1e-6));
+    final afterState = cutList(tester);
+    expect(afterState, hasLength(2));
+    // the seam is invisible: the second half continues where the first stopped
+    expect(afterState[1].startS, closeTo(afterState[0].endS, 1e-6));
+    expect(afterState[1].untilS, closeTo(original.untilS, 1e-6));
   });
 
-  testWidgets('dividir fora de um corte avisa em vez de não fazer nada', (
+  testWidgets('splitting outside a cut warns instead of doing nothing', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await teclar(tester, LogicalKeyboardKey.keyS);
+    await open(tester, withMusic: true);
+    await press(tester, LogicalKeyboardKey.keyS);
 
-    expect(find.textContaining('em cima de um corte'), findsOneWidget);
+    expect(find.textContaining('over a cut'), findsOneWidget);
   });
 
-  testWidgets('Delete tira os cortes escolhidos', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('Delete removes the selected cuts', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    await teclar(tester, LogicalKeyboardKey.delete);
+    await press(tester, LogicalKeyboardKey.delete);
 
-    expect(cortes(tester), isEmpty);
+    expect(cutList(tester), isEmpty);
   });
 
-  testWidgets('Ctrl+D duplica o que está selecionado', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('Ctrl+D duplicates what is selected', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    await teclar(tester, LogicalKeyboardKey.keyD, ctrl: true);
+    await press(tester, LogicalKeyboardKey.keyD, ctrl: true);
 
-    final depois = cortes(tester);
-    expect(depois, hasLength(2));
-    expect(depois[1].atS, closeTo(depois[0].untilS, 1e-6));
-    expect(depois[0].id, isNot(depois[1].id));
+    final afterState = cutList(tester);
+    expect(afterState, hasLength(2));
+    expect(afterState[1].atS, closeTo(afterState[0].untilS, 1e-6));
+    expect(afterState[0].id, isNot(afterState[1].id));
   });
 
-  testWidgets('copiar e colar põe a cópia onde o cursor estiver', (
+  testWidgets('copy and paste puts the copy where the cursor is', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    await teclar(tester, LogicalKeyboardKey.keyC, ctrl: true);
-    await cursorEm(tester, 5);
-    await teclar(tester, LogicalKeyboardKey.keyV, ctrl: true);
+    await press(tester, LogicalKeyboardKey.keyC, ctrl: true);
+    await cursorAt(tester, 5);
+    await press(tester, LogicalKeyboardKey.keyV, ctrl: true);
 
-    final depois = cortes(tester);
-    expect(depois, hasLength(2));
-    expect(depois[1].atS, closeTo(5.0, 0.3));
+    final afterState = cutList(tester);
+    expect(afterState, hasLength(2));
+    expect(afterState[1].atS, closeTo(5.0, 0.3));
   });
 
-  testWidgets('shift+clique soma à seleção, e o painel de lote aparece', (
+  testWidgets('shift+click adds to the selection, and the batch panel shows up', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await tester.tap(momento(75.0));
+    await tester.tap(moment(75.0));
     await tester.pump();
 
-    // só o último posto está selecionado
-    expect(find.textContaining('cortes selecionados'), findsNothing);
+    // only the last one placed is selected
+    expect(find.textContaining('cuts selected'), findsNothing);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
-    await tester.tap(bloco(tester, 0));
+    await tester.tap(block(tester, 0));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
     await tester.pump();
 
-    expect(find.text('2 cortes selecionados'), findsOneWidget);
+    expect(find.text('2 cuts selected'), findsOneWidget);
   });
 
-  testWidgets('Ctrl+A seleciona tudo e Delete leva todos', (tester) async {
-    await abrir(tester, comMusica: true);
+  testWidgets('Ctrl+A selects everything and Delete takes them all', (tester) async {
+    await open(tester, withMusic: true);
     for (final t in [30.0, 75.0, 120.0]) {
-      await tester.tap(momento(t));
+      await tester.tap(moment(t));
       await tester.pump();
     }
-    expect(cortes(tester), hasLength(3));
+    expect(cutList(tester), hasLength(3));
 
-    await teclar(tester, LogicalKeyboardKey.keyA, ctrl: true);
-    expect(find.text('3 cortes selecionados'), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.keyA, ctrl: true);
+    expect(find.text('3 cuts selected'), findsOneWidget);
 
-    await teclar(tester, LogicalKeyboardKey.delete);
-    expect(cortes(tester), isEmpty);
+    await press(tester, LogicalKeyboardKey.delete);
+    expect(cutList(tester), isEmpty);
   });
 
-  testWidgets('Shift+seta empurra a seleção sem mexer no cursor', (
+  testWidgets('Shift+arrow nudges the selection without moving the cursor', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    final antes = cortes(tester).first.atS;
+    final beforeState = cutList(tester).first.atS;
 
-    await teclar(tester, LogicalKeyboardKey.arrowRight, shift: true);
+    await press(tester, LogicalKeyboardKey.arrowRight, shift: true);
 
-    expect(cortes(tester).first.atS, closeTo(antes + 0.1, 1e-6));
+    expect(cutList(tester).first.atS, closeTo(beforeState + 0.1, 1e-6));
   });
 
-  testWidgets('a lista de atalhos está ao alcance', (tester) async {
-    await abrir(tester, comMusica: true);
-    // `pumpAndSettle` não serve aqui: sem plugin de vídeo nos testes, o monitor
-    // fica com um indicador girando para sempre e a árvore nunca "assenta".
-    await tester.tap(find.byKey(const Key('menu-da-tela')));
-    // a rota do menu entra animando, e enquanto anima ela absorve o toque
+  testWidgets('the shortcut list is within reach', (tester) async {
+    await open(tester, withMusic: true);
+    // `pumpAndSettle` does not work here: with no video plugin in tests, the monitor
+    // keeps a spinner going forever and the tree never "settles".
+    await tester.tap(find.byKey(const Key('screen-menu')));
+    // the menu route comes in animating, and while it animates it absorbs the tap
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
     await tester.tap(
-      find.widgetWithText(PopupMenuItem<String>, 'Atalhos do teclado'),
+      find.widgetWithText(PopupMenuItem<String>, 'Keyboard shortcuts'),
     );
-    // o menu fecha, só então o `onSelected` dispara, e só então o diálogo abre:
-    // são três quadros de animação, não um
+    // the menu closes, only then does `onSelected` fire, and only then does the dialog open:
+    // that is three animation frames, not one
     for (var i = 0; i < 4; i++) {
       await tester.pump(const Duration(milliseconds: 300));
     }
 
-    expect(find.text('dividir o corte sob o cursor'), findsOneWidget);
+    expect(find.text('split the cut under the cursor'), findsOneWidget);
   });
 
   // ── camadas ───────────────────────────────────────────────────────────────
 
-  testWidgets('a tela abre com uma camada, e o botão cria outra', (
+  testWidgets('the screen opens with one layer, and the button creates another', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    MusicTimeline regua() =>
+    await open(tester, withMusic: true);
+    MusicTimeline timelineWidget() =>
         tester.widget<MusicTimeline>(find.byType(MusicTimeline));
 
-    expect(regua().layers, hasLength(1));
+    expect(timelineWidget().layers, hasLength(1));
 
-    await tester.tap(find.byTooltip('Nova camada'));
+    await tester.tap(find.byTooltip('New layer'));
     await tester.pump();
 
-    expect(regua().layers, hasLength(2));
-    expect(regua().camadaAtiva, 1, reason: 'passa-se a trabalhar na nova');
+    expect(timelineWidget().layers, hasLength(2));
+    expect(timelineWidget().activeLayer, 1, reason: 'work moves to the new one');
   });
 
-  testWidgets('a última camada não pode ser tirada', (tester) async {
-    await abrir(tester, comMusica: true);
-    final botao = tester.widget<IconButton>(
+  testWidgets('the last layer cannot be removed', (tester) async {
+    await open(tester, withMusic: true);
+    final button = tester.widget<IconButton>(
       find.widgetWithIcon(IconButton, Icons.layers_clear_outlined),
     );
-    expect(botao.onPressed, isNull);
+    expect(button.onPressed, isNull);
   });
 
-  testWidgets('o clipe novo entra na camada ativa', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(find.byTooltip('Nova camada'));
+  testWidgets('the new clip goes into the active layer', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(find.byTooltip('New layer'));
     await tester.pump();
-    await tester.tap(momento(30.0));
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    final regua = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
-    expect(regua.layers[0].clips, isEmpty);
-    expect(regua.layers[1].clips, hasLength(1));
+    final timelineWidget = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
+    expect(timelineWidget.layers[0].clips, isEmpty);
+    expect(timelineWidget.layers[1].clips, hasLength(1));
   });
 
-  testWidgets('esconder uma camada tira os clipes dela da régua', (
+  testWidgets('hiding a layer removes its clips from the ruler', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    expect(bloco(tester, 0), findsOneWidget);
+    expect(block(tester, 0), findsOneWidget);
 
-    await tester.tap(find.byTooltip('esconder'));
+    await tester.tap(find.byTooltip('hide'));
     await tester.pump();
 
-    // o clipe continua na montagem, mas some do desenho
-    final regua = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
-    expect(regua.layers.first.clips, hasLength(1));
-    expect(regua.layers.first.hidden, isTrue);
+    // the clip stays in the montage, but vanishes from the drawing
+    final timelineWidget = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
+    expect(timelineWidget.layers.first.clips, hasLength(1));
+    expect(timelineWidget.layers.first.hidden, isTrue);
     expect(
-      find.byKey(ValueKey('bloco-${regua.layers.first.clips.first.id}')),
+      find.byKey(ValueKey('block-${timelineWidget.layers.first.clips.first.id}')),
       findsNothing,
     );
   });
 
-  testWidgets('desfazer volta o esconder', (tester) async {
-    // mexer numa camada é edição como qualquer outra
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('undo brings back the hiding', (tester) async {
+    // touching a layer is an edit like any other
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await tester.tap(find.byTooltip('esconder'));
+    await tester.tap(find.byTooltip('hide'));
     await tester.pump();
 
-    await teclar(tester, LogicalKeyboardKey.keyZ, ctrl: true);
+    await press(tester, LogicalKeyboardKey.keyZ, ctrl: true);
 
     expect(
       tester
@@ -794,47 +794,47 @@ void main() {
     );
   });
 
-  testWidgets('camada travada não deixa arrastar o clipe', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('a locked layer does not let the clip be dragged', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await tester.tap(find.byTooltip('travar'));
+    await tester.tap(find.byTooltip('lock'));
     await tester.pump();
 
-    await arrastarDevagar(tester, bloco(tester, 0), 120);
+    await dragSlowly(tester, block(tester, 0), 120);
 
-    expect(primeiroCorte(tester).atS, 0, reason: 'travada é travada');
+    expect(firstCut(tester).atS, 0, reason: 'locked is locked');
   });
 
-  // ── biblioteca de mídia ───────────────────────────────────────────────────
+  // ── media library ─────────────────────────────────────────────────────────
 
-  testWidgets('a lateral tem as duas prateleiras', (tester) async {
-    await abrir(tester, comMusica: true);
+  testWidgets('the sidebar has both shelves', (tester) async {
+    await open(tester, withMusic: true);
 
-    expect(find.text('Momentos'), findsOneWidget);
-    expect(find.text('Biblioteca'), findsOneWidget);
+    expect(find.text('Moments'), findsOneWidget);
+    expect(find.text('Library'), findsOneWidget);
   });
 
-  testWidgets('biblioteca vazia diz que está vazia', (tester) async {
-    // sem `comMusica` a partida não tem mídia nenhuma -- a música mora aqui
-    await abrir(tester);
-    await aba(tester, 'Biblioteca');
+  testWidgets('an empty library says it is empty', (tester) async {
+    // without `withMusic` the match has no media at all -- the music lives here
+    await open(tester);
+    await tab(tester, 'Library');
 
-    expect(find.text('Nada aqui ainda.'), findsOneWidget);
-    expect(find.text('Trazer'), findsOneWidget);
+    expect(find.text('Nothing here yet.'), findsOneWidget);
+    expect(find.text('Import'), findsOneWidget);
   });
 
-  testWidgets('um item da biblioteca vira clipe na régua', (tester) async {
+  testWidgets('a library item becomes a clip on the ruler', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1000, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final job = Job.fromJson({
-      ...jobJson(comMusica: true),
+      ...jobJson(withMusic: true),
       'media': [
         {
           'id': 'm1',
           'kind': 'image',
           'status': 'ready',
-          'name': 'selo.png',
+          'name': 'badge.png',
           'width': 320,
           'height': 180,
           'duration_s': 0.0,
@@ -844,34 +844,34 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: TimelineScreen(job: job)));
     await tester.pump();
 
-    await aba(tester, 'Biblioteca');
-    // o nome aparece na biblioteca e também na lista de marcas d'água da saída
-    expect(find.text('selo.png'), findsWidgets);
-    expect(find.byKey(const ValueKey('midia-m1')), findsOneWidget);
+    await tab(tester, 'Library');
+    // the name shows up in the library and also in the output watermark list
+    expect(find.text('badge.png'), findsWidgets);
+    expect(find.byKey(const ValueKey('media-m1')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('midia-m1')));
+    await tester.tap(find.byKey(const ValueKey('media-m1')));
     await tester.pump();
 
-    final clip = cortes(tester).single;
+    final clip = cutList(tester).single;
     expect(clip.source, 'media');
     expect(clip.mediaId, 'm1');
     expect(clip.durationS, greaterThan(0));
   });
 
-  testWidgets('não deixa tirar da biblioteca o que está na montagem', (
+  testWidgets('does not let you remove from the library what is in the montage', (
     tester,
   ) async {
-    // um clipe apontando para ela ficaria órfão, e o pedido seria recusado
+    // a clip pointing at it would be orphaned, and the request would be refused
     await tester.binding.setSurfaceSize(const Size(1000, 2400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final job = Job.fromJson({
-      ...jobJson(comMusica: true),
+      ...jobJson(withMusic: true),
       'media': [
         {
           'id': 'm1',
           'kind': 'image',
           'status': 'ready',
-          'name': 'selo.png',
+          'name': 'badge.png',
           'width': 320,
           'height': 180,
         },
@@ -879,84 +879,84 @@ void main() {
     });
     await tester.pumpWidget(MaterialApp(home: TimelineScreen(job: job)));
     await tester.pump();
-    await aba(tester, 'Biblioteca');
-    await tester.tap(find.byKey(const ValueKey('midia-m1')));
+    await tab(tester, 'Library');
+    await tester.tap(find.byKey(const ValueKey('media-m1')));
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Tirar da biblioteca'));
+    await tester.tap(find.byTooltip('Remove from the library'));
     await tester.pump();
 
-    expect(find.textContaining('está na montagem'), findsOneWidget);
-    expect(find.byKey(const ValueKey('midia-m1')), findsOneWidget);
+    expect(find.textContaining('is in the montage'), findsOneWidget);
+    expect(find.byKey(const ValueKey('media-m1')), findsOneWidget);
   });
 
   // ── efeitos ───────────────────────────────────────────────────────────────
 
-  testWidgets('o painel de efeitos abre no bloco escolhido', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('the effects panel opens on the selected block', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    expect(find.text('Efeitos'), findsOneWidget);
+    expect(find.text('Effects'), findsOneWidget);
 
-    await tester.tap(find.text('Efeitos'));
+    await tester.tap(find.text('Effects'));
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
-    expect(find.text('Velocidade'), findsOneWidget);
-    expect(find.text('Entrada'), findsOneWidget);
-    expect(find.text('Cor'), findsOneWidget);
-    expect(find.text('Aproximar'), findsOneWidget);
-    expect(find.text('Congelar'), findsOneWidget);
+    expect(find.text('Speed'), findsOneWidget);
+    expect(find.text('Fade in'), findsOneWidget);
+    expect(find.text('Colour'), findsOneWidget);
+    expect(find.text('Zoom in'), findsOneWidget);
+    expect(find.text('Freeze'), findsOneWidget);
   });
 
-  testWidgets('o punch entra pronto, num toque', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('the punch comes ready-made, in one tap', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await tester.tap(find.text('Efeitos'));
+    await tester.tap(find.text('Effects'));
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
-    await tester.tap(find.text('médio'));
+    await tester.tap(find.text('medium'));
     await tester.pump();
 
-    final clip = primeiroCorte(tester);
+    final clip = firstCut(tester);
     expect(clip.zoom, hasLength(3));
     expect(clip.zoom[1].scale, 1.6);
-    // e dá para tirar
-    await tester.tap(find.text('tirar'));
+    // and it can be removed
+    await tester.tap(find.text('remove'));
     await tester.pump();
-    expect(primeiroCorte(tester).zoom, isEmpty);
+    expect(firstCut(tester).zoom, isEmpty);
   });
 
-  testWidgets('a mistura aparece quando há música na régua', (tester) async {
-    // ter a música na biblioteca não é ter música no vídeo: só há o que
-    // equilibrar depois que ela entra na régua
-    await abrir(tester, comMusica: true);
-    expect(find.text('Mistura'), findsNothing);
+  testWidgets('the mix shows up when there is music on the ruler', (tester) async {
+    // having the song in the library is not having music in the video: there is
+    // only something to balance after it goes on the ruler
+    await open(tester, withMusic: true);
+    expect(find.text('Mix'), findsNothing);
 
-    await aba(tester, 'Biblioteca');
-    await tester.tap(find.byKey(const ValueKey('midia-m1')));
-    await assentar(tester);
-    await aba(tester, 'Momentos');
+    await tab(tester, 'Library');
+    await tester.tap(find.byKey(const ValueKey('media-m1')));
+    await settle(tester);
+    await tab(tester, 'Moments');
 
-    expect(find.text('Mistura'), findsOneWidget);
-    expect(find.textContaining('o tiro aparece por baixo'), findsOneWidget);
+    expect(find.text('Mix'), findsOneWidget);
+    expect(find.textContaining('gunfire comes through under it'), findsOneWidget);
   });
 
-  testWidgets('sem música não há mistura a fazer', (tester) async {
-    await abrir(tester);
-    expect(find.text('Mistura'), findsNothing);
+  testWidgets('without music there is no mix to do', (tester) async {
+    await open(tester);
+    expect(find.text('Mix'), findsNothing);
   });
 
   // ── texto ─────────────────────────────────────────────────────────────────
 
-  /// Abre o menu de escrever na tela e escolhe um item.
-  Future<void> escrever(WidgetTester tester, String item) async {
-    await tester.tap(find.byTooltip('Escrever na tela'));
+  /// Opens the write-on-screen menu and picks an item.
+  Future<void> write(WidgetTester tester, String item) async {
+    await tester.tap(find.byTooltip('Write on screen'));
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
@@ -966,48 +966,48 @@ void main() {
     }
   }
 
-  testWidgets('texto livre entra numa camada nova, por cima', (tester) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(30.0));
+  testWidgets('free text goes into a new layer, on top', (tester) async {
+    await open(tester, withMusic: true);
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    await escrever(tester, 'Texto livre');
+    await write(tester, 'Free text');
 
-    final regua = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
-    expect(regua.layers, hasLength(2), reason: 'texto vai por cima da imagem');
-    expect(regua.layers[1].clips.single.isText, isTrue);
-    expect(regua.layers[1].clips.single.text, 'TEXTO');
+    final timelineWidget = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
+    expect(timelineWidget.layers, hasLength(2), reason: 'text goes over the picture');
+    expect(timelineWidget.layers[1].clips.single.isText, isTrue);
+    expect(timelineWidget.layers[1].clips.single.text, 'TEXT');
   });
 
-  testWidgets('o contador de eliminações se escreve sozinho', (tester) async {
-    await abrir(tester, comMusica: true);
-    // duas eliminações na montagem
-    await tester.tap(momento(30.0));
+  testWidgets('the kill counter writes itself', (tester) async {
+    await open(tester, withMusic: true);
+    // two kills in the montage
+    await tester.tap(moment(30.0));
     await tester.pump();
-    await tester.tap(momento(30.0));
+    await tester.tap(moment(30.0));
     await tester.pump();
 
-    await escrever(tester, 'Contador de eliminações');
+    await write(tester, 'Kill counter');
 
-    final regua = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
-    final textos = [
-      for (final l in regua.layers)
+    final timelineWidget = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
+    final texts = [
+      for (final l in timelineWidget.layers)
         for (final c in l.clips)
           if (c.isText) c.text,
     ];
-    expect(textos, ['1', '2']);
+    expect(texts, ['1', '2']);
   });
 
-  testWidgets('sem eliminação, o contador avisa em vez de não fazer nada', (
+  testWidgets('without kills, the counter warns instead of doing nothing', (
     tester,
   ) async {
-    await abrir(tester, comMusica: true);
-    await tester.tap(momento(75.0)); // um dardo, não uma eliminação
+    await open(tester, withMusic: true);
+    await tester.tap(moment(75.0)); // a sleep dart, not a kill
     await tester.pump();
 
-    await escrever(tester, 'Contador de eliminações');
+    await write(tester, 'Kill counter');
 
-    expect(find.textContaining('Não há'), findsOneWidget);
+    expect(find.textContaining('There are no'), findsOneWidget);
   });
 
   group('typing on the video', () {
@@ -1019,16 +1019,16 @@ void main() {
         .single;
 
     Future<void> withText(WidgetTester tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await escrever(tester, 'Texto livre');
+      await write(tester, 'Free text');
     }
 
     testWidgets('the panel no longer has a field for the text', (tester) async {
       await withText(tester);
 
-      expect(find.text('O que está escrito'), findsNothing);
+      expect(find.text('What is written'), findsNothing);
       expect(find.byKey(const Key('type-on-frame')), findsOneWidget);
     });
 
@@ -1039,7 +1039,7 @@ void main() {
       final id = text(tester).id;
 
       // it is born selected: one tap opens typing
-      await tester.tap(find.byKey(ValueKey('frase-$id')));
+      await tester.tap(find.byKey(ValueKey('frame-text-$id')));
       await tester.pump();
       final field = find.byKey(ValueKey('typing-$id'));
       expect(field, findsOneWidget);
@@ -1072,9 +1072,9 @@ void main() {
       final id = text(tester).id;
       // the screen's normal state: focus on the montage, so shortcuts work —
       // and with it there, the field's `autofocus` did nothing
-      expect(FocusManager.instance.primaryFocus?.debugLabel, 'montagem');
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'montage');
 
-      await tester.tap(find.byKey(ValueKey('frase-$id')));
+      await tester.tap(find.byKey(ValueKey('frame-text-$id')));
       await tester.pump();
       await tester.pump();
       expect(keyboardOnField(tester, id), isTrue);
@@ -1088,10 +1088,10 @@ void main() {
       expect(keyboardOnField(tester, id), isTrue);
 
       // a one-key shortcut must not steal the letter: "s" would split the clip
-      final before = cortes(tester).length;
+      final before = cutList(tester).length;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.pump();
-      expect(cortes(tester), hasLength(before));
+      expect(cutList(tester), hasLength(before));
     });
 
     testWidgets('the panel button opens typing on the frame', (tester) async {
@@ -1149,11 +1149,11 @@ void main() {
   testWidgets('scrolling the panels keeps the monitor and ruler on screen', (
     tester,
   ) async {
-    await abrir(tester);
+    await open(tester);
     // a short window, where the panels do not fit and the screen must scroll
     await tester.binding.setSurfaceSize(const Size(1000, 900));
     await tester.pump();
-    await tester.tap(momento(30.0));
+    await tester.tap(moment(30.0));
     await tester.pump();
 
     final monitor = tester.getRect(find.byType(PreviewPlayer));
@@ -1181,141 +1181,141 @@ void main() {
     expect(tester.getRect(find.byType(MusicTimeline)), ruler);
   });
 
-  group('painel de saída', () {
-    /// O resumo é a única coisa da tela que diz o que vai sair de verdade.
-    String resumo(WidgetTester tester) =>
+  group('output panel', () {
+    /// The summary is the only thing on the screen that says what will really come out.
+    String summary(WidgetTester tester) =>
         tester.widget<Text>(find.textContaining(RegExp(r'^\d+x\d+'))).data!;
 
-    testWidgets('sem escolher nada, sai no tamanho da gravação', (
+    testWidgets('choosing nothing, it comes out at the recording size', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
-      expect(resumo(tester), startsWith('1920x1080'));
-      // e não há o que desfazer: o botão de voltar ao padrão nem aparece
-      expect(find.text('Padrão'), findsNothing);
+      expect(summary(tester), startsWith('1920x1080'));
+      // and there is nothing to undo: the back-to-default button does not even show
+      expect(find.text('Default'), findsNothing);
     });
 
-    testWidgets('escolher vertical muda a saída, e só ela', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('choosing vertical changes the output, and only it', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      final antes = cortes(tester).single;
+      final beforeState = cutList(tester).single;
 
       await tester.tap(find.text('Vertical'));
       await tester.pump();
 
-      expect(resumo(tester), startsWith('1080x1920'));
-      // a montagem não se mexeu: é uma janela, não uma edição
-      final depois = cortes(tester).single;
-      expect(depois.atS, antes.atS);
-      expect(depois.durationS, antes.durationS);
-      expect(depois.startS, antes.startS);
+      expect(summary(tester), startsWith('1080x1920'));
+      // the montage did not move: it is a window, not an edit
+      final afterState = cutList(tester).single;
+      expect(afterState.atS, beforeState.atS);
+      expect(afterState.durationS, beforeState.durationS);
+      expect(afterState.startS, beforeState.startS);
     });
 
-    testWidgets('a escolha entre cortar e caber só aparece quando importa', (
+    testWidgets('the choice between cropping and fitting only shows when it matters', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
-      // 720p de uma gravação 16:9 tem a mesma proporção: não há o que decidir
+      // 720p from a 16:9 recording has the same proportion: there is nothing to decide
       await tester.tap(find.text('720p'));
       await tester.pump();
-      expect(find.text('Preencher'), findsNothing);
+      expect(find.text('Fill'), findsNothing);
 
       await tester.tap(find.text('Vertical'));
       await tester.pump();
-      expect(find.text('Preencher'), findsOneWidget);
-      expect(find.text('Caber'), findsOneWidget);
+      expect(find.text('Fill'), findsOneWidget);
+      expect(find.text('Contain'), findsOneWidget);
     });
 
-    testWidgets('dá para voltar ao padrão de uma vez', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('you can go back to the default at once', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
       await tester.tap(find.text('Vertical'));
       await tester.pump();
-      await tester.tap(find.text('Leve'));
+      await tester.tap(find.text('Light'));
       await tester.pump();
-      expect(resumo(tester), startsWith('1080x1920'));
+      expect(summary(tester), startsWith('1080x1920'));
 
-      await tester.tap(find.text('Padrão'));
+      await tester.tap(find.text('Default'));
       await tester.pump();
-      expect(resumo(tester), startsWith('1920x1080'));
-      expect(find.text('Padrão'), findsNothing);
+      expect(summary(tester), startsWith('1920x1080'));
+      expect(find.text('Default'), findsNothing);
     });
 
-    testWidgets('mudar a saída se desfaz como qualquer outra edição', (
+    testWidgets('changing the output is undone like any other edit', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
       await tester.tap(find.text('Vertical'));
       await tester.pump();
-      expect(resumo(tester), startsWith('1080x1920'));
+      expect(summary(tester), startsWith('1080x1920'));
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
 
-      expect(resumo(tester), startsWith('1920x1080'));
-      expect(cortes(tester), hasLength(1), reason: 'o corte continua lá');
+      expect(summary(tester), startsWith('1920x1080'));
+      expect(cutList(tester), hasLength(1), reason: 'the cut is still there');
     });
 
-    testWidgets('sem seleção não dá para exportar só a seleção', (
+    testWidgets('without a selection you cannot export only the selection', (
       tester,
     ) async {
-      // um corte recém-posto entra selecionado, então o caso a testar é o
-      // da montagem em branco — e o de quem acabou de limpar a seleção
-      await abrir(tester);
+      // a freshly placed cut comes in selected, so the case to test is the
+      // blank montage — and that of whoever just cleared the selection
+      await open(tester);
 
       final chip = tester.widget<ChoiceChip>(
         find.ancestor(
-          of: find.text('Só a seleção'),
+          of: find.text('Selection only'),
           matching: find.byType(ChoiceChip),
         ),
       );
       expect(chip.onSelected, isNull);
     });
 
-    testWidgets('exportar a seleção recorta o tempo sem apagar nada', (
+    testWidgets('exporting the selection crops the time without deleting anything', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
-      await tester.tap(momento(75.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.tap(moment(75.0));
       await tester.pump();
 
-      // o segundo corte fica selecionado ao entrar; basta pedir o recorte
-      await tester.tap(find.text('Só a seleção'));
+      // the second cut stays selected when it comes in; just ask for the range
+      await tester.tap(find.text('Selection only'));
       await tester.pump();
 
-      expect(cortes(tester), hasLength(2), reason: 'nada foi apagado');
-      // a duração anunciada passa a ser a do trecho, não a do vídeo inteiro
-      final duracao = cortes(tester)[1].durationS;
-      expect(resumo(tester), contains('0:0${duracao.round()}'));
+      expect(cutList(tester), hasLength(2), reason: 'nothing was deleted');
+      // the announced duration becomes the range's, not the whole video's
+      final durationValue = cutList(tester)[1].durationS;
+      expect(summary(tester), contains('0:0${durationValue.round()}'));
     });
   });
 
-  group('montagens da partida', () {
-    Map<String, dynamic> montagemJson({
+  group('match montages', () {
+    Map<String, dynamic> montageJson({
       required String id,
-      required String nome,
+      required String displayName,
       double at = 0,
-      String titulo = '',
+      String heading = '',
       int versions = 0,
     }) => {
       'id': id,
       'job_id': 'j1',
-      'name': nome,
+      'name': displayName,
       'n_clips': 1,
       'duration_s': 2.0,
       'has_music': false,
@@ -1323,7 +1323,7 @@ void main() {
       'created_at': DateTime.now().toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
       'data': {
-        'title': titulo,
+        'title': heading,
         'layers': [
           {
             'clips': [
@@ -1334,219 +1334,219 @@ void main() {
       },
     };
 
-    Future<void> abrirCom(
+    Future<void> openWith(
       WidgetTester tester,
-      List<Map<String, dynamic>> montagens,
+      List<Map<String, dynamic>> montageList,
     ) async {
       await tester.binding.setSurfaceSize(const Size(1000, 2400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final job = Job.fromJson({...jobJson(), 'montages': montagens});
+      final job = Job.fromJson({...jobJson(), 'montages': montageList});
       await tester.pumpWidget(MaterialApp(home: TimelineScreen(job: job)));
       await tester.pump();
     }
 
-    testWidgets('abre a mais recente, e diz qual é', (tester) async {
-      // é a que se estava editando, e é a que se quer de volta
-      await abrirCom(tester, [
-        montagemJson(id: 'm1', nome: 'vertical curta', at: 4),
-        montagemJson(id: 'm2', nome: 'a longa'),
+    testWidgets('opens the most recent one, and says which it is', (tester) async {
+      // it is the one being edited, and the one you want back
+      await openWith(tester, [
+        montageJson(id: 'm1', displayName: 'short vertical', at: 4),
+        montageJson(id: 'm2', displayName: 'the long one'),
       ]);
 
-      expect(find.text('vertical curta'), findsOneWidget);
-      expect(cortes(tester).single.atS, 4.0);
+      expect(find.text('short vertical'), findsOneWidget);
+      expect(cutList(tester).single.atS, 4.0);
     });
 
-    testWidgets('sem montagem nenhuma, a tela abre em branco', (tester) async {
-      await abrirCom(tester, const []);
+    testWidgets('without any montage, the screen opens blank', (tester) async {
+      await openWith(tester, const []);
 
-      expect(find.text('Montagem'), findsOneWidget);
-      expect(cortes(tester), isEmpty);
+      expect(find.text('Montage'), findsOneWidget);
+      expect(cutList(tester), isEmpty);
     });
 
-    testWidgets('o seletor lista as outras, com o tamanho de cada uma', (
+    testWidgets('the picker lists the others, with the length of each', (
       tester,
     ) async {
-      await abrirCom(tester, [
-        montagemJson(id: 'm1', nome: 'vertical curta'),
-        montagemJson(id: 'm2', nome: 'a longa'),
+      await openWith(tester, [
+        montageJson(id: 'm1', displayName: 'short vertical'),
+        montageJson(id: 'm2', displayName: 'the long one'),
       ]);
 
-      await tester.tap(find.byKey(const Key('seletor-de-montagem')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('montage-picker')));
+      await settle(tester);
 
-      expect(find.byKey(const ValueKey('abrir-m1')), findsOneWidget);
-      expect(find.byKey(const ValueKey('abrir-m2')), findsOneWidget);
-      expect(find.textContaining('1 corte(s)'), findsWidgets);
-      expect(find.text('Nova montagem'), findsOneWidget);
+      expect(find.byKey(const ValueKey('open-m1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('open-m2')), findsOneWidget);
+      expect(find.textContaining('1 cut(s)'), findsWidgets);
+      expect(find.text('New montage'), findsOneWidget);
     });
 
-    testWidgets('trocar de montagem troca os cortes na régua', (tester) async {
-      await abrirCom(tester, [
-        montagemJson(id: 'm1', nome: 'primeira', at: 0),
-        montagemJson(id: 'm2', nome: 'segunda', at: 9),
+    testWidgets('switching montages switches the cuts on the ruler', (tester) async {
+      await openWith(tester, [
+        montageJson(id: 'm1', displayName: 'first', at: 0),
+        montageJson(id: 'm2', displayName: 'second', at: 9),
       ]);
-      expect(cortes(tester).single.atS, 0.0);
+      expect(cutList(tester).single.atS, 0.0);
 
-      await tester.tap(find.byKey(const Key('seletor-de-montagem')));
-      await assentar(tester);
-      await tester.tap(find.byKey(const ValueKey('abrir-m2')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('montage-picker')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('open-m2')));
+      await settle(tester);
 
-      expect(cortes(tester).single.atS, 9.0);
-      expect(find.text('segunda'), findsOneWidget);
+      expect(cutList(tester).single.atS, 9.0);
+      expect(find.text('second'), findsOneWidget);
     });
 
-    testWidgets('o desfazer não atravessa a troca de montagem', (tester) async {
-      // ele é a memória de uma sessão de trabalho *numa* montagem; desfazer
-      // para dentro de outra apagaria o que se acabou de abrir
-      await abrirCom(tester, [
-        montagemJson(id: 'm1', nome: 'primeira', at: 0),
-        montagemJson(id: 'm2', nome: 'segunda', at: 9),
+    testWidgets('undo does not cross a montage switch', (tester) async {
+      // it is the memory of a work session *on one* montage; undoing
+      // into another would erase what was just opened
+      await openWith(tester, [
+        montageJson(id: 'm1', displayName: 'first', at: 0),
+        montageJson(id: 'm2', displayName: 'second', at: 9),
       ]);
 
-      await tester.tap(momento(30.0));
+      await tester.tap(moment(30.0));
       await tester.pump();
-      expect(cortes(tester), hasLength(2));
+      expect(cutList(tester), hasLength(2));
 
-      await tester.tap(find.byKey(const Key('seletor-de-montagem')));
-      await assentar(tester);
-      await tester.tap(find.byKey(const ValueKey('abrir-m2')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('montage-picker')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('open-m2')));
+      await settle(tester);
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
 
-      expect(cortes(tester).single.atS, 9.0, reason: 'a segunda continua lá');
+      expect(cutList(tester).single.atS, 9.0, reason: 'the second one is still there');
     });
 
-    testWidgets('o menu oferece duplicar, versões e predefinições', (
+    testWidgets('the menu offers duplicate, versions and presets', (
       tester,
     ) async {
-      await abrirCom(tester, [montagemJson(id: 'm1', nome: 'uma')]);
+      await openWith(tester, [montageJson(id: 'm1', displayName: 'one')]);
 
-      await tester.tap(find.byKey(const Key('menu-da-tela')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('screen-menu')));
+      await settle(tester);
 
-      expect(find.text('Duplicar esta montagem'), findsOneWidget);
-      expect(find.text('Renomear'), findsOneWidget);
-      expect(find.text('Histórico de versões…'), findsOneWidget);
-      expect(find.text('Aplicar predefinição…'), findsOneWidget);
-      expect(find.text('Salvar como predefinição…'), findsOneWidget);
+      expect(find.text('Duplicate this montage'), findsOneWidget);
+      expect(find.text('Rename'), findsOneWidget);
+      expect(find.text('Version history…'), findsOneWidget);
+      expect(find.text('Apply preset…'), findsOneWidget);
+      expect(find.text('Save as preset…'), findsOneWidget);
     });
 
-    testWidgets('o título salvo na montagem volta no campo de nome', (
+    testWidgets('the title saved in the montage comes back in the name field', (
       tester,
     ) async {
-      await abrirCom(tester, [
-        montagemJson(id: 'm1', nome: 'uma', titulo: 'Ana carregando'),
+      await openWith(tester, [
+        montageJson(id: 'm1', displayName: 'one', heading: 'Ana carrying'),
       ]);
 
-      expect(find.widgetWithText(TextField, 'Ana carregando'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Ana carrying'), findsOneWidget);
     });
   });
 
-  group('música na régua', () {
-    /// A camada de som da montagem que está na tela, se já houver uma.
-    Layer? camadaDeSom(WidgetTester tester) => tester
+  group('music on the timeline', () {
+    /// The sound layer of the montage on screen, if there is one already.
+    Layer? audioLayer(WidgetTester tester) => tester
         .widget<MusicTimeline>(find.byType(MusicTimeline))
         .layers
         .where((l) => l.isAudio)
         .firstOrNull;
 
-    /// Põe a música na régua pelo caminho de verdade: a Biblioteca.
-    Future<void> porNaRegua(WidgetTester tester) async {
-      await aba(tester, 'Biblioteca');
-      await tester.tap(find.byKey(const ValueKey('midia-m1')));
-      await assentar(tester);
-      await aba(tester, 'Momentos');
+    /// Puts the song on the ruler the real way: through the Library.
+    Future<void> putOnRuler(WidgetTester tester) async {
+      await tab(tester, 'Library');
+      await tester.tap(find.byKey(const ValueKey('media-m1')));
+      await settle(tester);
+      await tab(tester, 'Moments');
     }
 
-    testWidgets('o botão abre uma camada só de som', (tester) async {
-      await abrir(tester, comMusica: true);
+    testWidgets('the button opens a sound-only layer', (tester) async {
+      await open(tester, withMusic: true);
 
-      await tester.tap(find.byKey(const Key('nova-camada-de-musica')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('new-music-layer')));
+      await settle(tester);
 
-      expect(camadaDeSom(tester), isNotNull);
-      expect(camadaDeSom(tester)!.clips, isEmpty);
+      expect(audioLayer(tester), isNotNull);
+      expect(audioLayer(tester)!.clips, isEmpty);
     });
 
-    testWidgets('a música da biblioteca abre a camada de som sozinha', (
+    testWidgets('the library song opens the sound layer on its own', (
       tester,
     ) async {
-      // pedir música e receber um pedido de camada seria burocracia
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+      // asking for music and getting a request for a layer would be red tape
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
-      await porNaRegua(tester);
+      await putOnRuler(tester);
 
-      final bloco = camadaDeSom(tester)!.clips.single;
-      expect(bloco.mediaId, 'm1');
-      expect(bloco.source, 'media');
-      expect(bloco.atS, 0);
+      final block = audioLayer(tester)!.clips.single;
+      expect(block.mediaId, 'm1');
+      expect(block.source, 'media');
+      expect(block.atS, 0);
     });
 
-    testWidgets('pôr na régua entra na cabeça de leitura', (tester) async {
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+    testWidgets('putting it on the ruler goes in at the playhead', (tester) async {
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 3.2);
+      await cursorAt(tester, 3.2);
 
-      await porNaRegua(tester);
+      await putOnRuler(tester);
 
-      final bloco = camadaDeSom(tester)!.clips.single;
-      expect(bloco.mediaId, 'm1');
-      expect(bloco.atS, closeTo(3.2, 0.2));
+      final block = audioLayer(tester)!.clips.single;
+      expect(block.mediaId, 'm1');
+      expect(block.atS, closeTo(3.2, 0.2));
     });
 
-    testWidgets('duas músicas cabem na mesma camada, uma depois da outra', (
+    testWidgets('two songs fit on the same layer, one after the other', (
       tester,
     ) async {
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
-      await porNaRegua(tester);
-      await porNaRegua(tester);
+      await putOnRuler(tester);
+      await putOnRuler(tester);
 
-      // a segunda não empurra a primeira: entra depois do que já está lá
-      final blocos = camadaDeSom(tester)!.clips;
-      expect(blocos, hasLength(2));
-      expect(blocos.last.atS, closeTo(blocos.first.untilS, 1e-6));
+      // the second does not push the first: it goes after what is already there
+      final blocks = audioLayer(tester)!.clips;
+      expect(blocks, hasLength(2));
+      expect(blocks.last.atS, closeTo(blocks.first.untilS, 1e-6));
     });
 
-    /// Arrasta um bloco até soltá-lo **exatamente** em [destinoS].
+    /// Drags a block until dropping it **exactly** at [targetS].
     ///
-    /// `arrastarDevagar` anda em passos de 3px e passa do ponto pedido: para
-    /// medir onde o ímã grudou é preciso saber de onde ele partiu, senão a
-    /// sobra do último passo responde pelo ímã.
-    Future<void> arrastarAte(
+    /// `dragSlowly` moves in 3px steps and overshoots the requested point: to
+    /// measure where the magnet snapped you need to know where it started, or the
+    /// leftover of the last step answers for the magnet.
+    Future<void> dragTo(
       WidgetTester tester,
-      Finder alvo,
-      double destinoS,
-      double partiuS,
+      Finder target,
+      double targetS,
+      double startedS,
     ) async {
-      final total = (destinoS - partiuS) * px + comidoPeloSlop;
-      final gesto = await tester.startGesture(tester.getCenter(alvo));
-      var andou = 0.0;
-      while (andou < total) {
-        final passo = total - andou < 3 ? total - andou : 3.0;
-        await gesto.moveBy(Offset(passo, 0));
+      final total = (targetS - startedS) * px + eatenBySlop;
+      final gesture = await tester.startGesture(tester.getCenter(target));
+      var moved = 0.0;
+      while (moved < total) {
+        final step = total - moved < 3 ? total - moved : 3.0;
+        await gesture.moveBy(Offset(step, 0));
         await tester.pump();
-        andou += passo;
+        moved += step;
       }
-      await gesto.up();
+      await gesture.up();
       await tester.pump();
     }
 
-    testWidgets('o painel de um vídeo da biblioteca diz de que arquivo saiu', (
+    testWidgets('the panel of a library video says which file it came from', (
       tester,
     ) async {
-      // "Evento de 00:00" é rótulo de momento da partida; um clipe importado
-      // não veio de momento nenhum
+      // "Event at 00:00" is a match moment label; an imported clip
+      // did not come from any moment
       await tester.binding.setSurfaceSize(const Size(1000, 2400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final job = Job.fromJson({
@@ -1556,7 +1556,7 @@ void main() {
             'id': 'v1',
             'kind': 'video',
             'status': 'ready',
-            'name': 'vinheta.mp4',
+            'name': 'intro.mp4',
             'duration_s': 4.0,
             'width': 1920,
             'height': 1080,
@@ -1566,200 +1566,200 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: TimelineScreen(job: job)));
       await tester.pump();
 
-      await aba(tester, 'Biblioteca');
-      await tester.tap(find.byKey(const ValueKey('midia-v1')));
-      await assentar(tester);
+      await tab(tester, 'Library');
+      await tester.tap(find.byKey(const ValueKey('media-v1')));
+      await settle(tester);
 
-      expect(find.text('vinheta.mp4'), findsWidgets);
-      expect(find.textContaining('Evento de'), findsNothing);
-      // imagem tem efeitos: o que não os tem é som
-      expect(find.text('Efeitos'), findsOneWidget);
-      expect(find.text('Enquadramento'), findsOneWidget);
+      expect(find.text('intro.mp4'), findsWidgets);
+      expect(find.textContaining('Event at'), findsNothing);
+      // images have effects: what does not have them is sound
+      expect(find.text('Effects'), findsOneWidget);
+      expect(find.text('Framing'), findsOneWidget);
     });
 
-    testWidgets('o painel do bloco fala de música, não de evento', (
+    testWidgets('the block panel talks about music, not an event', (
       tester,
     ) async {
-      // o bloco não veio de um momento da partida, e não desenha nada: dizer
-      // "Evento de 00:00" e oferecer zoom seria mentir duas vezes
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+      // the block did not come from a match moment, and draws nothing: saying
+      // "Event at 00:00" and offering zoom would be lying twice
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await porNaRegua(tester);
+      await putOnRuler(tester);
 
-      expect(find.text('musica.mp3'), findsWidgets);
+      expect(find.text('song.mp3'), findsWidgets);
       expect(
-        find.textContaining('a partir de 00:00 da música'),
+        find.textContaining('from 00:00 of the song'),
         findsOneWidget,
       );
-      expect(find.text('Trecho da música'), findsOneWidget);
-      expect(find.text('Enquadramento'), findsNothing);
-      expect(find.text('Efeitos'), findsNothing);
+      expect(find.text('Song span'), findsOneWidget);
+      expect(find.text('Framing'), findsNothing);
+      expect(find.text('Effects'), findsNothing);
     });
 
-    testWidgets('o ímã passa a seguir a música que está tocando', (
+    testWidgets('the magnet starts following the song that is playing', (
       tester,
     ) async {
-      // é o motivo de a grade ser por bloco: um vídeo com duas faixas tem dois
-      // andamentos, e grudar na batida da outra seria pior do que não grudar
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+      // that is why the grid is per block: a video with two tracks has two
+      // tempos, and snapping to the other one's beat would be worse than not snapping
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 3.2);
-      await porNaRegua(tester);
+      await cursorAt(tester, 3.2);
+      await putOnRuler(tester);
 
-      // a música entrou fora da grade de meio em meio segundo da faixa
-      // contínua, e é a partir da entrada dela que a grade passa a contar
-      final entrada = camadaDeSom(tester)!.clips.single.atS;
-      expect(entrada % 0.5, closeTo(0.2, 1e-6));
+      // the song came in off the half-second grid of the continuous
+      // track, and the grid starts counting from where it came in
+      final entry = audioLayer(tester)!.clips.single.atS;
+      expect(entry % 0.5, closeTo(0.2, 1e-6));
 
-      // solto 0,04s antes de uma batida *da música na régua* — que na grade
-      // antiga não é batida nenhuma, e ficaria onde foi solto
-      await arrastarAte(
+      // dropped 0.04s before a beat *of the song on the ruler* — which on the old
+      // grid is no beat at all, and would stay where it was dropped
+      await dragTo(
         tester,
-        bloco(tester, 0),
-        entrada + 0.46,
-        primeiroCorte(tester).atS,
+        block(tester, 0),
+        entry + 0.46,
+        firstCut(tester).atS,
       );
 
-      expect(primeiroCorte(tester).atS, closeTo(entrada + 0.5, 1e-6));
+      expect(firstCut(tester).atS, closeTo(entry + 0.5, 1e-6));
     });
   });
 
-  // ── arrastar da prateleira para a régua ───────────────────────────────────
+  // ── dragging from the shelf to the ruler ──────────────────────────────────
   //
-  // Clicar põe na cabeça de leitura, que serve para quem está montando na
-  // ordem. Arrastar é para quem já sabe onde quer a coisa — e é o gesto que
-  // qualquer editor tem.
+  // Clicking places at the playhead, which suits whoever is building in
+  // order. Dragging is for whoever already knows where they want the thing — and
+  // it is the gesture every editor has.
 
-  group('soltar na régua', () {
-    /// Arrasta [origem] até [segundos] da régua, na **pista** [linha].
+  group('dropping on the ruler', () {
+    /// Drags [origin] to [seconds] on the ruler, on **track** [line].
     ///
-    /// Pista é o que se vê: a de cima é a linha 0. A camada correspondente é a
-    /// conta inversa — a lista de camadas vai da de baixo para a de cima.
-    Future<void> arrastarPara(
+    /// A track is what you see: the top one is line 0. The matching layer is the
+    /// inverse maths — the layer list goes from bottom to top.
+    Future<void> dragOnto(
       WidgetTester tester,
-      Finder origem,
-      double segundos, {
-      int linha = 0,
+      Finder origin,
+      double seconds, {
+      int line = 0,
     }) async {
-      final regua = tester.getRect(find.byType(MusicTimeline));
-      final destino = Offset(
-        regua.left + MusicTimeline.larguraDosCabecalhos + 1 + segundos * 60,
-        regua.top +
+      final timelineWidget = tester.getRect(find.byType(MusicTimeline));
+      final destination = Offset(
+        timelineWidget.left + MusicTimeline.headerWidth + 1 + seconds * 60,
+        timelineWidget.top +
             MusicTimeline.waveHeight +
-            linha * MusicTimeline.blockHeight +
+            line * MusicTimeline.blockHeight +
             MusicTimeline.blockHeight / 2,
       );
-      final gesto = await tester.startGesture(tester.getCenter(origem));
-      // passos pequenos: o `Draggable` só nasce depois de vencer o slop, e é
-      // andando que o alvo recebe o `onWillAccept`
-      final de = tester.getCenter(origem);
+      final gesture = await tester.startGesture(tester.getCenter(origin));
+      // small steps: the `Draggable` is only born after beating the slop, and it is
+      // by moving that the target gets `onWillAccept`
+      final from = tester.getCenter(origin);
       for (var i = 1; i <= 20; i++) {
-        await gesto.moveTo(Offset.lerp(de, destino, i / 20)!);
+        await gesture.moveTo(Offset.lerp(from, destination, i / 20)!);
         await tester.pump();
       }
-      await gesto.up();
-      await assentar(tester);
+      await gesture.up();
+      await settle(tester);
     }
 
-    testWidgets('um momento largado na régua vira bloco onde caiu', (
+    testWidgets('a moment dropped on the ruler becomes a block where it landed', (
       tester,
     ) async {
-      await abrir(tester);
+      await open(tester);
 
-      await arrastarPara(tester, momento(30.0), 4.0);
+      await dragOnto(tester, moment(30.0), 4.0);
 
-      expect(cortes(tester), hasLength(1));
-      expect(cortes(tester).single.sourceT, 30.0);
-      expect(cortes(tester).single.atS, closeTo(4.0, 0.2));
+      expect(cutList(tester), hasLength(1));
+      expect(cutList(tester).single.sourceT, 30.0);
+      expect(cutList(tester).single.atS, closeTo(4.0, 0.2));
     });
 
-    testWidgets('a cabeça de leitura não se mexe com o arrasto', (
+    testWidgets('the playhead does not move with the drag', (
       tester,
     ) async {
-      // largar num ponto é dizer onde o bloco entra, e não onde o vídeo está
-      await abrir(tester);
-      await cursorEm(tester, 1);
+      // dropping at a point says where the block enters, not where the video is
+      await open(tester);
+      await cursorAt(tester, 1);
 
-      await arrastarPara(tester, momento(30.0), 6.0);
+      await dragOnto(tester, moment(30.0), 6.0);
 
-      expect(cortes(tester).single.atS, closeTo(6.0, 0.2));
+      expect(cutList(tester).single.atS, closeTo(6.0, 0.2));
       expect(find.text('00:01'), findsOneWidget);
     });
 
-    testWidgets('largar na pista de cima põe o bloco na camada de cima', (
+    testWidgets('dropping on the top track puts the block on the top layer', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(find.byTooltip('Nova camada'));
-      await assentar(tester);
+      await open(tester);
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
 
-      // pista 0 é a de cima na tela, e a de cima é a última da lista
-      await arrastarPara(tester, momento(30.0), 2.0);
+      // track 0 is the top one on screen, and the top one is the last in the list
+      await dragOnto(tester, moment(30.0), 2.0);
 
-      final camadas = tester
+      final layerList = tester
           .widget<MusicTimeline>(find.byType(MusicTimeline))
           .layers;
-      expect(camadas[0].clips, isEmpty);
-      expect(camadas[1].clips, hasLength(1));
+      expect(layerList[0].clips, isEmpty);
+      expect(layerList[1].clips, hasLength(1));
     });
 
-    testWidgets('uma música da biblioteca largada na régua vira bloco', (
+    testWidgets('a library song dropped on the ruler becomes a block', (
       tester,
     ) async {
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await aba(tester, 'Biblioteca');
+      await tab(tester, 'Library');
 
-      await arrastarPara(tester, find.byKey(const ValueKey('midia-m1')), 3.0);
+      await dragOnto(tester, find.byKey(const ValueKey('media-m1')), 3.0);
 
-      final som = tester
+      final sound = tester
           .widget<MusicTimeline>(find.byType(MusicTimeline))
           .layers
           .where((l) => l.isAudio)
           .single;
-      expect(som.clips.single.mediaId, 'm1');
-      expect(som.clips.single.atS, closeTo(3.0, 0.2));
+      expect(sound.clips.single.mediaId, 'm1');
+      expect(sound.clips.single.atS, closeTo(3.0, 0.2));
     });
 
-    testWidgets('um momento largado na camada de som é recusado', (
+    testWidgets('a moment dropped on the sound layer is refused', (
       tester,
     ) async {
-      // uma camada desenha ou toca; o servidor recusaria, e recusar aqui
-      // explica melhor
-      await abrir(tester, comMusica: true);
-      await tester.tap(find.byKey(const Key('nova-camada-de-musica')));
-      await assentar(tester);
+      // a layer draws or plays; the server would refuse, and refusing here
+      // explains it better
+      await open(tester, withMusic: true);
+      await tester.tap(find.byKey(const Key('new-music-layer')));
+      await settle(tester);
 
-      // a camada de som nasce por último, e por isso fica na pista de cima
-      await arrastarPara(tester, momento(30.0), 2.0);
+      // the sound layer is born last, and so it sits on the top track
+      await dragOnto(tester, moment(30.0), 2.0);
 
-      expect(cortes(tester), isEmpty);
-      expect(find.textContaining('camada é de som'), findsOneWidget);
+      expect(cutList(tester), isEmpty);
+      expect(find.textContaining('is a sound layer'), findsOneWidget);
     });
   });
 
-  // ── o relógio ─────────────────────────────────────────────────────────────
+  // ── the clock ─────────────────────────────────────────────────────────────
 
-  group('tocar', () {
-    testWidgets('sem nada montado não há o que tocar', (tester) async {
-      await abrir(tester);
-      final botao = tester.widget<IconButton>(
+  group('playback', () {
+    testWidgets('with nothing built there is nothing to play', (tester) async {
+      await open(tester);
+      final button = tester.widget<IconButton>(
         find.ancestor(
           of: find.byIcon(Icons.play_arrow),
           matching: find.byType(IconButton),
         ),
       );
-      expect(botao.onPressed, isNull);
+      expect(button.onPressed, isNull);
     });
 
-    testWidgets('tocar anda a cabeça de leitura pelo vídeo', (tester) async {
-      // o relógio é o vídeo, e não a música: um vídeo sem trilha nenhuma
-      // continua sendo um vídeo a rever
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('playing moves the playhead through the video', (tester) async {
+      // the clock is the video, not the song: a video with no track at all
+      // is still a video to review
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
       await tester.tap(find.byIcon(Icons.play_arrow));
@@ -1769,17 +1769,17 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 100));
       }
-      final regua = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
-      expect(regua.playheadS, greaterThan(0.3), reason: 'a cabeça andou');
+      final timelineWidget = tester.widget<MusicTimeline>(find.byType(MusicTimeline));
+      expect(timelineWidget.playheadS, greaterThan(0.3), reason: 'the playhead moved');
 
       await tester.tap(find.byIcon(Icons.pause));
       await tester.pump();
       expect(find.byIcon(Icons.play_arrow), findsOneWidget);
     });
 
-    testWidgets('no fim do vídeo ele para sozinho', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('at the end of the video it stops on its own', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
 
       await tester.tap(find.byIcon(Icons.play_arrow));
@@ -1793,340 +1793,340 @@ void main() {
 
   // ── o texto no monitor ────────────────────────────────────────────────────
   //
-  // O texto existia na régua e no vídeo gerado, e em lugar nenhum entre os
-  // dois: para saber onde a frase ia parar era preciso gerar o vídeo.
+  // The text existed on the ruler and in the rendered video, and nowhere in
+  // between: to know where the phrase would land you had to render the video.
 
-  group('texto no monitor', () {
-    /// O clipe de texto que está na montagem.
-    TimelineClip textoNaRegua(WidgetTester tester) =>
-        cortes(tester).firstWhere((c) => c.isText);
+  group('text on the monitor', () {
+    /// The text clip in the montage.
+    TimelineClip textOnRuler(WidgetTester tester) =>
+        cutList(tester).firstWhere((c) => c.isText);
 
-    testWidgets('a frase aparece por cima da imagem', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('the phrase shows over the picture', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await escrever(tester, 'Texto livre');
+      await write(tester, 'Free text');
 
       expect(
-        find.byKey(ValueKey('texto-no-quadro-${textoNaRegua(tester).id}')),
+        find.byKey(ValueKey('text-on-frame-${textOnRuler(tester).id}')),
         findsOneWidget,
       );
     });
 
-    testWidgets('some quando a cabeça de leitura sai de cima dele', (
+    testWidgets('vanishes when the playhead leaves it', (
       tester,
     ) async {
-      // o monitor mostra o que vai sair naquele instante, e nada mais
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      // the monitor shows what will come out at that instant, and nothing else
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await escrever(tester, 'Texto livre');
-      final id = textoNaRegua(tester).id;
+      await write(tester, 'Free text');
+      final id = textOnRuler(tester).id;
 
-      await cursorEm(tester, 6);
+      await cursorAt(tester, 6);
 
-      expect(find.byKey(ValueKey('frase-$id')), findsNothing);
+      expect(find.byKey(ValueKey('frame-text-$id')), findsNothing);
     });
 
-    testWidgets('arrastar a frase no monitor a reposiciona no quadro', (
+    testWidgets('dragging the phrase on the monitor repositions it in the frame', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await escrever(tester, 'Texto livre');
-      final id = textoNaRegua(tester).id;
-      expect(textoNaRegua(tester).transform.x, 0);
+      await write(tester, 'Free text');
+      final id = textOnRuler(tester).id;
+      expect(textOnRuler(tester).transform.x, 0);
 
-      final antes = textoNaRegua(tester);
-      final alvo = find.byKey(ValueKey('frase-$id'));
+      final beforeState = textOnRuler(tester);
+      final target = find.byKey(ValueKey('frame-text-$id'));
       final monitor = tester.getSize(find.byType(PreviewPlayer));
-      await tester.drag(alvo, Offset(monitor.width / 3, 0));
-      await assentar(tester);
+      await tester.drag(target, Offset(monitor.width / 3, 0));
+      await settle(tester);
 
-      final depois = textoNaRegua(tester);
-      // para a direita e só para a direita — `y` não se mexe num arrasto
-      // horizontal, e o bloco não sai do lugar na régua
-      expect(depois.transform.x, greaterThan(0.2));
-      expect(depois.transform.y, closeTo(antes.transform.y, 0.01));
-      expect(depois.atS, antes.atS);
+      final afterState = textOnRuler(tester);
+      // to the right and only to the right — `y` does not move on a horizontal
+      // drag, and the block does not move on the ruler
+      expect(afterState.transform.x, greaterThan(0.2));
+      expect(afterState.transform.y, closeTo(beforeState.transform.y, 0.01));
+      expect(afterState.atS, beforeState.atS);
     });
 
-    testWidgets('a frase não sai do quadro', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('the phrase does not leave the frame', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await escrever(tester, 'Texto livre');
-      final id = textoNaRegua(tester).id;
+      await write(tester, 'Free text');
+      final id = textOnRuler(tester).id;
 
-      // um arrasto que passa da borda: a frase encosta e para
-      final alvo = find.byKey(ValueKey('frase-$id'));
+      // a drag past the edge: the phrase touches it and stops
+      final target = find.byKey(ValueKey('frame-text-$id'));
       final monitor = tester.getSize(find.byType(PreviewPlayer));
       await tester.drag(
-        alvo,
+        target,
         Offset(monitor.width * 0.8, monitor.height * 0.8),
       );
-      await assentar(tester);
+      await settle(tester);
 
-      expect(textoNaRegua(tester).transform.x, 1.0);
-      expect(textoNaRegua(tester).transform.y, 1.0);
+      expect(textOnRuler(tester).transform.x, 1.0);
+      expect(textOnRuler(tester).transform.y, 1.0);
     });
 
-    testWidgets('reposicionar entra no desfazer', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('repositioning goes into undo', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await escrever(tester, 'Texto livre');
-      final id = textoNaRegua(tester).id;
+      await write(tester, 'Free text');
+      final id = textOnRuler(tester).id;
 
       final monitor = tester.getSize(find.byType(PreviewPlayer));
       await tester.drag(
-        find.byKey(ValueKey('frase-$id')),
+        find.byKey(ValueKey('frame-text-$id')),
         Offset(monitor.width / 3, 0),
       );
-      await assentar(tester);
-      expect(textoNaRegua(tester).transform.x, greaterThan(0.2));
+      await settle(tester);
+      expect(textOnRuler(tester).transform.x, greaterThan(0.2));
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
 
-      expect(textoNaRegua(tester).transform.x, 0);
+      expect(textOnRuler(tester).transform.x, 0);
     });
   });
 
-  // ── a ordem das camadas ───────────────────────────────────────────────────
+  // ── layer order ───────────────────────────────────────────────────────────
 
-  group('reordenar camadas', () {
-    testWidgets('arrastar um cabeçalho sobre o outro troca a ordem', (
+  group('reordering layers', () {
+    testWidgets('dragging one header over the other swaps the order', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      // uma segunda camada, com um bloco que a identifique
-      await tester.tap(find.byTooltip('Nova camada'));
-      await assentar(tester);
-      await cursorEm(tester, 8);
-      await tester.tap(momento(75.0));
+      // a second layer, with a block that identifies it
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+      await cursorAt(tester, 8);
+      await tester.tap(moment(75.0));
       await tester.pump();
 
-      List<double> deCada(WidgetTester t) => [
+      List<double> each(WidgetTester t) => [
         for (final l
             in t.widget<MusicTimeline>(find.byType(MusicTimeline)).layers)
           if (l.clips.isNotEmpty) l.clips.first.sourceT else -1,
       ];
-      expect(deCada(tester), [30.0, 75.0]);
+      expect(each(tester), [30.0, 75.0]);
 
-      final de = tester.getCenter(find.byKey(const ValueKey('cabecalho-0')));
-      final para = tester.getCenter(find.byKey(const ValueKey('cabecalho-1')));
-      final gesto = await tester.startGesture(de);
-      // toque longo, que é o caminho do dedo; no ponteiro há a alça, que
+      final from = tester.getCenter(find.byKey(const ValueKey('header-0')));
+      final to = tester.getCenter(find.byKey(const ValueKey('header-1')));
+      final gesture = await tester.startGesture(from);
+      // long press, which is the finger path; with a pointer there is the handle, which
       // arrasta na hora
       await tester.pump(const Duration(milliseconds: 400));
       for (var i = 1; i <= 10; i++) {
-        await gesto.moveTo(Offset.lerp(de, para, i / 10)!);
+        await gesture.moveTo(Offset.lerp(from, to, i / 10)!);
         await tester.pump();
       }
-      await gesto.up();
-      await assentar(tester);
+      await gesture.up();
+      await settle(tester);
 
-      expect(deCada(tester), [75.0, 30.0], reason: 'a de baixo subiu');
+      expect(each(tester), [75.0, 30.0], reason: 'the bottom one went up');
     });
 
-    testWidgets('a alça arrasta na hora, sem esperar toque longo', (
+    testWidgets('the handle drags right away, without waiting for a long press', (
       tester,
     ) async {
-      // no desktop ninguém segura o botão do mouse para arrastar uma pista
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      // on desktop nobody holds the mouse button to drag a track
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await tester.tap(find.byTooltip('Nova camada'));
-      await assentar(tester);
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
 
       expect(
-        find.byTooltip('Arraste para mudar a ordem das camadas'),
+        find.byTooltip('Drag to change the order of the layers'),
         findsNWidgets(2),
       );
 
-      final de = tester.getCenter(
+      final from = tester.getCenter(
         find.descendant(
-          of: find.byKey(const ValueKey('cabecalho-0')),
-          matching: find.byTooltip('Arraste para mudar a ordem das camadas'),
+          of: find.byKey(const ValueKey('header-0')),
+          matching: find.byTooltip('Drag to change the order of the layers'),
         ),
       );
-      final para = tester.getCenter(find.byKey(const ValueKey('cabecalho-1')));
-      final gesto = await tester.startGesture(de);
+      final to = tester.getCenter(find.byKey(const ValueKey('header-1')));
+      final gesture = await tester.startGesture(from);
       for (var i = 1; i <= 10; i++) {
-        await gesto.moveTo(Offset.lerp(de, para, i / 10)!);
+        await gesture.moveTo(Offset.lerp(from, to, i / 10)!);
         await tester.pump();
       }
-      await gesto.up();
-      await assentar(tester);
+      await gesture.up();
+      await settle(tester);
 
-      final camadas = tester
+      final layerList = tester
           .widget<MusicTimeline>(find.byType(MusicTimeline))
           .layers;
-      expect(camadas[1].clips, hasLength(1), reason: 'a de baixo subiu');
+      expect(layerList[1].clips, hasLength(1), reason: 'the bottom one went up');
     });
   });
 
-  // ── mover entre camadas ───────────────────────────────────────────────────
+  // ── moving between layers ────────────────────────────────────────────────
 
-  group('levar um bloco para outra camada', () {
-    testWidgets('arrastar para cima leva o bloco para a camada de cima', (
+  group('moving a block to another layer', () {
+    testWidgets('dragging up takes the block to the top layer', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await tester.tap(find.byTooltip('Nova camada'));
-      await assentar(tester);
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
 
-      final id = cortes(tester).first.id;
-      // para cima na tela: uma pista acima é uma camada acima na pilha
+      final id = cutList(tester).first.id;
+      // up on screen: one track up is one layer up in the stack
       await tester.drag(
-        find.byKey(ValueKey('bloco-$id')),
+        find.byKey(ValueKey('block-$id')),
         const Offset(0, -MusicTimeline.blockHeight),
       );
-      await assentar(tester);
+      await settle(tester);
 
-      final camadas = tester
+      final layerList = tester
           .widget<MusicTimeline>(find.byType(MusicTimeline))
           .layers;
-      expect(camadas[0].clips, isEmpty);
-      expect(camadas[1].clips.single.id, id);
+      expect(layerList[0].clips, isEmpty);
+      expect(layerList[1].clips.single.id, id);
     });
 
-    testWidgets('para a camada de som, ele explica em vez de só recusar', (
+    testWidgets('for the sound layer, it explains instead of just refusing', (
       tester,
     ) async {
-      // recusar em silêncio é o pior dos dois mundos: o bloco volta e quem
-      // arrastou não sabe se o gesto não pegou ou se não era possível
-      await abrir(tester, comMusica: true);
-      await tester.tap(momento(30.0));
+      // refusing silently is the worst of both worlds: the block goes back and whoever
+      // dragged it cannot tell whether the gesture missed or it was impossible
+      await open(tester, withMusic: true);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await tester.tap(find.byKey(const Key('nova-camada-de-musica')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('new-music-layer')));
+      await settle(tester);
 
-      final id = cortes(tester).first.id;
+      final id = cutList(tester).first.id;
       await tester.drag(
-        find.byKey(ValueKey('bloco-$id')),
+        find.byKey(ValueKey('block-$id')),
         const Offset(0, -MusicTimeline.blockHeight),
       );
-      await assentar(tester);
+      await settle(tester);
 
-      expect(find.textContaining('camada é de som'), findsOneWidget);
-      final camadas = tester
+      expect(find.textContaining('is a sound layer'), findsOneWidget);
+      final layerList = tester
           .widget<MusicTimeline>(find.byType(MusicTimeline))
           .layers;
-      expect(camadas[0].clips.single.id, id, reason: 'ficou onde estava');
+      expect(layerList[0].clips.single.id, id, reason: 'it stayed where it was');
     });
   });
 
-  // ── o teclado e os campos de texto ────────────────────────────────────────
+  // ── the keyboard and the text fields ──────────────────────────────────────
   //
-  // Os atalhos são de uma tecla só: "S" divide o corte, Delete apaga o bloco.
-  // Sobre um campo de texto isso é desastre — foi o que apareceu ao renomear a
-  // montagem: o nome não recebia o "s" e apagar comia um bloco da régua.
+  // Shortcuts are single keys: "S" splits the cut, Delete deletes the block.
+  // Over a text field that is a disaster — it is what showed up when renaming the
+  // montage: the name did not get the "s" and deleting ate a block off the ruler.
 
-  group('atalhos e campos de texto', () {
-    /// Põe a cabeça de leitura no meio do primeiro bloco, onde dividir vale.
-    Future<void> comUmBlocoEOCursorNoMeio(WidgetTester tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+  group('shortcuts and text fields', () {
+    /// Puts the playhead in the middle of the first block, where splitting works.
+    Future<void> withOneBlockAndCursorInside(WidgetTester tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 0.6);
+      await cursorAt(tester, 0.6);
     }
 
-    testWidgets('com o foco na régua, "S" continua dividindo', (tester) async {
-      await comUmBlocoEOCursorNoMeio(tester);
-      expect(cortes(tester), hasLength(1));
+    testWidgets('with focus on the ruler, "S" keeps splitting', (tester) async {
+      await withOneBlockAndCursorInside(tester);
+      expect(cutList(tester), hasLength(1));
 
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.pump();
 
-      expect(cortes(tester), hasLength(2));
+      expect(cutList(tester), hasLength(2));
     });
 
-    /// Os atalhos registrados agora.
+    /// The shortcuts registered right now.
     ///
-    /// Um atalho que "trata" a tecla sem fazer nada é pior do que não existir:
-    /// o `CallbackShortcuts` marca a tecla como tratada assim que algum atalho
-    /// a aceita, e no navegador tecla tratada vira `preventDefault` — a letra
-    /// não chega ao campo. Por isso a correção é **não registrar** atalho
-    /// nenhum enquanto alguém escreve.
-    Map<ShortcutActivator, VoidCallback> atalhos(WidgetTester tester) => tester
+    /// A shortcut that "handles" the key while doing nothing is worse than none:
+    /// `CallbackShortcuts` marks the key as handled as soon as some shortcut
+    /// accepts it, and in the browser a handled key becomes `preventDefault` — the
+    /// letter does not reach the field. That is why the fix is to **register no**
+    /// shortcut while someone is typing.
+    Map<ShortcutActivator, VoidCallback> shortcuts(WidgetTester tester) => tester
         .widget<CallbackShortcuts>(find.byType(CallbackShortcuts))
         .bindings;
 
-    testWidgets('escrevendo no nome do vídeo, "S" é a letra s', (tester) async {
-      await comUmBlocoEOCursorNoMeio(tester);
-      expect(atalhos(tester), isNotEmpty);
+    testWidgets('typing in the video name, "S" is the letter s', (tester) async {
+      await withOneBlockAndCursorInside(tester);
+      expect(shortcuts(tester), isNotEmpty);
 
-      final campo = find.widgetWithText(TextField, 'Minha montagem');
-      await tester.tap(campo);
-      await assentar(tester);
+      final inputField = find.widgetWithText(TextField, 'My montage');
+      await tester.tap(inputField);
+      await settle(tester);
 
-      expect(atalhos(tester), isEmpty, reason: 'a tecla vai para o campo');
+      expect(shortcuts(tester), isEmpty, reason: 'the key goes to the field');
 
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.pump();
-      expect(cortes(tester), hasLength(1), reason: 'não dividiu nada');
+      expect(cutList(tester), hasLength(1), reason: 'nothing was split');
     });
 
-    testWidgets('tocar na régua devolve os atalhos', (tester) async {
-      // sem isto, tocar no campo uma vez matava os atalhos para sempre: nada
-      // tira o foco de um `TextField`, e "S" nunca mais dividia nada
-      await comUmBlocoEOCursorNoMeio(tester);
-      await tester.tap(find.widgetWithText(TextField, 'Minha montagem'));
-      await assentar(tester);
-      expect(atalhos(tester), isEmpty);
+    testWidgets('tapping the ruler gives back the shortcuts', (tester) async {
+      // without this, tapping the field once killed the shortcuts for good: nothing
+      // takes the focus away from a `TextField`, and "S" never split anything again
+      await withOneBlockAndCursorInside(tester);
+      await tester.tap(find.widgetWithText(TextField, 'My montage'));
+      await settle(tester);
+      expect(shortcuts(tester), isEmpty);
 
-      await cursorEm(tester, 0.6);
-      await assentar(tester);
+      await cursorAt(tester, 0.6);
+      await settle(tester);
 
-      expect(atalhos(tester), isNotEmpty);
+      expect(shortcuts(tester), isNotEmpty);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.pump();
-      expect(cortes(tester), hasLength(2), reason: '"S" voltou a dividir');
+      expect(cutList(tester), hasLength(2), reason: '"S" splits again');
     });
 
-    testWidgets('escrevendo no nome do vídeo, apagar não come um bloco', (
+    testWidgets('typing in the video name, delete does not eat a block', (
       tester,
     ) async {
-      await comUmBlocoEOCursorNoMeio(tester);
-      final campo = find.widgetWithText(TextField, 'Minha montagem');
-      await tester.tap(campo);
-      await assentar(tester);
+      await withOneBlockAndCursorInside(tester);
+      final inputField = find.widgetWithText(TextField, 'My montage');
+      await tester.tap(inputField);
+      await settle(tester);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.delete);
       await tester.pump();
 
-      expect(cortes(tester), hasLength(1));
+      expect(cutList(tester), hasLength(1));
     });
 
-    testWidgets('nem Ctrl+Z desfaz a montagem enquanto se escreve', (
+    testWidgets('not even Ctrl+Z undoes the montage while typing', (
       tester,
     ) async {
-      // o campo tem o desfazer dele, e é o dele que a pessoa quer ali
-      await comUmBlocoEOCursorNoMeio(tester);
-      final campo = find.widgetWithText(TextField, 'Minha montagem');
-      await tester.tap(campo);
-      await assentar(tester);
+      // the field has its own undo, and that is the one the person wants there
+      await withOneBlockAndCursorInside(tester);
+      final inputField = find.widgetWithText(TextField, 'My montage');
+      await tester.tap(inputField);
+      await settle(tester);
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
 
-      expect(cortes(tester), hasLength(1), reason: 'o bloco continua lá');
+      expect(cutList(tester), hasLength(1), reason: 'the block is still there');
     });
 
-    testWidgets('o diálogo de renomear recebe o que se digita', (tester) async {
+    testWidgets('the rename dialog gets what is typed', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1000, 2400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final job = Job.fromJson({
@@ -2135,7 +2135,7 @@ void main() {
           {
             'id': 'm1',
             'job_id': 'j1',
-            'name': 'vertical curta',
+            'name': 'short vertical',
             'n_clips': 1,
             'duration_s': 2.0,
             'has_music': false,
@@ -2157,179 +2157,179 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: TimelineScreen(job: job)));
       await tester.pump();
 
-      await tester.tap(find.byKey(const Key('menu-da-tela')));
-      await assentar(tester);
-      await tester.tap(find.text('Renomear'));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('screen-menu')));
+      await settle(tester);
+      await tester.tap(find.text('Rename'));
+      await settle(tester);
 
-      final noDialogo = find.descendant(
+      final inDialog = find.descendant(
         of: find.byType(AlertDialog),
         matching: find.byType(TextField),
       );
-      expect(noDialogo, findsOneWidget);
+      expect(inDialog, findsOneWidget);
 
-      await tester.enterText(noDialogo, 'shorts');
+      await tester.enterText(inDialog, 'shorts');
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
       await tester.pump();
 
-      // apagar apaga uma letra do nome — e não um bloco da régua, que é o que
-      // acontecia quando os atalhos da tela alcançavam quem está escrevendo
-      expect(tester.widget<TextField>(noDialogo).controller?.text, 'short');
-      expect(cortes(tester), hasLength(1));
+      // delete deletes a letter of the name — and not a block off the ruler, which is what
+      // happened when the screen shortcuts reached whoever was typing
+      expect(tester.widget<TextField>(inDialog).controller?.text, 'short');
+      expect(cutList(tester), hasLength(1));
     });
   });
 
-  // ── alinhar a jogada ──────────────────────────────────────────────────────
+  // ── aligning the play ─────────────────────────────────────────────────────
   //
-  // O bloco é um trecho; a jogada é um instante dentro dele, marcado na régua.
-  // Alinhar pela borda deixaria o impacto meio segundo depois da batida.
+  // The block is a span; the play is an instant inside it, marked on the ruler.
+  // Aligning by the edge would leave the impact half a second after the beat.
 
-  group('alinhar a jogada ao cursor', () {
-    testWidgets('o botão leva a jogada para debaixo da cabeça de leitura', (
+  group('aligning the play to the cursor', () {
+    testWidgets('the button brings the play under the playhead', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      final antes = cortes(tester).single;
-      expect(momentoNoVideo(antes), isNotNull);
+      final beforeState = cutList(tester).single;
+      expect(momentInVideo(beforeState), isNotNull);
 
-      // parar a cabeça de leitura na batida, escolher o bloco, alinhar
-      await cursorEm(tester, 4);
-      await tester.tap(bloco(tester, 0));
+      // stop the playhead on the beat, select the block, align
+      await cursorAt(tester, 4);
+      await tester.tap(block(tester, 0));
       await tester.pump();
-      await tester.tap(find.byKey(const Key('alinhar-momento')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('align-moment')));
+      await settle(tester);
 
-      final depois = cortes(tester).single;
-      expect(momentoNoVideo(depois), closeTo(4.0, 0.2));
-      expect(depois.durationS, antes.durationS, reason: 'não estica nem apara');
+      final afterState = cutList(tester).single;
+      expect(momentInVideo(afterState), closeTo(4.0, 0.2));
+      expect(afterState.durationS, beforeState.durationS, reason: 'neither stretches nor trims');
     });
 
-    testWidgets('sem seleção, vale o bloco sob a cabeça de leitura', (
+    testWidgets('without a selection, the block under the playhead counts', (
       tester,
     ) async {
-      // tocar na régua para posicionar o cursor limpa a seleção; pedir para
-      // escolher o bloco de novo seria o mesmo gesto duas vezes
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      // tapping the ruler to place the cursor clears the selection; asking to
+      // select the block again would be the same gesture twice
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 0.9); // dentro do bloco, que começa em 0
+      await cursorAt(tester, 0.9); // inside the block, which starts at 0
       expect(
-        find.byKey(const Key('alinhar-momento')),
+        find.byKey(const Key('align-moment')),
         findsNothing,
-        reason: 'sem seleção não há painel',
+        reason: 'without a selection there is no panel',
       );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
       await tester.pump();
 
-      expect(momentoNoVideo(cortes(tester).single), closeTo(0.9, 0.2));
+      expect(momentInVideo(cutList(tester).single), closeTo(0.9, 0.2));
     });
 
-    testWidgets('sem seleção, vale o bloco sob a cabeça de leitura', (
+    testWidgets('without a selection, the block under the playhead counts', (
       tester,
     ) async {
-      // tocar na régua para posicionar o cursor limpa a seleção; pedir para
-      // escolher o bloco de novo seria o mesmo gesto duas vezes
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      // tapping the ruler to place the cursor clears the selection; asking to
+      // select the block again would be the same gesture twice
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 0.9); // dentro do bloco, que começa em 0
+      await cursorAt(tester, 0.9); // inside the block, which starts at 0
       expect(
-        find.byKey(const Key('alinhar-momento')),
+        find.byKey(const Key('align-moment')),
         findsNothing,
-        reason: 'sem seleção não há painel',
+        reason: 'without a selection there is no panel',
       );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
       await tester.pump();
 
-      expect(momentoNoVideo(cortes(tester).single), closeTo(0.9, 0.2));
+      expect(momentInVideo(cutList(tester).single), closeTo(0.9, 0.2));
     });
 
-    testWidgets('o atalho M faz o mesmo', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+    testWidgets('the M shortcut does the same', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 5);
-      await tester.tap(bloco(tester, 0));
+      await cursorAt(tester, 5);
+      await tester.tap(block(tester, 0));
       await tester.pump();
 
       await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
       await tester.pump();
 
-      expect(momentoNoVideo(cortes(tester).single), closeTo(5.0, 0.2));
+      expect(momentInVideo(cutList(tester).single), closeTo(5.0, 0.2));
     });
 
-    testWidgets('com o vizinho colado, o trecho desliza e a tela conta', (
+    testWidgets('with the neighbour back to back, the span slides and the screen says so', (
       tester,
     ) async {
-      // numa montagem de blocos colados o bloco não tem para onde andar — e
-      // silêncio aqui faria parecer que o comando não funcionou
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      // in a montage of back-to-back blocks the block has nowhere to go — and
+      // silence here would make it look like the command did not work
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await tester.tap(momento(75.0));
+      await tester.tap(moment(75.0));
       await tester.pump();
-      final antes = cortes(tester).first;
+      final beforeState = cutList(tester).first;
 
-      await cursorEm(tester, 0.4);
-      await tester.tap(bloco(tester, 0));
+      await cursorAt(tester, 0.4);
+      await tester.tap(block(tester, 0));
       await tester.pump();
-      await tester.tap(find.byKey(const Key('alinhar-momento')));
-      await assentar(tester);
+      await tester.tap(find.byKey(const Key('align-moment')));
+      await settle(tester);
 
-      final depois = cortes(tester).first;
-      expect(momentoNoVideo(depois), closeTo(0.4, 0.2));
-      expect(depois.atS, antes.atS, reason: 'o bloco ficou onde estava');
-      expect(depois.startS, isNot(antes.startS), reason: 'o trecho andou');
-      expect(cortes(tester)[1].atS, 1.2, reason: 'o vizinho não se mexeu');
-      expect(find.textContaining('deslizou dentro dele'), findsOneWidget);
+      final afterState = cutList(tester).first;
+      expect(momentInVideo(afterState), closeTo(0.4, 0.2));
+      expect(afterState.atS, beforeState.atS, reason: 'the block stayed where it was');
+      expect(afterState.startS, isNot(beforeState.startS), reason: 'the span moved');
+      expect(cutList(tester)[1].atS, 1.2, reason: 'the neighbour did not move');
+      expect(find.textContaining('slid'), findsOneWidget);
     });
 
-    testWidgets('um bloco de música não tem jogada a alinhar', (tester) async {
-      await abrir(tester, comMusica: true);
-      await aba(tester, 'Biblioteca');
-      await tester.tap(find.byKey(const ValueKey('midia-m1')));
-      await assentar(tester);
-      await aba(tester, 'Momentos');
+    testWidgets('a music block has no play to align', (tester) async {
+      await open(tester, withMusic: true);
+      await tab(tester, 'Library');
+      await tester.tap(find.byKey(const ValueKey('media-m1')));
+      await settle(tester);
+      await tab(tester, 'Moments');
 
-      // o bloco de música fica escolhido depois de posto
-      expect(find.byKey(const Key('alinhar-momento')), findsNothing);
+      // the music block stays selected after being placed
+      expect(find.byKey(const Key('align-moment')), findsNothing);
     });
 
-    testWidgets('a marca acende quando a jogada está sob o cursor', (
+    testWidgets('the mark lights up when the play is under the cursor', (
       tester,
     ) async {
-      // é a confirmação visual do encaixe: sem ela, alinhar é um ato de fé
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      // it is the visual confirmation of the fit: without it, aligning is an act of faith
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await cursorEm(tester, 4);
+      await cursorAt(tester, 4);
 
-      bool marcaAcesa() {
-        final blocos = tester.widgetList<MusicTimeline>(
+      bool markLit() {
+        final blocks = tester.widgetList<MusicTimeline>(
           find.byType(MusicTimeline),
         );
-        return blocos.first.layers.any(
+        return blocks.first.layers.any(
           (l) => l.clips.any(
             (c) =>
-                momentoNoVideo(c) != null &&
-                (momentoNoVideo(c)! - blocos.first.playheadS).abs() < 0.017,
+                momentInVideo(c) != null &&
+                (momentInVideo(c)! - blocks.first.playheadS).abs() < 0.017,
           ),
         );
       }
 
-      expect(marcaAcesa(), isFalse);
-      await tester.tap(bloco(tester, 0));
+      expect(markLit(), isFalse);
+      await tester.tap(block(tester, 0));
       await tester.pump();
-      await tester.tap(find.byKey(const Key('alinhar-momento')));
-      await assentar(tester);
-      expect(marcaAcesa(), isTrue);
+      await tester.tap(find.byKey(const Key('align-moment')));
+      await settle(tester);
+      expect(markLit(), isTrue);
     });
   });
 
@@ -2337,18 +2337,18 @@ void main() {
     testWidgets('the tab sits in the sidebar, with moments and library', (
       tester,
     ) async {
-      await abrir(tester);
+      await open(tester);
 
-      expect(find.widgetWithText(Tab, 'Momentos'), findsOneWidget);
-      expect(find.widgetWithText(Tab, 'Biblioteca'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Moments'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Library'), findsOneWidget);
       expect(find.widgetWithText(Tab, 'Transitions'), findsOneWidget);
     });
 
     testWidgets('with no clip selected, there is nothing to apply', (
       tester,
     ) async {
-      await abrir(tester);
-      await aba(tester, 'Transitions');
+      await open(tester);
+      await tab(tester, 'Transitions');
 
       expect(find.textContaining('Pick a clip'), findsOneWidget);
       final tile = tester.widget<ListTile>(
@@ -2360,17 +2360,17 @@ void main() {
     testWidgets('tapping a transition sets the selected clip\'s entrance', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      final id = primeiroCorte(tester).id;
-      await aba(tester, 'Transitions');
+      final id = firstCut(tester).id;
+      await tab(tester, 'Transitions');
 
       await tester.tap(find.byKey(const ValueKey('transition-fade_black')));
       await tester.pump();
 
-      expect(primeiroCorte(tester).transition?.kind, 'fade_black');
-      expect(primeiroCorte(tester).transition?.durationS, 0.5);
+      expect(firstCut(tester).transition?.kind, 'fade_black');
+      expect(firstCut(tester).transition?.durationS, 0.5);
       expect(
         find.byKey(ValueKey('transition-on-clip-$id')),
         findsOneWidget,
@@ -2380,43 +2380,43 @@ void main() {
       // and the hard cut clears it
       await tester.tap(find.byKey(const Key('no-transition')));
       await tester.pump();
-      expect(primeiroCorte(tester).transition, isNull);
+      expect(firstCut(tester).transition, isNull);
       expect(find.byKey(ValueKey('transition-on-clip-$id')), findsNothing);
     });
 
     testWidgets('setting a transition can be undone', (tester) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await aba(tester, 'Transitions');
+      await tab(tester, 'Transitions');
       await tester.tap(find.byKey(const ValueKey('transition-dissolve')));
       await tester.pump();
-      expect(primeiroCorte(tester).transition, isNotNull);
+      expect(firstCut(tester).transition, isNotNull);
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
 
-      expect(primeiroCorte(tester).transition, isNull);
+      expect(firstCut(tester).transition, isNull);
     });
 
     testWidgets('the monitor marks the transition while it happens', (
       tester,
     ) async {
-      await abrir(tester);
-      await tester.tap(momento(30.0));
+      await open(tester);
+      await tester.tap(moment(30.0));
       await tester.pump();
-      await aba(tester, 'Transitions');
+      await tab(tester, 'Transitions');
       await tester.tap(find.byKey(const ValueKey('transition-fade_white')));
       await tester.pump();
-      final c = primeiroCorte(tester);
+      final c = firstCut(tester);
 
-      await cursorEm(tester, c.atS + 0.1);
+      await cursorAt(tester, c.atS + 0.1);
       expect(find.byKey(const Key('transition-badge')), findsOneWidget);
       expect(find.byKey(const Key('transition-veil')), findsOneWidget);
 
-      await cursorEm(tester, c.atS + 2);
+      await cursorAt(tester, c.atS + 2);
       expect(find.byKey(const Key('transition-badge')), findsNothing);
     });
   });

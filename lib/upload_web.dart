@@ -5,16 +5,17 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:web/web.dart' as web;
 
-/// Envia o arquivo deixando o **navegador** carregá-lo.
+/// Sends the file letting the **browser** load it.
 ///
-/// O `Blob` escolhido no seletor não é uma cópia dos bytes: é uma referência
-/// ao arquivo no disco. Entregá-lo ao `FormData` faz o navegador ler e enviar
-/// em pedaços, sem que nada disso passe pela memória do Dart — que é o que
-/// quebrava em gravações de partida (ver `upload.dart`).
+/// The `Blob` picked in the file chooser is not a copy of the bytes: it is a
+/// reference to the file on disk. Handing it to `FormData` makes the browser
+/// read and send it in chunks, without any of it going through Dart's memory —
+/// which is what broke on match recordings (see `upload.dart`).
 ///
-/// Vai por `XMLHttpRequest`, e não por `fetch`, por um motivo só: o `fetch`
-/// não conta quanto do corpo já subiu, e numa gravação de meia hora a barra de
-/// envio é a única coisa que diz ao usuário que o sistema não travou.
+/// It goes through `XMLHttpRequest`, and not `fetch`, for one reason only:
+/// `fetch` does not report how much of the body has been sent, and on a
+/// half-hour recording the upload bar is the only thing telling the user the
+/// system has not frozen.
 Future<http.Response> uploadFile({
   required Uri url,
   required String field,
@@ -40,8 +41,8 @@ Future<http.Response> uploadFile({
 
   xhr.upload.onprogress = (web.ProgressEvent e) {
     if (onProgress == null) return;
-    // `total` é o corpo inteiro, com o cabeçalho do multipart junto; a
-    // diferença é de algumas centenas de bytes num arquivo de gigabytes
+    // `total` is the whole body, multipart header included; the difference is
+    // a few hundred bytes on a file of gigabytes
     final total = e.lengthComputable ? e.total : length;
     onProgress(total == 0 ? 0 : (e.loaded / total).clamp(0.0, 1.0));
   }.toJS;
@@ -58,23 +59,23 @@ Future<http.Response> uploadFile({
     );
   }.toJS;
 
-  // o navegador não conta por que a rede falhou -- e é só isso que se sabe
+  // the browser does not say why the network failed -- and that is all we know
   xhr.onerror = (web.ProgressEvent _) {
-    fail(http.ClientException('o envio de ${file.name} falhou', url));
+    fail(http.ClientException('uploading ${file.name} failed', url));
   }.toJS;
   xhr.onabort = (web.ProgressEvent _) {
-    fail(http.ClientException('o envio de ${file.name} foi cancelado', url));
+    fail(http.ClientException('uploading ${file.name} was cancelled', url));
   }.toJS;
 
   xhr.send(form);
   return done.future;
 }
 
-/// O `Blob` por trás do arquivo escolhido.
+/// The `Blob` behind the picked file.
 ///
-/// `PlatformFile` na web guarda uma URL `blob:` em vez do caminho; buscá-la
-/// devolve o mesmo arquivo, sem cópia — o navegador só entrega de volta a
-/// referência que ele já tinha.
+/// On the web `PlatformFile` holds a `blob:` URL instead of the path; fetching
+/// it returns the same file, without a copy — the browser just hands back the
+/// reference it already had.
 Future<web.Blob> _blobOf(PlatformFile file) async {
   final response = await web.window.fetch(file.uri.toString().toJS).toDart;
   return response.blob().toDart;

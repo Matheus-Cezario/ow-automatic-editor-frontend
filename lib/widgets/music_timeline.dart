@@ -8,48 +8,48 @@ import '../api.dart';
 import '../montage.dart';
 import 'highlight_style.dart';
 
-/// O que está sendo arrastado para a régua.
+/// What is being dragged onto the ruler.
 ///
-/// São duas origens e um só alvo: um momento da partida, da prateleira da
-/// esquerda, ou um item da biblioteca — vídeo, imagem ou música. A régua não
-/// precisa saber o que fazer com cada um; ela diz **onde** caiu e a tela
-/// resolve o resto.
-class ArrastoParaARegua {
-  const ArrastoParaARegua.momento(DetectionEvent this.evento) : media = null;
-  const ArrastoParaARegua.midia(Media this.media) : evento = null;
+/// Two origins and a single target: a match moment, from the left shelf, or a
+/// library item — video, image or music. The ruler does not need to know what
+/// to do with each; it says **where** it landed and the screen sorts out the
+/// rest.
+class RulerDrop {
+  const RulerDrop.moment(DetectionEvent this.event) : media = null;
+  const RulerDrop.mediaItem(Media this.media) : event = null;
 
-  final DetectionEvent? evento;
+  final DetectionEvent? event;
   final Media? media;
 
-  /// Quanto o bloco vai durar — é o que o fantasma do arrasto desenha, para o
-  /// tamanho no dedo ser o tamanho na régua.
-  double get duracaoS => media?.duracaoSugerida ?? kDefaultCutS;
+  /// How long the block will last — it is what the drag ghost draws, so the
+  /// size under the finger is the size on the ruler.
+  double get durationSecs => media?.suggestedDuration ?? kDefaultCutS;
 
-  String get rotulo => media?.name ?? EventStyle.of(evento!.kind).label;
+  String get blockLabel => media?.name ?? EventStyle.of(event!.kind).label;
 
-  bool get eSom => media?.isAudio ?? false;
+  bool get isSound => media?.isAudio ?? false;
 }
 
-/// A régua do vídeo com as camadas por cima — o coração da montagem manual.
+/// The video ruler with the layers on top — the heart of the manual montage.
 ///
-/// Tudo é desenhado na escala do **vídeo que vai sair**: o instante zero é o
-/// primeiro quadro dele. A música mora dentro dessa escala, em blocos, e cada
-/// bloco desenha a própria onda — foi assim que ela deixou de ser um fundo
-/// contínuo e virou material como qualquer outro.
+/// Everything is drawn on the scale of the **video that will come out**:
+/// instant zero is its first frame. The music lives within that scale, in
+/// blocks, and each block draws its own waveform — that is how it stopped
+/// being a continuous background and became material like any other.
 ///
-/// As camadas são pistas empilhadas, da de baixo para a de cima — a mesma
-/// ordem em que o servidor as desenha. O cabeçalho de cada uma fica **fora** da
-/// rolagem: ele tem de continuar visível quando a régua anda.
+/// The layers are stacked tracks, from the bottom one to the top one — the
+/// same order the server draws them in. Each one's header stays **outside**
+/// the scroll: it must stay visible when the ruler moves.
 ///
-/// Quatro gestos: arrastar o corpo do clipe **move**, a borda esquerda
-/// **apara**, a direita **estica**, e arrastar para cima ou para baixo **troca
-/// de camada**.
+/// Four gestures: dragging the clip's body **moves** it, the left edge
+/// **trims**, the right one **stretches**, and dragging up or down **changes
+/// layer**.
 class MusicTimeline extends StatefulWidget {
   const MusicTimeline({
     super.key,
     required this.layers,
-    required this.camadaAtiva,
-    required this.selecao,
+    required this.activeLayer,
+    required this.selectionIds,
     required this.pxPerSecond,
     required this.playheadS,
     required this.scroll,
@@ -58,29 +58,29 @@ class MusicTimeline extends StatefulWidget {
     required this.onMove,
     required this.onTrim,
     required this.onStretch,
-    required this.onGestoInicio,
-    required this.onGestoFim,
-    required this.onTrocarDeCamada,
-    required this.onCamadaAtiva,
-    required this.onAjustarCamada,
-    required this.onReordenarCamadas,
+    required this.onGestureStart,
+    required this.onGestureEnd,
+    required this.onChangeLayer,
+    required this.onActiveLayer,
+    required this.onAdjustLayer,
+    required this.onReorderLayers,
     this.onDragLabel,
-    this.onSoltar,
-    this.batidas = const [],
-    this.ondaDaPartida = const [],
-    this.duracaoDaPartida = 0,
-    this.musicas = const {},
+    this.onDrop,
+    this.beatTimes = const [],
+    this.matchWaveform = const [],
+    this.matchDuration = 0,
+    this.tracks = const {},
     this.fallbackDurationS = 60,
   });
 
   final List<Layer> layers;
-  final int camadaAtiva;
+  final int activeLayer;
 
-  /// Quem está selecionado, por id do clipe. Índice não serve: apagar um clipe
-  /// desloca os seguintes, e a seleção passaria a apontar para o vizinho.
-  final Set<String> selecao;
+  /// Who is selected, by clip id. An index will not do: deleting a clip shifts
+  /// the following ones, and the selection would point at the neighbour.
+  final Set<String> selectionIds;
 
-  /// Zoom: quantos pixels vale um segundo de vídeo.
+  /// Zoom: how many pixels one second of video is worth.
   final double pxPerSecond;
 
   final double playheadS;
@@ -88,93 +88,95 @@ class MusicTimeline extends StatefulWidget {
 
   final ValueChanged<double> onSeek;
 
-  /// Escolher um clipe. `alternar` é o shift-clique, que soma à seleção em vez
-  /// de trocá-la; `null` limpa.
-  final void Function(String? id, {bool alternar}) onSelect;
+  /// Picks a clip. `toggle` is the shift-click, which adds to the selection
+  /// instead of replacing it; `null` clears it.
+  final void Function(String? id, {bool toggle}) onSelect;
 
-  /// (id, nova posição em tempo de vídeo) — valores **absolutos**, já que o
-  /// arrasto é medido desde o início do gesto.
+  /// (id, new position in video time) — **absolute** values, since the drag is
+  /// measured from the start of the gesture.
   final void Function(String id, double atS) onMove;
   final void Function(String id, double atS) onTrim;
   final void Function(String id, double durationS) onStretch;
 
-  /// (id, camada de destino) — o arrasto vertical.
-  final void Function(String id, int camada) onTrocarDeCamada;
+  /// (id, target layer) — the vertical drag.
+  final void Function(String id, int layerIndex) onChangeLayer;
 
-  final ValueChanged<int> onCamadaAtiva;
+  final ValueChanged<int> onActiveLayer;
 
-  /// (de, para) — arrastar um cabeçalho por cima do outro troca a ordem em que
-  /// as camadas são desenhadas.
-  final void Function(int de, int para) onReordenarCamadas;
-  final void Function(int camada, {bool? muted, bool? hidden, bool? locked})
-  onAjustarCamada;
+  /// (from, to) — dragging one header over another swaps the order in which
+  /// the layers are drawn.
+  final void Function(int from, int to) onReorderLayers;
+  final void Function(int layerIndex, {bool? muted, bool? hidden, bool? locked})
+  onAdjustLayer;
 
-  /// Abre e fecha o gesto no histórico: um arrasto inteiro vira um único passo
-  /// de desfazer, em vez de um por quadro.
-  final VoidCallback onGestoInicio;
-  final VoidCallback onGestoFim;
+  /// Opens and closes the gesture in the history: a whole drag becomes a
+  /// single undo step, instead of one per frame.
+  final VoidCallback onGestureStart;
+  final VoidCallback onGestureEnd;
 
-  /// Texto para a tela mostrar enquanto o dedo está no clipe; `null` ao soltar.
+  /// Text for the screen to show while the finger is on the clip; `null` on
+  /// release.
   final ValueChanged<String?>? onDragLabel;
 
-  /// O que fazer quando algo é solto na régua: um momento da partida ou um item
-  /// da biblioteca, com o instante e a camada em que caiu.
+  /// What to do when something is dropped on the ruler: a match moment or a
+  /// library item, with the instant and the layer where it landed.
   ///
-  /// É o caminho curto de quem já sabe onde quer a coisa — clicar põe na cabeça
-  /// de leitura, arrastar põe onde o dedo largou.
-  final void Function(ArrastoParaARegua o, double atS, int camada)? onSoltar;
+  /// It is the short path for whoever already knows where they want the thing
+  /// — clicking puts it at the playhead, dragging puts it where the finger let
+  /// go.
+  final void Function(RulerDrop o, double atS, int layerIndex)? onDrop;
 
-  /// A grade de batidas em tempo de vídeo — a mesma que o ímã usa. Desenhá-la
-  /// e grudar nela têm de ser a mesma coisa, senão a linha mente.
-  final List<double> batidas;
+  /// The beat grid in video time — the same the magnet uses. Drawing it and
+  /// snapping to it must be the same thing, or the line lies.
+  final List<double> beatTimes;
 
-  /// A forma de onda do áudio da partida inteira, e quanto tempo ela cobre.
-  final List<double> ondaDaPartida;
-  final double duracaoDaPartida;
+  /// The whole match audio's waveform, and how much time it covers.
+  final List<double> matchWaveform;
+  final double matchDuration;
 
-  /// As músicas da biblioteca, por id. É delas que sai a onda desenhada dentro
-  /// de um bloco de música — cada uma tem a sua, e não a da partida.
-  final Map<String, Track> musicas;
+  /// The library's music tracks, by id. They are where the waveform drawn
+  /// inside a music block comes from — each has its own, not the match's.
+  final Map<String, Track> tracks;
 
-  /// Régua a desenhar enquanto a montagem ainda está vazia.
+  /// Ruler to draw while the montage is still empty.
   final double fallbackDurationS;
 
-  /// A faixa de cima, onde ficam as batidas e a cabeça de leitura. Era a onda
-  /// da faixa contínua; hoje cada bloco desenha a sua, e o que sobra aqui é a
-  /// grade.
+  /// The top band, where the beats and the playhead are. It used to be the
+  /// continuous track's waveform; today each block draws its own, and what is
+  /// left here is the grid.
   static const double waveHeight = 26;
   static const double blockHeight = 72;
   static const double rulerHeight = 20;
-  static const double larguraDosCabecalhos = 148;
+  static const double headerWidth = 148;
 
-  static double alturaPara(int camadas) =>
-      waveHeight + blockHeight * camadas + rulerHeight;
+  static double heightFor(int layerCount) =>
+      waveHeight + blockHeight * layerCount + rulerHeight;
 
-  /// Que camada é desenhada na pista [linha], contada de cima para baixo.
+  /// Which layer is drawn on track [line], counted from the top down.
   ///
-  /// A lista de camadas vai da de baixo para a de cima — a ordem em que o
-  /// servidor as desenha —, e a régua mostra o contrário: **a pista de cima é
-  /// a camada de cima**, como em qualquer editor. Sem esta inversão, arrastar
-  /// uma camada para o topo a mandava para trás de todas as outras.
-  static int camadaDaLinha(int linha, int quantas) => quantas - 1 - linha;
+  /// The list of layers goes from the bottom one to the top one — the order
+  /// the server draws them in — and the ruler shows the opposite: **the top
+  /// track is the top layer**, as in any editor. Without this inversion,
+  /// dragging a layer to the top sent it behind all the others.
+  static int rowLayer(int line, int howMany) => howMany - 1 - line;
 
-  /// A conta inversa: em que pista uma camada aparece.
-  static int linhaDaCamada(int camada, int quantas) => quantas - 1 - camada;
+  /// The inverse computation: which track a layer shows on.
+  static int layerRow(int layerIndex, int howMany) => howMany - 1 - layerIndex;
 
   @override
   State<MusicTimeline> createState() => _MusicTimelineState();
 }
 
 class _MusicTimelineState extends State<MusicTimeline> {
-  /// Rolagem automática quando o dedo chega perto da borda da janela.
+  /// Automatic scrolling when the finger gets close to the window's edge.
   Timer? _autoScroll;
-  double _direcao = 0;
+  double _direction = 0;
 
-  /// Onde o arrasto de fora vai cair: (instante, camada). É o que desenha o
-  /// retângulo antes de soltar — largar às cegas é o que faz arrastar parecer
-  /// pior do que clicar.
-  (double, int)? _mira;
-  double _larguraDaMira = kDefaultCutS;
+  /// Where the outside drag will land: (instant, layer). It is what draws the
+  /// rectangle before dropping — dropping blind is what makes dragging feel
+  /// worse than clicking.
+  (double, int)? _crosshair;
+  double _crosshairWidth = kDefaultCutS;
 
   @override
   void dispose() {
@@ -183,100 +185,100 @@ class _MusicTimelineState extends State<MusicTimeline> {
   }
 
   double get _durationS {
-    var fim = 0.0;
+    var endTime = 0.0;
     for (final l in widget.layers) {
       for (final c in l.clips) {
-        fim = math.max(fim, c.untilS);
+        endTime = math.max(endTime, c.untilS);
       }
     }
-    // uma folga no fim para dar onde soltar o último clipe
-    return math.max(fim + 4, widget.fallbackDurationS);
+    // some slack at the end, so there is somewhere to drop the last clip
+    return math.max(endTime + 4, widget.fallbackDurationS);
   }
 
-  /// A jogada deste bloco cai exatamente sob a cabeça de leitura?
+  /// Does this block's play fall exactly under the playhead?
   ///
-  /// Meio quadro de tolerância: alinhar é uma decisão de montagem, não uma
-  /// medida de precisão infinita.
-  bool _jogadaNoCursor(TimelineClip clip) {
-    final marca = momentoNoVideo(clip);
-    return marca != null && (marca - widget.playheadS).abs() < 0.017;
+  /// Half a frame of tolerance: aligning is an editing decision, not a
+  /// measurement of infinite precision.
+  bool _playAtCursor(TimelineClip clip) {
+    final mark = momentInVideo(clip);
+    return mark != null && (mark - widget.playheadS).abs() < 0.017;
   }
 
-  /// Em que camada cai um ponto da régua — a conta inversa do empilhamento.
-  int _camadaEm(double dy) {
-    final linha = ((dy - MusicTimeline.waveHeight) / MusicTimeline.blockHeight)
+  /// Which layer a point of the ruler falls on — the inverse of the stacking.
+  int _layerAt(double dy) {
+    final line = ((dy - MusicTimeline.waveHeight) / MusicTimeline.blockHeight)
         .floor();
-    return MusicTimeline.camadaDaLinha(
-      linha.clamp(0, math.max(0, widget.layers.length - 1)),
+    return MusicTimeline.rowLayer(
+      line.clamp(0, math.max(0, widget.layers.length - 1)),
       widget.layers.length,
     );
   }
 
-  /// Liga/desliga a rolagem conforme a posição global do dedo.
-  void _talvezRolar(Offset global) {
+  /// Turns auto-scroll on/off according to the finger's global position.
+  void _maybeScroll(Offset global) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !widget.scroll.hasClients) return;
     final x = box.globalToLocal(global).dx;
-    const margem = 48.0;
+    const marginPx = 48.0;
 
-    final direcao = x < MusicTimeline.larguraDosCabecalhos + margem
+    final direction = x < MusicTimeline.headerWidth + marginPx
         ? -1.0
-        : x > box.size.width - margem
+        : x > box.size.width - marginPx
         ? 1.0
         : 0.0;
-    if (direcao == _direcao) return;
-    _direcao = direcao;
+    if (direction == _direction) return;
+    _direction = direction;
     _autoScroll?.cancel();
-    if (direcao == 0) return;
+    if (direction == 0) return;
 
     _autoScroll = Timer.periodic(const Duration(milliseconds: 16), (_) {
       final pos = widget.scroll.position;
-      final alvo = (widget.scroll.offset + direcao * 8).clamp(
+      final target = (widget.scroll.offset + direction * 8).clamp(
         0.0,
         pos.maxScrollExtent,
       );
-      if (alvo == widget.scroll.offset) return;
-      widget.scroll.jumpTo(alvo);
+      if (target == widget.scroll.offset) return;
+      widget.scroll.jumpTo(target);
     });
   }
 
-  /// Converte a posição global do dedo em (instante, camada) da régua.
-  (double, int)? _ondeCai(Offset global) {
+  /// Converts the finger's global position into the ruler's (instant, layer).
+  (double, int)? _dropPoint(Offset global) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return null;
     final local = box.globalToLocal(global);
     final x =
-        local.dx - MusicTimeline.larguraDosCabecalhos + widget.scroll.offset;
+        local.dx - MusicTimeline.headerWidth + widget.scroll.offset;
     if (x < 0) return null;
-    return (math.max(0.0, x / widget.pxPerSecond), _camadaEm(local.dy));
+    return (math.max(0.0, x / widget.pxPerSecond), _layerAt(local.dy));
   }
 
-  void _pararDeRolar() {
+  void _stopScrolling() {
     _autoScroll?.cancel();
     _autoScroll = null;
-    _direcao = 0;
+    _direction = 0;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final px = widget.pxPerSecond;
-    final largura = _durationS * px;
-    final altura = MusicTimeline.alturaPara(widget.layers.length);
+    final widthPx = _durationS * px;
+    final heightPx = MusicTimeline.heightFor(widget.layers.length);
 
     return SizedBox(
-      height: altura,
+      height: heightPx,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: MusicTimeline.larguraDosCabecalhos,
-            child: _Cabecalhos(
+            width: MusicTimeline.headerWidth,
+            child: _Headers(
               layers: widget.layers,
-              ativa: widget.camadaAtiva,
-              onAtiva: widget.onCamadaAtiva,
-              onAjustar: widget.onAjustarCamada,
-              onReordenar: widget.onReordenarCamadas,
+              active: widget.activeLayer,
+              onActive: widget.onActiveLayer,
+              onAdjust: widget.onAdjustLayer,
+              onReorder: widget.onReorderLayers,
             ),
           ),
           const VerticalDivider(width: 1),
@@ -284,30 +286,30 @@ class _MusicTimelineState extends State<MusicTimeline> {
             child: SingleChildScrollView(
               controller: widget.scroll,
               scrollDirection: Axis.horizontal,
-              child: DragTarget<ArrastoParaARegua>(
+              child: DragTarget<RulerDrop>(
                 onWillAcceptWithDetails: (d) {
-                  final onde = _ondeCai(d.offset);
-                  if (onde == null) return false;
+                  final location = _dropPoint(d.offset);
+                  if (location == null) return false;
                   setState(() {
-                    _mira = onde;
-                    _larguraDaMira = d.data.duracaoS;
+                    _crosshair = location;
+                    _crosshairWidth = d.data.durationSecs;
                   });
                   return true;
                 },
-                onLeave: (_) => setState(() => _mira = null),
+                onLeave: (_) => setState(() => _crosshair = null),
                 onAcceptWithDetails: (d) {
-                  final onde = _ondeCai(d.offset) ?? _mira;
-                  setState(() => _mira = null);
-                  if (onde == null) return;
-                  widget.onSoltar?.call(d.data, onde.$1, onde.$2);
+                  final location = _dropPoint(d.offset) ?? _crosshair;
+                  setState(() => _crosshair = null);
+                  if (location == null) return;
+                  widget.onDrop?.call(d.data, location.$1, location.$2);
                 },
                 builder: (context, _, _) => SizedBox(
-                  width: largura,
-                  height: altura,
+                  width: widthPx,
+                  height: heightPx,
                   child: Stack(
                     children: [
-                      // fundo: onda, batidas, régua, marcador de início e as
-                      // linhas que separam as pistas
+                      // background: waveform, beats, ruler, start marker and
+                      // the lines that separate the tracks
                       Positioned.fill(
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
@@ -317,10 +319,10 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           },
                           child: CustomPaint(
                             painter: _RulerPainter(
-                              beats: widget.batidas,
+                              beats: widget.beatTimes,
                               durationS: _durationS,
                               pxPerSecond: px,
-                              camadas: widget.layers.length,
+                              layerList: widget.layers.length,
                               onColor: theme.colorScheme.primary,
                               waveColor: theme.colorScheme.primary.withValues(
                                 alpha: 0.35,
@@ -335,59 +337,58 @@ class _MusicTimelineState extends State<MusicTimeline> {
                       ),
 
                       for (
-                        var camada = 0;
-                        camada < widget.layers.length;
-                        camada++
+                        var layerIndex = 0;
+                        layerIndex < widget.layers.length;
+                        layerIndex++
                       )
-                        if (!widget.layers[camada].hidden)
-                          for (final clip in widget.layers[camada].clips)
+                        if (!widget.layers[layerIndex].hidden)
+                          for (final clip in widget.layers[layerIndex].clips)
                             _Block(
-                              key: ValueKey('bloco-${clip.id}'),
+                              key: ValueKey('block-${clip.id}'),
                               cut: clip,
-                              musica: widget.musicas[clip.mediaId],
-                              selected: widget.selecao.contains(clip.id),
-                              travada: widget.layers[camada].locked,
-                              marcaNoCursor: _jogadaNoCursor(clip),
+                              music: widget.tracks[clip.mediaId],
+                              selected: widget.selectionIds.contains(clip.id),
+                              isLocked: widget.layers[layerIndex].locked,
+                              markAtCursor: _playAtCursor(clip),
                               pxPerSecond: px,
                               left: clip.atS * px,
                               top:
                                   MusicTimeline.waveHeight +
-                                  MusicTimeline.linhaDaCamada(
-                                        camada,
+                                  MusicTimeline.layerRow(
+                                        layerIndex,
                                         widget.layers.length,
                                       ) *
                                       MusicTimeline.blockHeight,
                               height: MusicTimeline.blockHeight,
-                              onSelect: ({bool alternar = false}) =>
-                                  widget.onSelect(clip.id, alternar: alternar),
+                              onSelect: ({bool toggle = false}) =>
+                                  widget.onSelect(clip.id, toggle: toggle),
                               onMove: (at) => widget.onMove(clip.id, at),
                               onTrim: (at) => widget.onTrim(clip.id, at),
                               onStretch: (d) => widget.onStretch(clip.id, d),
                               onDragLabel: widget.onDragLabel,
-                              onda: widget.ondaDaPartida,
-                              duracaoDaPartida: widget.duracaoDaPartida,
-                              onDragInicio: widget.onGestoInicio,
-                              onDragMove: _talvezRolar,
+                              wave: widget.matchWaveform,
+                              matchDuration: widget.matchDuration,
+                              onDragStart: widget.onGestureStart,
+                              onDragMove: _maybeScroll,
                               onDragEnd: () {
-                                _pararDeRolar();
-                                widget.onGestoFim();
+                                _stopScrolling();
+                                widget.onGestureEnd();
                               },
-                              // para cima na tela é para cima na pilha: os
-                              // passos vêm em pistas, e pista cresce para
-                              // baixo
-                              onTrocarDeCamada: (passos) => widget
-                                  .onTrocarDeCamada(clip.id, camada - passos),
+                              // up on screen is up in the stack: the steps
+                              // come in tracks, and tracks grow downwards
+                              onChangeLayer: (steps) => widget
+                                  .onChangeLayer(clip.id, layerIndex - steps),
                             ),
 
-                      // onde o que está sendo arrastado vai cair
-                      if (_mira != null)
+                      // where what is being dragged will land
+                      if (_crosshair != null)
                         Positioned(
-                          left: _mira!.$1 * px,
+                          left: _crosshair!.$1 * px,
                           top:
                               MusicTimeline.waveHeight +
-                              _mira!.$2 * MusicTimeline.blockHeight,
+                              _crosshair!.$2 * MusicTimeline.blockHeight,
                           height: MusicTimeline.blockHeight,
-                          width: math.max(2, _larguraDaMira * px),
+                          width: math.max(2, _crosshairWidth * px),
                           child: IgnorePointer(
                             child: DecoratedBox(
                               decoration: BoxDecoration(
@@ -402,7 +403,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           ),
                         ),
 
-                      // a cabeça de leitura, por último para ficar por cima
+                      // the playhead, last so it stays on top
                       Positioned(
                         left: widget.playheadS * px - 1,
                         top: 0,
@@ -424,36 +425,36 @@ class _MusicTimelineState extends State<MusicTimeline> {
   }
 }
 
-/// A coluna de cabeçalhos, fora da rolagem.
+/// The column of headers, outside the scroll.
 ///
-/// Fica fora porque ela é a referência: quando a régua anda, saber de que
-/// camada é cada pista continua valendo.
-class _Cabecalhos extends StatefulWidget {
-  const _Cabecalhos({
+/// It stays outside because it is the reference: when the ruler moves,
+/// knowing which layer each track is still holds.
+class _Headers extends StatefulWidget {
+  const _Headers({
     required this.layers,
-    required this.ativa,
-    required this.onAtiva,
-    required this.onAjustar,
-    required this.onReordenar,
+    required this.active,
+    required this.onActive,
+    required this.onAdjust,
+    required this.onReorder,
   });
 
   final List<Layer> layers;
-  final int ativa;
-  final ValueChanged<int> onAtiva;
-  final void Function(int camada, {bool? muted, bool? hidden, bool? locked})
-  onAjustar;
+  final int active;
+  final ValueChanged<int> onActive;
+  final void Function(int layerIndex, {bool? muted, bool? hidden, bool? locked})
+  onAdjust;
 
-  /// (de, para) — a ordem nova das camadas.
-  final void Function(int de, int para) onReordenar;
+  /// (from, to) — the layers' new order.
+  final void Function(int from, int to) onReorder;
 
   @override
-  State<_Cabecalhos> createState() => _CabecalhosState();
+  State<_Headers> createState() => _HeadersState();
 }
 
-class _CabecalhosState extends State<_Cabecalhos> {
-  /// Sobre qual cabeçalho o arrasto está agora, para a linha de destino
-  /// aparecer antes de soltar.
-  int? _alvo;
+class _HeadersState extends State<_Headers> {
+  /// Which header the drag is over now, so the target line shows before
+  /// dropping.
+  int? _target;
 
   @override
   Widget build(BuildContext context) {
@@ -461,52 +462,52 @@ class _CabecalhosState extends State<_Cabecalhos> {
     final layers = widget.layers;
     return Column(
       children: [
-        // a faixa da grade, que não pertence a camada nenhuma
+        // the grid band, which belongs to no layer
         SizedBox(
           height: MusicTimeline.waveHeight,
           child: Center(
             child: Text(
-              'batidas',
+              'beats',
               style: theme.textTheme.labelSmall?.copyWith(
                 color: theme.hintColor,
               ),
             ),
           ),
         ),
-        // As pistas, **de cima para baixo**: a primeira linha é a camada de
-        // cima, como em qualquer editor. Cada cabeçalho é pegável — arrastar um
-        // por cima do outro troca a ordem em que o servidor desenha as camadas,
-        // que é o que decide quem cobre quem.
-        for (var linha = 0; linha < layers.length; linha++)
+        // The tracks, **from top to bottom**: the first row is the top layer,
+        // as in any editor. Each header can be grabbed — dragging one over
+        // another swaps the order in which the server draws the layers, which
+        // is what decides who covers whom.
+        for (var line = 0; line < layers.length; line++)
           Builder(
             builder: (context) {
-              final i = MusicTimeline.camadaDaLinha(linha, layers.length);
+              final i = MusicTimeline.rowLayer(line, layers.length);
               return DragTarget<int>(
                 onWillAcceptWithDetails: (d) {
                   if (d.data == i) return false;
-                  setState(() => _alvo = i);
+                  setState(() => _target = i);
                   return true;
                 },
-                onLeave: (_) => setState(() => _alvo = null),
+                onLeave: (_) => setState(() => _target = null),
                 onAcceptWithDetails: (d) {
-                  setState(() => _alvo = null);
-                  widget.onReordenar(d.data, i);
+                  setState(() => _target = null);
+                  widget.onReorder(d.data, i);
                 },
-                builder: (context, _, _) => _Reordenavel(
-                  indice: i,
+                builder: (context, _, _) => _Reorderable(
+                  index: i,
                   feedback: Material(
                     color: Colors.transparent,
                     child: SizedBox(
-                      width: MusicTimeline.larguraDosCabecalhos,
+                      width: MusicTimeline.headerWidth,
                       height: MusicTimeline.blockHeight,
                       child: Opacity(
                         opacity: 0.9,
-                        child: _CabecalhoDeCamada(
+                        child: _LayerHeader(
                           layer: layers[i],
-                          indice: i,
-                          ativa: true,
-                          onAtiva: () {},
-                          onAjustar:
+                          index: i,
+                          active: true,
+                          onActive: () {},
+                          onAdjust:
                               ({bool? muted, bool? hidden, bool? locked}) {},
                         ),
                       ),
@@ -518,24 +519,24 @@ class _CabecalhosState extends State<_Cabecalhos> {
                       color: theme.colorScheme.primary.withValues(alpha: 0.08),
                     ),
                   ),
-                  builder: (alca) => Container(
-                    key: ValueKey('cabecalho-$i'),
+                  builder: (handle) => Container(
+                    key: ValueKey('header-$i'),
                     height: MusicTimeline.blockHeight,
-                    decoration: _alvo == i
+                    decoration: _target == i
                         ? BoxDecoration(
                             border: Border.all(
                               color: theme.colorScheme.primary,
                             ),
                           )
                         : null,
-                    child: _CabecalhoDeCamada(
+                    child: _LayerHeader(
                       layer: layers[i],
-                      indice: i,
-                      ativa: i == widget.ativa,
-                      alca: alca,
-                      onAtiva: () => widget.onAtiva(i),
-                      onAjustar: ({bool? muted, bool? hidden, bool? locked}) =>
-                          widget.onAjustar(
+                      index: i,
+                      active: i == widget.active,
+                      handle: handle,
+                      onActive: () => widget.onActive(i),
+                      onAdjust: ({bool? muted, bool? hidden, bool? locked}) =>
+                          widget.onAdjust(
                             i,
                             muted: muted,
                             hidden: hidden,
@@ -552,84 +553,84 @@ class _CabecalhosState extends State<_Cabecalhos> {
   }
 }
 
-/// Um cabeçalho que se arrasta — mas só pela alça.
+/// A header that can be dragged — but only by its handle.
 ///
-/// O punho é um `Draggable` de verdade (arrasto imediato, como qualquer editor
-/// de desktop), e o resto do cabeçalho continua clicável: os botões de
-/// esconder, emudecer e travar estão ali.
-class _Reordenavel extends StatelessWidget {
-  const _Reordenavel({
-    required this.indice,
+/// The grip is a real `Draggable` (immediate drag, like any desktop editor),
+/// and the rest of the header stays clickable: the hide, mute and lock
+/// buttons are there.
+class _Reorderable extends StatelessWidget {
+  const _Reorderable({
+    required this.index,
     required this.feedback,
     required this.childWhenDragging,
     required this.builder,
   });
 
-  final int indice;
+  final int index;
   final Widget feedback;
   final Widget childWhenDragging;
-  final Widget Function(Widget alca) builder;
+  final Widget Function(Widget handle) builder;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final alca = Draggable<int>(
-      data: indice,
+    final handle = Draggable<int>(
+      data: index,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: feedback,
       childWhenDragging: const SizedBox(width: 20, height: 20),
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
         child: Tooltip(
-          message: 'Arraste para mudar a ordem das camadas',
+          message: 'Drag to change the order of the layers',
           child: Icon(Icons.drag_indicator, size: 16, color: theme.hintColor),
         ),
       ),
     );
-    // O cabeçalho inteiro também sai no toque longo: num celular não há
-    // ponteiro para mirar uma alça de 16px. Um arrasto que comece na alça é
-    // reclamado pelo `Draggable` de dentro, que é mais fundo na árvore.
+    // The whole header also comes out on long press: on a phone there is no
+    // pointer to aim at a 16px handle. A drag starting on the handle is
+    // claimed by the inner `Draggable`, which is deeper in the tree.
     return LongPressDraggable<int>(
-      data: indice,
+      data: index,
       delay: const Duration(milliseconds: 300),
       feedback: feedback,
       childWhenDragging: childWhenDragging,
-      child: builder(alca),
+      child: builder(handle),
     );
   }
 }
 
-class _CabecalhoDeCamada extends StatelessWidget {
-  const _CabecalhoDeCamada({
+class _LayerHeader extends StatelessWidget {
+  const _LayerHeader({
     required this.layer,
-    required this.indice,
-    required this.ativa,
-    required this.onAtiva,
-    required this.onAjustar,
-    this.alca,
+    required this.index,
+    required this.active,
+    required this.onActive,
+    required this.onAdjust,
+    this.handle,
   });
 
   final Layer layer;
-  final int indice;
-  final bool ativa;
-  final VoidCallback onAtiva;
-  final void Function({bool? muted, bool? hidden, bool? locked}) onAjustar;
+  final int index;
+  final bool active;
+  final VoidCallback onActive;
+  final void Function({bool? muted, bool? hidden, bool? locked}) onAdjust;
 
-  /// O punho por onde a camada é arrastada para outra posição da pilha.
+  /// The grip by which the layer is dragged to another position in the stack.
   ///
-  /// Uma alça, e não o cabeçalho inteiro: ele tem botões dentro, e um arrasto
-  /// que começasse em qualquer lugar dele brigaria com cada um deles.
-  final Widget? alca;
+  /// A handle, and not the whole header: it has buttons inside, and a drag
+  /// starting anywhere on it would fight each of them.
+  final Widget? handle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
-      onTap: onAtiva,
+      onTap: onActive,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         decoration: BoxDecoration(
-          color: ativa
+          color: active
               ? theme.colorScheme.primary.withValues(alpha: 0.10)
               : null,
           border: Border(
@@ -638,7 +639,7 @@ class _CabecalhoDeCamada extends StatelessWidget {
             ),
             left: BorderSide(
               width: 3,
-              color: ativa ? theme.colorScheme.primary : Colors.transparent,
+              color: active ? theme.colorScheme.primary : Colors.transparent,
             ),
           ),
         ),
@@ -656,40 +657,40 @@ class _CabecalhoDeCamada extends StatelessWidget {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    layer.name.isEmpty ? 'Camada ${indice + 1}' : layer.name,
+                    layer.name.isEmpty ? 'Layer ${index + 1}' : layer.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelMedium,
                   ),
                 ),
-                ?alca,
+                ?handle,
               ],
             ),
             Row(
               children: [
-                // esconder uma camada que não desenha nada não quer dizer nada;
-                // o que se quer dela é o mudo
+                // hiding a layer that draws nothing means nothing; what is
+                // wanted from it is mute
                 if (!layer.isAudio)
-                  _Chavinha(
-                    ligado: !layer.hidden,
-                    ligada: Icons.visibility,
-                    desligada: Icons.visibility_off,
-                    dica: layer.hidden ? 'mostrar' : 'esconder',
-                    onTap: () => onAjustar(hidden: !layer.hidden),
+                  _Toggle(
+                    turnedOn: !layer.hidden,
+                    isOn: Icons.visibility,
+                    off: Icons.visibility_off,
+                    hint: layer.hidden ? 'show' : 'hide',
+                    onTap: () => onAdjust(hidden: !layer.hidden),
                   ),
-                _Chavinha(
-                  ligado: !layer.muted,
-                  ligada: Icons.volume_up,
-                  desligada: Icons.volume_off,
-                  dica: layer.muted ? 'com som' : 'sem som',
-                  onTap: () => onAjustar(muted: !layer.muted),
+                _Toggle(
+                  turnedOn: !layer.muted,
+                  isOn: Icons.volume_up,
+                  off: Icons.volume_off,
+                  hint: layer.muted ? 'unmute' : 'mute',
+                  onTap: () => onAdjust(muted: !layer.muted),
                 ),
-                _Chavinha(
-                  ligado: !layer.locked,
-                  ligada: Icons.lock_open,
-                  desligada: Icons.lock,
-                  dica: layer.locked ? 'destravar' : 'travar',
-                  onTap: () => onAjustar(locked: !layer.locked),
+                _Toggle(
+                  turnedOn: !layer.locked,
+                  isOn: Icons.lock_open,
+                  off: Icons.lock,
+                  hint: layer.locked ? 'unlock' : 'lock',
+                  onTap: () => onAdjust(locked: !layer.locked),
                 ),
               ],
             ),
@@ -700,55 +701,55 @@ class _CabecalhoDeCamada extends StatelessWidget {
   }
 }
 
-class _Chavinha extends StatelessWidget {
-  const _Chavinha({
-    required this.ligado,
-    required this.ligada,
-    required this.desligada,
-    required this.dica,
+class _Toggle extends StatelessWidget {
+  const _Toggle({
+    required this.turnedOn,
+    required this.isOn,
+    required this.off,
+    required this.hint,
     required this.onTap,
   });
 
-  final bool ligado;
-  final IconData ligada;
-  final IconData desligada;
-  final String dica;
+  final bool turnedOn;
+  final IconData isOn;
+  final IconData off;
+  final String hint;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return IconButton(
-      tooltip: dica,
+      tooltip: hint,
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 26, minHeight: 24),
       iconSize: 15,
       icon: Icon(
-        ligado ? ligada : desligada,
-        color: ligado ? theme.hintColor : theme.colorScheme.error,
+        turnedOn ? isOn : off,
+        color: turnedOn ? theme.hintColor : theme.colorScheme.error,
       ),
     );
   }
 }
 
-/// Um bloco na régua, com os quatro gestos.
+/// A block on the ruler, with the four gestures.
 ///
-/// É `Stateful` por causa de uma armadilha que fazia o arrasto simplesmente
-/// **não funcionar**: aplicando `delta.dx` quadro a quadro, cada passo de 3px
-/// virava 0,05 s e o ímã grudava de volta na mesma batida — o bloco só saía do
-/// lugar num piparote forte o bastante para vencer a tolerância num único
-/// quadro. Agora o gesto guarda de onde partiu e acumula o deslocamento
-/// inteiro, então o ímã decide sobre a intenção do arrasto, não sobre um pixel.
+/// It is `Stateful` because of a trap that made dragging simply **not work**:
+/// applying `delta.dx` frame by frame, each 3px step became 0.05 s and the
+/// magnet snapped back to the same beat — the block only moved with a flick
+/// strong enough to beat the tolerance in a single frame. Now the gesture
+/// keeps where it started and accumulates the whole offset, so the magnet
+/// decides on the drag's intent, not on one pixel.
 class _Block extends StatefulWidget {
   const _Block({
     super.key,
     required this.cut,
-    required this.musica,
+    required this.music,
     required this.selected,
-    required this.travada,
-    required this.marcaNoCursor,
+    required this.isLocked,
+    required this.markAtCursor,
     required this.pxPerSecond,
     required this.left,
     required this.top,
@@ -758,110 +759,111 @@ class _Block extends StatefulWidget {
     required this.onTrim,
     required this.onStretch,
     required this.onDragLabel,
-    required this.onda,
-    required this.duracaoDaPartida,
-    required this.onDragInicio,
+    required this.wave,
+    required this.matchDuration,
+    required this.onDragStart,
     required this.onDragMove,
     required this.onDragEnd,
-    required this.onTrocarDeCamada,
+    required this.onChangeLayer,
   });
 
   final TimelineClip cut;
 
-  /// A música deste bloco, quando ele é um bloco de música. É dela que sai a
-  /// onda desenhada e o nome escrito.
-  final Track? musica;
+  /// The music of this block, when it is a music block. It is where the drawn
+  /// waveform and the written name come from.
+  final Track? music;
 
   final bool selected;
 
-  /// Camada travada: o clipe ainda se escolhe, mas não se arrasta.
-  final bool travada;
+  /// Locked layer: the clip can still be chosen, but not dragged.
+  final bool isLocked;
 
-  /// A jogada deste bloco está debaixo da cabeça de leitura?
-  final bool marcaNoCursor;
+  /// Is this block's play under the playhead?
+  final bool markAtCursor;
 
   final double pxPerSecond;
   final double left;
   final double top;
   final double height;
-  final void Function({bool alternar}) onSelect;
+  final void Function({bool toggle}) onSelect;
   final ValueChanged<double> onMove;
   final ValueChanged<double> onTrim;
   final ValueChanged<double> onStretch;
   final ValueChanged<String?>? onDragLabel;
-  final List<double> onda;
-  final double duracaoDaPartida;
-  final VoidCallback onDragInicio;
+  final List<double> wave;
+  final double matchDuration;
+  final VoidCallback onDragStart;
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
 
-  /// Quantas pistas para cima (negativo) ou para baixo (positivo).
-  final ValueChanged<int> onTrocarDeCamada;
+  /// How many tracks up (negative) or down (positive).
+  final ValueChanged<int> onChangeLayer;
 
-  /// Alça de redimensionar. 26px porque o alvo é um dedo, não um mouse — abaixo
-  /// disso a pessoa erra e move o bloco quando queria esticá-lo.
+  /// Resize handle. 26px because the target is a finger, not a mouse — below
+  /// that the person misses and moves the block when they meant to stretch it.
   static const double handle = 26;
 
   @override
   State<_Block> createState() => _BlockState();
 }
 
-enum _Gesto { mover, aparar, esticar }
+enum _Gesture { move, trimLeft, stretchRight }
 
 class _BlockState extends State<_Block> {
-  /// Valor no início do gesto e deslocamento acumulado desde então.
-  double _partiuDe = 0;
-  double _andou = 0;
+  /// Value at the start of the gesture and the offset accumulated since.
+  double _startedAt = 0;
+  double _moved = 0;
 
-  /// Quanto o dedo subiu ou desceu, para saber em que pista soltar.
-  double _subiu = 0;
+  /// How far the finger went up or down, to know which track to drop on.
+  double _rose = 0;
 
-  void _comecar(_Gesto gesto) {
-    // arrastar um bloco que já está numa seleção múltipla não deve desmanchá-la
+  void _begin(_Gesture gesture) {
+    // dragging a block that is already in a multiple selection must not break
+    // it up
     if (!widget.selected) widget.onSelect();
-    widget.onDragInicio();
-    _andou = 0;
-    _partiuDe = switch (gesto) {
-      _Gesto.mover => widget.cut.atS,
-      _Gesto.aparar => widget.cut.atS,
-      _Gesto.esticar => widget.cut.durationS,
+    widget.onDragStart();
+    _moved = 0;
+    _startedAt = switch (gesture) {
+      _Gesture.move => widget.cut.atS,
+      _Gesture.trimLeft => widget.cut.atS,
+      _Gesture.stretchRight => widget.cut.durationS,
     };
   }
 
-  void _andar(_Gesto gesto, DragUpdateDetails d) {
-    _andou += d.delta.dx / widget.pxPerSecond;
-    final alvo = _partiuDe + _andou;
-    switch (gesto) {
-      case _Gesto.mover:
-        widget.onMove(alvo);
-      case _Gesto.aparar:
-        widget.onTrim(alvo);
-      case _Gesto.esticar:
-        widget.onStretch(alvo);
+  void _advance(_Gesture gesture, DragUpdateDetails d) {
+    _moved += d.delta.dx / widget.pxPerSecond;
+    final target = _startedAt + _moved;
+    switch (gesture) {
+      case _Gesture.move:
+        widget.onMove(target);
+      case _Gesture.trimLeft:
+        widget.onTrim(target);
+      case _Gesture.stretchRight:
+        widget.onStretch(target);
     }
     widget.onDragMove(d.globalPosition);
-    widget.onDragLabel?.call(_rotulo(gesto));
+    widget.onDragLabel?.call(_label(gesture));
   }
 
-  String _rotulo(_Gesto gesto) => switch (gesto) {
-    _Gesto.mover => 'entra em ${formatClock(widget.cut.atS)} do vídeo',
+  String _label(_Gesture gesture) => switch (gesture) {
+    _Gesture.move => 'starts at ${formatClock(widget.cut.atS)} of the video',
     _ => '${widget.cut.durationS.toStringAsFixed(2)}s',
   };
 
-  void _soltar() {
+  void _release() {
     widget.onDragLabel?.call(null);
     widget.onDragEnd();
   }
 
-  /// Shift-clique soma à seleção; clique simples troca.
-  void _tocar() =>
-      widget.onSelect(alternar: HardwareKeyboard.instance.isShiftPressed);
+  /// Shift-click adds to the selection; a plain click replaces it.
+  void _play() =>
+      widget.onSelect(toggle: HardwareKeyboard.instance.isShiftPressed);
 
-  /// As alças só aparecem no bloco escolhido: num bloco de 1 s a 60 px/s, duas
-  /// alças de 26 px não deixariam onde pegar para mover.
-  Widget _alca(_Gesto gesto, Color cor, {required bool esquerda}) => Positioned(
-    left: esquerda ? 0 : null,
-    right: esquerda ? null : 0,
+  /// The handles only show on the chosen block: on a 1 s block at 60 px/s, two
+  /// 26 px handles would leave nowhere to grab to move it.
+  Widget _handle(_Gesture gesture, Color fillColour, {required bool leftEdge}) => Positioned(
+    left: leftEdge ? 0 : null,
+    right: leftEdge ? null : 0,
     top: 0,
     bottom: 0,
     width: _Block.handle,
@@ -869,16 +871,16 @@ class _BlockState extends State<_Block> {
       cursor: SystemMouseCursors.resizeLeftRight,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onHorizontalDragStart: (_) => _comecar(gesto),
-        onHorizontalDragUpdate: (d) => _andar(gesto, d),
-        onHorizontalDragEnd: (_) => _soltar(),
-        onHorizontalDragCancel: _soltar,
+        onHorizontalDragStart: (_) => _begin(gesture),
+        onHorizontalDragUpdate: (d) => _advance(gesture, d),
+        onHorizontalDragEnd: (_) => _release(),
+        onHorizontalDragCancel: _release,
         child: Center(
           child: Container(
             width: 4,
             height: 26,
             decoration: BoxDecoration(
-              color: cor,
+              color: fillColour,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -887,90 +889,90 @@ class _BlockState extends State<_Block> {
     ),
   );
 
-  double? get _marca => marcaDoMomento(widget.cut);
+  double? get _mark => momentMark(widget.cut);
 
-  /// (a onda a desenhar, quanto tempo ela cobre).
+  /// (the waveform to draw, how much time it covers).
   ///
-  /// Um bloco de música mostra a onda **da música**; um corte, a do áudio da
-  /// partida. Nos dois casos o desenho é um recorte da onda inteira, então
-  /// aparar o bloco muda o que aparece sem recalcular nada.
-  (List<double>, double) get _onda {
-    final m = widget.musica;
+  /// A music block shows the **music's** waveform; a cut, the match audio's.
+  /// In both cases the drawing is a slice of the whole waveform, so trimming
+  /// the block changes what shows without recomputing anything.
+  (List<double>, double) get _waveform {
+    final m = widget.music;
     if (m != null) return (m.peaks, m.durationS);
-    return (widget.onda, widget.duracaoDaPartida);
+    return (widget.wave, widget.matchDuration);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final musica = widget.musica;
+    final music = widget.music;
     final style = EventStyle.of(widget.cut.kind);
-    // um bloco de música não é um momento da partida: ele tem a cor da trilha,
-    // que é a mesma da onda desenhada no alto da régua
-    final cor = musica != null ? theme.colorScheme.primary : style.color;
-    final rotulo = musica?.name ?? style.label;
-    final largura = math.max(10.0, widget.cut.durationS * widget.pxPerSecond);
-    final cabeTexto = largura > 56;
+    // a music block is not a match moment: it has the track's colour, which
+    // is the same as the waveform drawn at the top of the ruler
+    final fillColour = music != null ? theme.colorScheme.primary : style.color;
+    final blockLabel = music?.name ?? style.label;
+    final widthPx = math.max(10.0, widget.cut.durationS * widget.pxPerSecond);
+    final textFits = widthPx > 56;
 
     return Positioned(
       left: widget.left,
       top: widget.top,
-      width: largura,
+      width: widthPx,
       height: widget.height,
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: _tocar,
-          // arrastar para cima ou para baixo leva o clipe para outra pista. É
-          // um gesto separado do horizontal, então os dois não disputam.
-          onVerticalDragStart: widget.travada
+          onTap: _play,
+          // dragging up or down takes the clip to another track. It is a
+          // gesture separate from the horizontal one, so they do not compete.
+          onVerticalDragStart: widget.isLocked
               ? null
               : (_) {
-                  _subiu = 0;
+                  _rose = 0;
                   if (!widget.selected) widget.onSelect();
                 },
-          onVerticalDragUpdate: widget.travada
+          onVerticalDragUpdate: widget.isLocked
               ? null
-              : (d) => _subiu += d.delta.dy,
-          onVerticalDragEnd: widget.travada
+              : (d) => _rose += d.delta.dy,
+          onVerticalDragEnd: widget.isLocked
               ? null
               : (_) {
-                  final passos = (_subiu / widget.height).round();
-                  if (passos != 0) widget.onTrocarDeCamada(passos);
+                  final steps = (_rose / widget.height).round();
+                  if (steps != 0) widget.onChangeLayer(steps);
                   widget.onDragLabel?.call(null);
                 },
-          onHorizontalDragStart: widget.travada
+          onHorizontalDragStart: widget.isLocked
               ? null
-              : (_) => _comecar(_Gesto.mover),
-          onHorizontalDragUpdate: widget.travada
+              : (_) => _begin(_Gesture.move),
+          onHorizontalDragUpdate: widget.isLocked
               ? null
-              : (d) => _andar(_Gesto.mover, d),
-          onHorizontalDragEnd: widget.travada ? null : (_) => _soltar(),
-          onHorizontalDragCancel: widget.travada ? null : _soltar,
+              : (d) => _advance(_Gesture.move, d),
+          onHorizontalDragEnd: widget.isLocked ? null : (_) => _release(),
+          onHorizontalDragCancel: widget.isLocked ? null : _release,
           child: Container(
             margin: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: cor.withValues(alpha: widget.selected ? 0.45 : 0.25),
+              color: fillColour.withValues(alpha: widget.selected ? 0.45 : 0.25),
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: widget.selected ? theme.colorScheme.onSurface : cor,
+                color: widget.selected ? theme.colorScheme.onSurface : fillColour,
                 width: widget.selected ? 2 : 1,
               ),
             ),
             child: Stack(
               children: [
-                // ── o som do jogo dentro deste corte ───────────────────────
-                if (_onda.$1.isNotEmpty && _onda.$2 > 0)
+                // ── the game sound inside this cut ──────────────────────────
+                if (_waveform.$1.isNotEmpty && _waveform.$2 > 0)
                   Positioned.fill(
                     child: IgnorePointer(
                       child: CustomPaint(
-                        painter: _OndaDoCorte(
-                          onda: _onda.$1,
-                          duracaoTotal: _onda.$2,
-                          de: widget.cut.startS,
-                          ate: widget.cut.endS,
-                          cor: cor.withValues(alpha: 0.55),
+                        painter: _CutWaveform(
+                          wave: _waveform.$1,
+                          totalDuration: _waveform.$2,
+                          from: widget.cut.startS,
+                          until: widget.cut.endS,
+                          fillColour: fillColour.withValues(alpha: 0.55),
                         ),
                       ),
                     ),
@@ -985,7 +987,7 @@ class _BlockState extends State<_Block> {
                     left: 0,
                     top: 0,
                     bottom: 0,
-                    width: math.min(largura, tr.durationS * widget.pxPerSecond),
+                    width: math.min(widthPx, tr.durationS * widget.pxPerSecond),
                     child: IgnorePointer(
                       child: Container(
                         key: ValueKey('transition-on-clip-${widget.cut.id}'),
@@ -1014,21 +1016,22 @@ class _BlockState extends State<_Block> {
                     ),
                   ),
 
-                // ── onde a jogada acontece ─────────────────────────────────
-                // O bloco é um trecho; o momento é um instante dentro dele. Sem
-                // esta marca, encaixar a eliminação na batida seria adivinhar:
-                // o que se alinha com a percussão é ela, não a borda do corte.
-                if (_marca != null)
+                // ── where the play happens ──────────────────────────────────
+                // The block is a stretch; the moment is an instant inside it.
+                // Without this mark, fitting the kill to the beat would be
+                // guessing: what lines up with the percussion is the play, not
+                // the cut's edge.
+                if (_mark != null)
                   Positioned(
-                    left: _marca! * largura - (widget.marcaNoCursor ? 1.5 : 1),
+                    left: _mark! * widthPx - (widget.markAtCursor ? 1.5 : 1),
                     top: 0,
                     bottom: 0,
-                    width: widget.marcaNoCursor ? 3 : 2,
+                    width: widget.markAtCursor ? 3 : 2,
                     child: IgnorePointer(
                       child: ColoredBox(
-                        // acesa quando a jogada está exatamente sob a cabeça de
-                        // leitura: é a confirmação de que o encaixe pegou
-                        color: widget.marcaNoCursor
+                        // lit when the play is exactly under the playhead: it
+                        // is the confirmation that the fit took
+                        color: widget.markAtCursor
                             ? theme.colorScheme.error
                             : theme.colorScheme.onSurface.withValues(
                                 alpha: 0.85,
@@ -1036,21 +1039,21 @@ class _BlockState extends State<_Block> {
                       ),
                     ),
                   ),
-                if (_marca != null)
+                if (_mark != null)
                   Positioned(
-                    left: _marca! * largura - 4,
+                    left: _mark! * widthPx - 4,
                     top: 0,
                     child: IgnorePointer(
                       child: Icon(
                         Icons.arrow_drop_down,
-                        size: widget.marcaNoCursor ? 14 : 12,
-                        color: widget.marcaNoCursor
+                        size: widget.markAtCursor ? 14 : 12,
+                        color: widget.markAtCursor
                             ? theme.colorScheme.error
                             : theme.colorScheme.onSurface,
                       ),
                     ),
                   ),
-                if (cabeTexto)
+                if (textFits)
                   Padding(
                     padding: EdgeInsets.symmetric(
                       horizontal: widget.selected ? _Block.handle : 6,
@@ -1061,12 +1064,12 @@ class _BlockState extends State<_Block> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          rotulo,
+                          blockLabel,
                           maxLines: 1,
                           overflow: TextOverflow.clip,
                           softWrap: false,
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: cor,
+                            color: fillColour,
                           ),
                         ),
                         Text(
@@ -1080,9 +1083,9 @@ class _BlockState extends State<_Block> {
                       ],
                     ),
                   ),
-                if (widget.selected && !widget.travada) ...[
-                  _alca(_Gesto.aparar, cor, esquerda: true),
-                  _alca(_Gesto.esticar, cor, esquerda: false),
+                if (widget.selected && !widget.isLocked) ...[
+                  _handle(_Gesture.trimLeft, fillColour, leftEdge: true),
+                  _handle(_Gesture.stretchRight, fillColour, leftEdge: false),
                 ],
               ],
             ),
@@ -1093,45 +1096,46 @@ class _BlockState extends State<_Block> {
   }
 }
 
-/// A onda do áudio da partida no pedaço que este bloco mostra.
+/// The match audio's waveform over the piece this block shows.
 ///
-/// Recorta a onda da partida inteira em vez de guardar uma por bloco: aparar ou
-/// esticar o corte muda o pedaço desenhado sozinho, sem recalcular nada.
-class _OndaDoCorte extends CustomPainter {
-  _OndaDoCorte({
-    required this.onda,
-    required this.duracaoTotal,
-    required this.de,
-    required this.ate,
-    required this.cor,
+/// It slices the whole match's waveform instead of storing one per block:
+/// trimming or stretching the cut changes the drawn piece by itself, without
+/// recomputing anything.
+class _CutWaveform extends CustomPainter {
+  _CutWaveform({
+    required this.wave,
+    required this.totalDuration,
+    required this.from,
+    required this.until,
+    required this.fillColour,
   });
 
-  final List<double> onda;
-  final double duracaoTotal;
-  final double de;
-  final double ate;
-  final Color cor;
+  final List<double> wave;
+  final double totalDuration;
+  final double from;
+  final double until;
+  final Color fillColour;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.width < 2 || ate <= de) return;
-    final meio = size.height / 2;
-    final pincel = Paint()
-      ..color = cor
+    if (size.width < 2 || until <= from) return;
+    final middle = size.height / 2;
+    final brush = Paint()
+      ..color = fillColour
       ..strokeWidth = 1;
 
     for (var x = 0.0; x < size.width; x += 1) {
-      final t = de + (ate - de) * (x / size.width);
-      final i = (t / duracaoTotal * onda.length).floor();
-      if (i < 0 || i >= onda.length) continue;
-      final h = onda[i] * (meio - 3);
-      canvas.drawLine(Offset(x, meio - h), Offset(x, meio + h), pincel);
+      final t = from + (until - from) * (x / size.width);
+      final i = (t / totalDuration * wave.length).floor();
+      if (i < 0 || i >= wave.length) continue;
+      final h = wave[i] * (middle - 3);
+      canvas.drawLine(Offset(x, middle - h), Offset(x, middle + h), brush);
     }
   }
 
   @override
-  bool shouldRepaint(_OndaDoCorte old) =>
-      old.de != de || old.ate != ate || old.onda != onda;
+  bool shouldRepaint(_CutWaveform old) =>
+      old.from != from || old.until != until || old.wave != wave;
 }
 
 class _RulerPainter extends CustomPainter {
@@ -1139,18 +1143,18 @@ class _RulerPainter extends CustomPainter {
     required this.beats,
     required this.durationS,
     required this.pxPerSecond,
-    required this.camadas,
+    required this.layerList,
     required this.onColor,
     required this.waveColor,
     required this.beatColor,
     required this.textColor,
   });
 
-  /// A grade em tempo de vídeo — a mesma que o ímã usa.
+  /// The grid in video time — the same the magnet uses.
   final List<double> beats;
   final double durationS;
   final double pxPerSecond;
-  final int camadas;
+  final int layerList;
   final Color onColor;
   final Color waveColor;
   final Color beatColor;
@@ -1158,65 +1162,65 @@ class _RulerPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // ── batidas ────────────────────────────────────────────────────────────
-    // Atravessam a altura inteira: é por elas que se alinha um bloco de
-    // qualquer camada, e uma linha que morre na faixa de cima não ajuda quem
-    // está encaixando o corte três pistas abaixo.
+    // ── beats ──────────────────────────────────────────────────────────────
+    // They cross the whole height: they are what blocks on any layer are
+    // aligned by, and a line that dies at the top band does not help whoever
+    // is fitting the cut three tracks below.
     //
-    // Com a música muito afastada as batidas ficam a 2px uma da outra e viram
-    // um borrão cinza; aí desenha-se uma a cada N para continuarem legíveis.
+    // With the music zoomed far out the beats end up 2px apart and become a
+    // grey smear; then one every N is drawn so they stay readable.
     if (beats.length >= 2) {
-      final espaco = (beats[1] - beats[0]) * pxPerSecond;
-      final passo = espaco < 6 ? (6 / math.max(espaco, 0.5)).ceil() : 1;
-      final pincel = Paint()
+      final gap = (beats[1] - beats[0]) * pxPerSecond;
+      final step = gap < 6 ? (6 / math.max(gap, 0.5)).ceil() : 1;
+      final brush = Paint()
         ..color = beatColor
         ..strokeWidth = 1;
-      for (var i = 0; i < beats.length; i += passo) {
+      for (var i = 0; i < beats.length; i += step) {
         final x = beats[i] * pxPerSecond;
         if (x > size.width) break;
         canvas.drawLine(
           Offset(x, 0),
           Offset(x, size.height - MusicTimeline.rulerHeight),
-          pincel,
+          brush,
         );
       }
     }
 
-    // ── divisórias entre as pistas ─────────────────────────────────────────
-    final linha = Paint()
+    // ── dividers between the tracks ─────────────────────────────────────────
+    final line = Paint()
       ..color = beatColor
       ..strokeWidth = 1;
-    for (var i = 0; i <= camadas; i++) {
+    for (var i = 0; i <= layerList; i++) {
       final y = MusicTimeline.waveHeight + i * MusicTimeline.blockHeight;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), linha);
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), line);
     }
 
-    // ── régua de tempo ─────────────────────────────────────────────────────
-    final passoS = _passoDaRegua();
-    final pincelRegua = Paint()
+    // ── time ruler ─────────────────────────────────────────────────────────
+    final stepS = _rulerStep();
+    final rulerBrush = Paint()
       ..color = beatColor
       ..strokeWidth = 1;
-    final topoRegua = size.height - MusicTimeline.rulerHeight;
-    for (var s = 0.0; s <= durationS; s += passoS) {
+    final rulerTop = size.height - MusicTimeline.rulerHeight;
+    for (var s = 0.0; s <= durationS; s += stepS) {
       final x = s * pxPerSecond;
       canvas.drawLine(
-        Offset(x, topoRegua),
-        Offset(x, topoRegua + 5),
-        pincelRegua,
+        Offset(x, rulerTop),
+        Offset(x, rulerTop + 5),
+        rulerBrush,
       );
-      final texto = TextPainter(
+      final textValue = TextPainter(
         text: TextSpan(
-          text: _relogio(s),
+          text: _clock(s),
           style: TextStyle(color: textColor, fontSize: 10),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      texto.paint(canvas, Offset(x + 3, topoRegua + 5));
+      textValue.paint(canvas, Offset(x + 3, rulerTop + 5));
     }
 
-    // ── o primeiro quadro ──────────────────────────────────────────────────
-    // A régua começa no começo do vídeo, e a marca diz isso sem depender de o
-    // usuário lembrar que zero é zero.
+    // ── the first frame ────────────────────────────────────────────────────
+    // The ruler starts at the start of the video, and the mark says so
+    // without relying on the user remembering that zero is zero.
     canvas.drawLine(
       Offset(0, 0),
       Offset(0, size.height),
@@ -1226,16 +1230,16 @@ class _RulerPainter extends CustomPainter {
     );
   }
 
-  /// De quanto em quanto tempo a régua ganha um número, para os rótulos não se
-  /// atropelarem em nenhum zoom.
-  double _passoDaRegua() {
-    for (final passo in const [1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0]) {
-      if (passo * pxPerSecond >= 56) return passo;
+  /// How often the ruler gets a number, so the labels do not run over each
+  /// other at any zoom.
+  double _rulerStep() {
+    for (final step in const [1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0]) {
+      if (step * pxPerSecond >= 56) return step;
     }
     return 120;
   }
 
-  static String _relogio(double s) {
+  static String _clock(double s) {
     final t = s.round();
     return '${t ~/ 60}:${(t % 60).toString().padLeft(2, '0')}';
   }
@@ -1245,5 +1249,5 @@ class _RulerPainter extends CustomPainter {
       old.beats != beats ||
       old.pxPerSecond != pxPerSecond ||
       old.durationS != durationS ||
-      old.camadas != camadas;
+      old.layerList != layerList;
 }
