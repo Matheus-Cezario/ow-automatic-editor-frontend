@@ -348,11 +348,11 @@ class ClipFade {
   Map<String, dynamic> toJson() => {'in_s': inS, 'out_s': outS};
 }
 
-/// Como um clipe entra, na emenda com o anterior da mesma camada.
+/// How a clip enters, at the cut with the previous clip on the same layer.
 ///
-/// É de quem **entra**, e não do corte: mover o bloco leva a entrada junto, e
-/// um bloco sem ninguém antes (o primeiro, ou um depois de um buraco) também
-/// tem entrada — saindo do fundo.
+/// It belongs to the clip that **enters**, not to the cut: moving the clip
+/// takes its entrance along, and a clip with nothing before it (the first one,
+/// or one after a gap) still has an entrance — out of the background.
 class ClipTransition {
   const ClipTransition({required this.kind, this.durationS = 0.5});
 
@@ -361,8 +361,8 @@ class ClipTransition {
     durationS: (j['duration_s'] as num?)?.toDouble() ?? 0.5,
   );
 
-  /// `dissolve`, `fade_black`, `fade_white` ou `slide_*` — os nomes do
-  /// servidor. O que cada um é para a tela está em `TipoDeTransicao`.
+  /// `dissolve`, `fade_black`, `fade_white` or `slide_*` — the server's names.
+  /// What each one is for the screen lives in `TransitionType`.
   final String kind;
   final double durationS;
 
@@ -374,11 +374,11 @@ class ClipTransition {
     durationS: durationS ?? this.durationS,
   );
 
-  /// Nunca mais longa que o bloco: o servidor recusaria, e aparar o bloco não
-  /// pode deixar a montagem impossível de gerar.
-  Map<String, dynamic> toJsonPara(double duracaoDoBloco) => {
+  /// Never longer than the clip: the server would refuse it, and trimming the
+  /// clip must not leave the montage impossible to render.
+  Map<String, dynamic> toJsonFor(double clipDuration) => {
     'kind': kind,
-    'duration_s': durationS.clamp(minS, math.max(minS, duracaoDoBloco)),
+    'duration_s': durationS.clamp(minS, math.max(minS, clipDuration)),
   };
 
   @override
@@ -644,7 +644,7 @@ class TimelineClip {
   final String text;
   final ClipTextStyle textStyle;
 
-  /// Como entra sobre o anterior. `null` = corte seco.
+  /// How it enters over the previous clip. `null` = a hard cut.
   final ClipTransition? transition;
 
   bool get isText => source == 'text';
@@ -693,7 +693,7 @@ class TimelineClip {
     String? text,
     ClipTextStyle? textStyle,
     ClipTransition? transition,
-    bool semTransicao = false,
+    bool clearTransition = false,
   }) => TimelineClip(
     sourceT: sourceT ?? this.sourceT,
     startS: startS ?? this.startS,
@@ -713,7 +713,7 @@ class TimelineClip {
     reverse: reverse ?? this.reverse,
     text: text ?? this.text,
     textStyle: textStyle ?? this.textStyle,
-    transition: semTransicao ? null : transition ?? this.transition,
+    transition: clearTransition ? null : transition ?? this.transition,
   );
 
   /// O `id` não vem do servidor: ele é atribuído ao carregar, por
@@ -773,7 +773,7 @@ class TimelineClip {
     if (reverse) 'reverse': true,
     if (isText) 'text': text,
     if (isText) 'text_style': textStyle.toJson(),
-    if (transition != null) 'transition': transition!.toJsonPara(durationS),
+    if (transition != null) 'transition': transition!.toJsonFor(durationS),
   };
 }
 

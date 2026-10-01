@@ -10,7 +10,7 @@ void main() {
     await tester.pumpWidget(const OwEditorApp());
     await tester.pump();
 
-    expect(find.text('Partidas'), findsOneWidget);
+    expect(find.text('Matches'), findsOneWidget);
     expect(find.text('Nova partida'), findsOneWidget);
   });
 

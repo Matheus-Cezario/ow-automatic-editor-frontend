@@ -37,11 +37,11 @@ class PreviewPlayer extends StatefulWidget {
     this.onSelecionarTexto,
     this.onMoverTexto,
     this.onArrastando,
-    this.editando,
-    this.onEditar,
-    this.onEscrever,
-    this.onGestoInicio,
-    this.onGestoFim,
+    this.editingId,
+    this.onEditing,
+    this.onTextChanged,
+    this.onGestureStart,
+    this.onGestureEnd,
   });
 
   final String videoUrl;
@@ -65,19 +65,19 @@ class PreviewPlayer extends StatefulWidget {
   /// servidor a entende.
   final void Function(String id, double x, double y)? onMoverTexto;
 
-  /// O texto que está sendo escrito ali mesmo, no quadro; `null` se nenhum.
-  final String? editando;
+  /// The text being typed right there on the frame; `null` if none.
+  final String? editingId;
 
-  /// Pede para começar (id) ou terminar (`null`) de escrever no quadro.
-  final ValueChanged<String?>? onEditar;
+  /// Asks to start (id) or stop (`null`) typing on the frame.
+  final ValueChanged<String?>? onEditing;
 
-  /// (id, texto) — o que está escrito agora, a cada tecla.
-  final void Function(String id, String texto)? onEscrever;
+  /// (id, text) — what is written now, on every keystroke.
+  final void Function(String id, String text)? onTextChanged;
 
-  /// Começo e fim de um arrasto da frase: tudo o que acontece entre os dois é
-  /// **um** passo do desfazer, e não um por movimento do ponteiro.
-  final VoidCallback? onGestoInicio;
-  final VoidCallback? onGestoFim;
+  /// Start and end of a drag of the text: everything in between is **one**
+  /// undo step, not one per pointer movement.
+  final VoidCallback? onGestureStart;
+  final VoidCallback? onGestureEnd;
 
   /// Texto para a tela mostrar enquanto o dedo arrasta a frase; `null` ao
   /// soltar. Serve ao mesmo propósito do rótulo de arrasto da régua.
@@ -253,44 +253,45 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
     if (mounted) setState(() {});
   }
 
-  /// A imagem do bloco que entra, como a transição a traz.
+  /// The incoming clip's picture, as the transition brings it in.
   ///
-  /// O monitor tem **um** vídeo: não dá para mostrar o anterior por baixo do
-  /// novo. O dissolver vira o novo surgindo do preto e o deslizar, o novo
-  /// chegando pelo lado — o bastante para ver o tempo e o sentido dela. A
-  /// mistura de verdade é a do vídeo gerado.
-  Widget _comTransicao(Widget imagem) {
-    final tr = transicaoEm(widget.cuts, widget.atS);
-    if (tr == null || tr.saindo) return imagem;
-    final falta = 1 - tr.p;
+  /// The monitor has **one** video: it cannot show the previous clip under the
+  /// new one. Dissolve becomes the new clip emerging from black, and slide the
+  /// new clip arriving from the side — enough to see its timing and direction.
+  /// The real mix is the one in the rendered video.
+  Widget _withTransition(Widget picture) {
+    final tr = transitionAt(widget.cuts, widget.atS);
+    if (tr == null || tr.leaving) return picture;
+    final remaining = 1 - tr.p;
     return switch (tr.kind) {
-      'dissolve' => Opacity(opacity: tr.p, child: imagem),
-      'slide_left' => _desliza(imagem, Offset(falta, 0)),
-      'slide_right' => _desliza(imagem, Offset(-falta, 0)),
-      'slide_up' => _desliza(imagem, Offset(0, falta)),
-      'slide_down' => _desliza(imagem, Offset(0, -falta)),
-      _ => imagem,
+      'dissolve' => Opacity(opacity: tr.p, child: picture),
+      'slide_left' => _slide(picture, Offset(remaining, 0)),
+      'slide_right' => _slide(picture, Offset(-remaining, 0)),
+      'slide_up' => _slide(picture, Offset(0, remaining)),
+      'slide_down' => _slide(picture, Offset(0, -remaining)),
+      _ => picture,
     };
   }
 
-  Widget _desliza(Widget imagem, Offset fracao) => ClipRect(
-    child: FractionalTranslation(translation: fracao, child: imagem),
+  Widget _slide(Widget picture, Offset fraction) => ClipRect(
+    child: FractionalTranslation(translation: fraction, child: picture),
   );
 
-  /// A cor por cima da imagem num mergulho, ou `null` fora dele.
-  Color? _veu() {
-    final tr = transicaoEm(widget.cuts, widget.atS);
+  /// The colour over the picture during a dip, or `null` outside one.
+  Color? _veil() {
+    final tr = transitionAt(widget.cuts, widget.atS);
     if (tr == null) return null;
-    final cor = switch (tr.kind) {
+    final colour = switch (tr.kind) {
       'fade_black' => Colors.black,
       'fade_white' => Colors.white,
       _ => null,
     };
-    if (cor == null) return null;
-    // saindo, a cor sobe na metade final; entrando, desce na metade inicial
-    final opacidade = tr.saindo ? tr.p : math.max(0.0, 1 - tr.p * 2);
-    if (opacidade <= 0) return null;
-    return cor.withValues(alpha: opacidade);
+    if (colour == null) return null;
+    // leaving, the colour rises over the last half; entering, it fades over
+    // the first half
+    final opacity = tr.leaving ? tr.p : math.max(0.0, 1 - tr.p * 2);
+    if (opacity <= 0) return null;
+    return colour.withValues(alpha: opacity);
   }
 
   @override
@@ -310,15 +311,15 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
             // No buraco o quadro anterior não pode ficar à mostra: ali o vídeo
             // vai ser preto de verdade, e mostrar a imagem velha mentiria sobre
             // o que vai sair.
-            if (vivo && !naTelaPreta) _comTransicao(VideoPlayer(c)),
-            if (_veu() case final veu?)
+            if (vivo && !naTelaPreta) _withTransition(VideoPlayer(c)),
+            if (_veil() case final veil?)
               IgnorePointer(
                 child: ColoredBox(
-                  key: const Key('veu-da-transicao'),
-                  color: veu,
+                  key: const Key('transition-veil'),
+                  color: veil,
                 ),
               ),
-            if (transicaoEm(widget.cuts, widget.atS) case final tr?)
+            if (transitionAt(widget.cuts, widget.atS) case final tr?)
               Positioned(
                 left: 8,
                 top: 8,
@@ -334,8 +335,8 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                         vertical: 2,
                       ),
                       child: Text(
-                        TipoDeTransicao.de(tr.kind)?.nome ?? tr.kind,
-                        key: const Key('selo-da-transicao'),
+                        TransitionType.of(tr.kind)?.name ?? tr.kind,
+                        key: const Key('transition-badge'),
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: Colors.white,
                         ),
@@ -388,15 +389,15 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                       ? null
                       : (x, y) => widget.onMoverTexto!(t.id, x, y),
                   onArrastando: widget.onArrastando,
-                  editando: widget.editando == t.id,
-                  onEditar: widget.onEditar == null
+                  editing: widget.editingId == t.id,
+                  onEditing: widget.onEditing == null
                       ? null
-                      : (sim) => widget.onEditar!(sim ? t.id : null),
-                  onEscrever: widget.onEscrever == null
+                      : (on) => widget.onEditing!(on ? t.id : null),
+                  onTextChanged: widget.onTextChanged == null
                       ? null
-                      : (v) => widget.onEscrever!(t.id, v),
-                  onGestoInicio: widget.onGestoInicio,
-                  onGestoFim: widget.onGestoFim,
+                      : (v) => widget.onTextChanged!(t.id, v),
+                  onGestureStart: widget.onGestureStart,
+                  onGestureEnd: widget.onGestureEnd,
                 ),
 
             if (_erro != null)
@@ -446,9 +447,10 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
 /// Uma frase desenhada sobre o monitor, e arrastável.
 ///
 /// Arrastar aqui é o jeito natural de dizer onde o texto fica: a alternativa
-/// era digitar dois números e gerar o vídeo para conferir. E é aqui também que
-/// se escreve: tocar na frase já escolhida abre a edição no próprio quadro, no
-/// tamanho e na cor em que ela vai sair.
+/// era digitar dois números e gerar o vídeo para conferir.
+///
+/// It is also where text is typed: tapping the already selected text opens
+/// editing on the frame itself, at the size and colour it will come out in.
 class _TextoNoQuadro extends StatefulWidget {
   const _TextoNoQuadro({
     super.key,
@@ -457,11 +459,11 @@ class _TextoNoQuadro extends StatefulWidget {
     required this.onEscolher,
     required this.onMover,
     required this.onArrastando,
-    this.editando = false,
-    this.onEditar,
-    this.onEscrever,
-    this.onGestoInicio,
-    this.onGestoFim,
+    this.editing = false,
+    this.onEditing,
+    this.onTextChanged,
+    this.onGestureStart,
+    this.onGestureEnd,
   });
 
   final TimelineClip clip;
@@ -469,11 +471,11 @@ class _TextoNoQuadro extends StatefulWidget {
   final VoidCallback onEscolher;
   final void Function(double x, double y)? onMover;
   final ValueChanged<String?>? onArrastando;
-  final bool editando;
-  final ValueChanged<bool>? onEditar;
-  final ValueChanged<String>? onEscrever;
-  final VoidCallback? onGestoInicio;
-  final VoidCallback? onGestoFim;
+  final bool editing;
+  final ValueChanged<bool>? onEditing;
+  final ValueChanged<String>? onTextChanged;
+  final VoidCallback? onGestureStart;
+  final VoidCallback? onGestureEnd;
 
   @override
   State<_TextoNoQuadro> createState() => _TextoNoQuadroState();
@@ -491,70 +493,71 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
   double _x0 = 0;
   double _y0 = 0;
 
-  late final TextEditingController _campo = TextEditingController(
+  late final TextEditingController _controller = TextEditingController(
     text: widget.clip.text,
   );
 
-  /// O foco do campo, pedido à mão.
+  /// The field's focus, requested by hand.
   ///
-  /// `autofocus` não basta: ele só vale quando **nada** na tela tem foco, e o
-  /// editor mantém o foco no nó dos atalhos quase o tempo todo. O campo abria
-  /// sem teclado, e as letras iam para os atalhos — "s" dividia o corte.
-  late final FocusNode _foco = FocusNode(debugLabel: 'texto no quadro')
-    ..addListener(_focoMudou);
+  /// `autofocus` is not enough: it only applies when **nothing** on screen has
+  /// focus, and the editor keeps focus on the shortcuts node almost all the
+  /// time. The field opened with no keyboard, and keys went to the shortcuts —
+  /// "s" split the clip.
+  late final FocusNode _focusNode = FocusNode(debugLabel: 'text on frame')
+    ..addListener(_onFocusChange);
 
-  /// O que estava escrito quando a edição abriu: apagar tudo e sair devolve
-  /// isto, porque texto vazio não é um texto que o servidor desenhe.
-  String _antes = '';
+  /// What was written when editing opened: clearing everything and leaving
+  /// restores it, because empty text is not text the server draws.
+  String _before = '';
 
   @override
   void initState() {
     super.initState();
-    if (widget.editando) _abriu();
+    if (widget.editing) _opened();
   }
 
   @override
   void didUpdateWidget(_TextoNoQuadro old) {
     super.didUpdateWidget(old);
-    if (widget.editando && !old.editando) _abriu();
-    // desfazer, ou outra tela, mudou o texto por fora: o campo acompanha
-    if (!widget.editando && _campo.text != widget.clip.text) {
-      _campo.text = widget.clip.text;
+    if (widget.editing && !old.editing) _opened();
+    // undo, or another screen, changed the text from outside: the field follows
+    if (!widget.editing && _controller.text != widget.clip.text) {
+      _controller.text = widget.clip.text;
     }
   }
 
   @override
   void dispose() {
-    _foco.dispose();
-    _campo.dispose();
+    _focusNode.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
-  /// Perder o foco por qualquer caminho fecha a escrita: um campo aberto e sem
-  /// teclado é o pior dos dois mundos.
-  void _focoMudou() {
-    if (!_foco.hasFocus && widget.editando) _terminar();
+  /// Losing focus by any route closes editing: an open field with no keyboard
+  /// is the worst of both worlds.
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus && widget.editing) _finish();
   }
 
-  void _abriu() {
-    _antes = widget.clip.text;
-    _campo.value = TextEditingValue(
+  void _opened() {
+    _before = widget.clip.text;
+    _controller.value = TextEditingValue(
       text: widget.clip.text,
       selection: TextSelection(
         baseOffset: 0,
         extentOffset: widget.clip.text.length,
       ),
     );
-    // o campo só existe depois deste quadro
+    // the field only exists after this frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.editando) _foco.requestFocus();
+      if (mounted && widget.editing) _focusNode.requestFocus();
     });
   }
 
-  void _terminar() {
-    if (!widget.editando) return;
-    if (_campo.text.trim().isEmpty) widget.onEscrever?.call(_antes);
-    widget.onEditar?.call(false);
+  void _finish() {
+    if (!widget.editing) return;
+    if (_controller.text.trim().isEmpty) widget.onTextChanged?.call(_before);
+    widget.onEditing?.call(false);
   }
 
   @override
@@ -580,21 +583,21 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
             // (dedo rápido, ou um teste) não produz update nenhum — a frase
             // não saía do lugar
             dragStartBehavior: DragStartBehavior.down,
-            onTap: widget.editando
+            onTap: widget.editing
                 ? null
-                : widget.escolhido && widget.onEditar != null
-                ? () => widget.onEditar!(true)
+                : widget.escolhido && widget.onEditing != null
+                ? () => widget.onEditing!(true)
                 : widget.onEscolher,
-            onPanStart: widget.onMover == null || widget.editando
+            onPanStart: widget.onMover == null || widget.editing
                 ? null
                 : (_) {
                     widget.onEscolher();
-                    widget.onGestoInicio?.call();
+                    widget.onGestureStart?.call();
                     _andou = Offset.zero;
                     _x0 = t.x;
                     _y0 = t.y;
                   },
-            onPanUpdate: widget.onMover == null || widget.editando
+            onPanUpdate: widget.onMover == null || widget.editing
                 ? null
                 : (d) {
                     _andou += d.delta;
@@ -612,12 +615,12 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                     );
                     widget.onMover!(x, y);
                   },
-            onPanEnd: widget.onMover == null || widget.editando
+            onPanEnd: widget.onMover == null || widget.editing
                 ? null
                 : (_) {
                     _andou = Offset.zero;
                     widget.onArrastando?.call(null);
-                    widget.onGestoFim?.call();
+                    widget.onGestureEnd?.call();
                   },
             child: Container(
               // a chave fica na frase, e não na área do quadro: é nela que se
@@ -632,17 +635,17 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                       ),
                     )
                   : null,
-              child: widget.editando
+              child: widget.editing
                   ? IntrinsicWidth(
                       child: TextField(
-                        key: ValueKey('escrevendo-${widget.clip.id}'),
-                        controller: _campo,
-                        focusNode: _foco,
+                        key: ValueKey('typing-${widget.clip.id}'),
+                        controller: _controller,
+                        focusNode: _focusNode,
                         textAlign: TextAlign.center,
                         cursorColor: cor,
-                        onChanged: widget.onEscrever,
-                        onSubmitted: (_) => _terminar(),
-                        onTapOutside: (_) => _terminar(),
+                        onChanged: widget.onTextChanged,
+                        onSubmitted: (_) => _finish(),
+                        onTapOutside: (_) => _finish(),
                         decoration: const InputDecoration.collapsed(
                           hintText: '',
                         ),
@@ -651,9 +654,9 @@ class _TextoNoQuadroState extends State<_TextoNoQuadro> {
                           fontWeight: FontWeight.bold,
                           height: 1.1,
                           color: cor,
-                          // o contorno de verdade é um segundo texto por
-                          // baixo, e um campo não tem como desenhar dois; a
-                          // sombra o imita o bastante para ler o que se digita
+                          // the real outline is a second text underneath, and a
+                          // field cannot draw two; the shadow imitates it well
+                          // enough to read what is being typed
                           shadows: contorno > 0
                               ? [
                                   for (final d in const [

@@ -634,43 +634,43 @@ void main() {
     });
   });
 
-  group('transição no monitor', () {
-    TimelineClip bloco(double at, double dur, {ClipTransition? tr}) =>
+  group('transition on the monitor', () {
+    TimelineClip clip(double at, double dur, {ClipTransition? tr}) =>
         TimelineClip(atS: at, durationS: dur, startS: 10, transition: tr);
 
-    test('acontece no começo do bloco que entra, pelo tempo dela', () {
+    test('happens at the start of the incoming clip, for its duration', () {
       final cuts = [
-        bloco(0, 2),
-        bloco(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
+        clip(0, 2),
+        clip(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
       ];
 
-      expect(transicaoEm(cuts, 1.9), isNull);
-      final meio = transicaoEm(cuts, 2.5)!;
-      expect(meio.kind, 'dissolve');
-      expect(meio.p, closeTo(0.5, 1e-9));
-      expect(meio.saindo, isFalse);
-      expect(transicaoEm(cuts, 3.1), isNull);
+      expect(transitionAt(cuts, 1.9), isNull);
+      final middle = transitionAt(cuts, 2.5)!;
+      expect(middle.kind, 'dissolve');
+      expect(middle.p, closeTo(0.5, 1e-9));
+      expect(middle.leaving, isFalse);
+      expect(transitionAt(cuts, 3.1), isNull);
     });
 
-    test('o mergulho começa antes do corte, no bloco que sai', () {
+    test('a dip starts before the cut, on the outgoing clip', () {
       final cuts = [
-        bloco(0, 2),
-        bloco(2, 2, tr: const ClipTransition(kind: 'fade_black', durationS: 1)),
+        clip(0, 2),
+        clip(2, 2, tr: const ClipTransition(kind: 'fade_black', durationS: 1)),
       ];
 
-      expect(transicaoEm(cuts, 1.4), isNull);
-      final saindo = transicaoEm(cuts, 1.75)!;
-      expect(saindo.saindo, isTrue);
-      expect(saindo.p, closeTo(0.5, 1e-9));
+      expect(transitionAt(cuts, 1.4), isNull);
+      final leaving = transitionAt(cuts, 1.75)!;
+      expect(leaving.leaving, isTrue);
+      expect(leaving.p, closeTo(0.5, 1e-9));
     });
 
-    test('o dissolver não começa antes do corte', () {
-      // nele o bloco de antes não muda nada: é o novo que aparece por cima
+    test('a dissolve does not start before the cut', () {
+      // the previous clip does not change in it: the new one shows over it
       final cuts = [
-        bloco(0, 2),
-        bloco(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
+        clip(0, 2),
+        clip(2, 2, tr: const ClipTransition(kind: 'dissolve', durationS: 1)),
       ];
-      expect(transicaoEm(cuts, 1.75), isNull);
+      expect(transitionAt(cuts, 1.75), isNull);
     });
   });
 }

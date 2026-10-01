@@ -114,12 +114,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// arrasto está fazendo em pixels.
   String? _arrastando;
 
-  /// O clipe de texto sendo escrito no próprio monitor, se algum.
-  String? _editandoTexto;
+  /// The text clip being typed on the monitor itself, if any.
+  String? _editingTextId;
 
-  /// A duração que a próxima transição vai ter. Fica na tela, e não no bloco,
-  /// para quem põe a mesma transição em vários cortes não ajustá-la em cada um.
-  double _duracaoTransicao = 0.5;
+  /// The duration the next transition gets. It lives on the screen, not on the
+  /// clip, so applying the same transition to several cuts needs no
+  /// adjustment on each one.
+  double _transitionDuration = 0.5;
 
   /// Altura do monitor, arrastável pela alça abaixo dele.
   double _monitorH = 200;
@@ -1391,18 +1392,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (mounted) _foco.requestFocus();
   }
 
-  /// Abre (id) ou fecha (`null`) a escrita no monitor.
+  /// Opens (id) or closes (`null`) typing on the monitor.
   ///
-  /// Tudo o que se digita numa abertura vira **um** passo do desfazer: tecla a
-  /// tecla, Ctrl+Z apagaria uma letra por vez.
-  void _escreverNoQuadro(String? id) {
-    if (id == _editandoTexto) return;
-    if (_editandoTexto != null) _historia.fecharGesto();
+  /// Everything typed in one opening becomes **one** undo step: keystroke by
+  /// keystroke, Ctrl+Z would erase one letter at a time.
+  void _typeOnFrame(String? id) {
+    if (id == _editingTextId) return;
+    if (_editingTextId != null) _historia.fecharGesto();
     if (id != null) {
       _historia.abrirGesto();
       _pausar();
     }
-    setState(() => _editandoTexto = id);
+    setState(() => _editingTextId = id);
     if (id != null) _semHistorico(_estado.copyWith(selecao: {id}));
     if (id == null) _devolverOFoco();
   }
@@ -1629,12 +1630,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
     child: Column(
       children: [
         const TabBar(
-          // três abas em 300px: o rótulo inteiro não caberia lado a lado
+          // three tabs in 300px: full labels would not fit side by side
           labelPadding: EdgeInsets.symmetric(horizontal: 4),
           tabs: [
             Tab(text: 'Momentos'),
             Tab(text: 'Biblioteca'),
-            Tab(text: 'Transições'),
+            Tab(text: 'Transitions'),
           ],
         ),
         Expanded(
@@ -1642,7 +1643,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             children: [
               _momentos(encaixado: false),
               _biblioteca_(encaixado: false),
-              _transicoes(encaixado: false),
+              _transitions(docked: false),
             ],
           ),
         ),
@@ -1650,47 +1651,48 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
-  Widget _transicoes({required bool encaixado}) {
-    final escolhidos = [
+  Widget _transitions({required bool docked}) {
+    final selected = [
       for (final id in _estado.selecao)
         if (_estado.clipe(id) case final c?)
-          if (!_ehSom(id)) c,
+          if (!_isAudioClip(id)) c,
     ];
-    return _Transicoes(
-      escolhidos: escolhidos,
-      duracao: _duracaoTransicao,
+    return _Transitions(
+      selected: selected,
+      duration: _transitionDuration,
       enabled: !_enviando,
-      encaixado: encaixado,
-      onAplicar: (kind) => _editar(
-        aplicarTransicao(_estado, [
-          for (final c in escolhidos) c.id,
-        ], ClipTransition(kind: kind, durationS: _duracaoTransicao)),
+      docked: docked,
+      onApply: (kind) => _editar(
+        applyTransition(_estado, [
+          for (final c in selected) c.id,
+        ], ClipTransition(kind: kind, durationS: _transitionDuration)),
       ),
-      onTirar: () => _editar(
-        aplicarTransicao(_estado, [for (final c in escolhidos) c.id], null),
+      onClear: () => _editar(
+        applyTransition(_estado, [for (final c in selected) c.id], null),
       ),
-      onDuracao: (d) {
-        setState(() => _duracaoTransicao = d);
-        // quem já tem transição acompanha o ajuste: é o bloco que se está
-        // olhando, e mexer no controle sem mudar nada nele seria estranho
+      onDuration: (d) {
+        setState(() => _transitionDuration = d);
+        // clips that already have a transition follow the adjustment: it is
+        // the clip being looked at, and moving the control without changing
+        // it would be odd
         var s = _estado;
-        for (final c in escolhidos) {
+        for (final c in selected) {
           final t = c.transition;
           if (t != null) {
-            s = aplicarTransicao(s, [c.id], t.copyWith(durationS: d));
+            s = applyTransition(s, [c.id], t.copyWith(durationS: d));
           }
         }
         _editar(s);
       },
-      onGestoInicio: _historia.abrirGesto,
-      onGestoFim: _historia.fecharGesto,
+      onGestureStart: _historia.abrirGesto,
+      onGestureEnd: _historia.fecharGesto,
     );
   }
 
-  /// O bloco mora numa camada de som?
-  bool _ehSom(String id) {
-    final onde = _estado.localizar(id);
-    return onde != null && _estado.layers[onde.$1].isAudio;
+  /// Does the clip live on an audio layer?
+  bool _isAudioClip(String id) {
+    final where = _estado.localizar(id);
+    return where != null && _estado.layers[where.$1].isAudio;
   }
 
   Widget _biblioteca_({required bool encaixado}) => _Biblioteca(
@@ -1719,13 +1721,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final preto = duracaoEmPreto(_estado.clips);
     final selecao = _estado.selecao;
 
-    // O monitor, o transporte e a régua ficam presos no topo; só os painéis de
-    // baixo rolam. Rolar até o fim da tela para mexer num efeito e perder de
-    // vista o vídeo e a régua era editar às cegas.
+    // The monitor, transport and ruler stay pinned at the top; only the panels
+    // below scroll. Scrolling to the bottom to adjust an effect and losing
+    // sight of the video and the ruler was editing blind.
     //
-    // Numa janela baixa a parte fixa tomaria a tela inteira: passou de 70% da
-    // altura, ela mesma rola, e os painéis continuam ao alcance.
-    final fixo = <Widget>[
+    // In a short window the pinned part would take the whole screen: past 70%
+    // of the height it scrolls by itself, and the panels stay within reach.
+    final pinned = <Widget>[
       const SizedBox(height: 8),
       // ── o monitor, com a alça de altura ─────────────────────────────────
       if (widget.job.monitorUrl != null) ...[
@@ -1749,12 +1751,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 onMoverTexto: (id, x, y) =>
                     _editar(posicionarNoQuadro(_estado, id, x: x, y: y)),
                 onArrastando: (t) => setState(() => _arrastando = t),
-                editando: _editandoTexto,
-                onEditar: _escreverNoQuadro,
-                onEscrever: (id, v) =>
+                editingId: _editingTextId,
+                onEditing: _typeOnFrame,
+                onTextChanged: (id, v) =>
                     _editar(trocarTexto(_estado, id, texto: v)),
-                onGestoInicio: _historia.abrirGesto,
-                onGestoFim: _historia.fecharGesto,
+                onGestureStart: _historia.abrirGesto,
+                onGestureEnd: _historia.fecharGesto,
               ),
             ),
           ),
@@ -1934,7 +1936,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SizedBox(height: 4),
     ];
 
-    final rolante = <Widget>[
+    final scrolling = <Widget>[
       if (selecao.length == 1) ...[
         const SizedBox(height: 8),
         Padding(
@@ -1950,7 +1952,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onReverse: (v) => _efeito(selecao.first, reverse: v),
             onEstilo: (v) =>
                 _editar(trocarTexto(_estado, selecao.first, estilo: v)),
-            onEscreverNoQuadro: () => _escreverNoQuadro(selecao.first),
+            onTypeOnFrame: () => _typeOnFrame(selecao.first),
             onDuracao: (d) => _esticar(selecao.first, d),
             onDeslocar: (d) => _deslocar(selecao.first, d),
             onParaOCursor: () => _mover(selecao.first, _cursor),
@@ -2019,7 +2021,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         const SizedBox(height: 18),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _transicoes(encaixado: true),
+          child: _transitions(docked: true),
         ),
       ],
 
@@ -2070,8 +2072,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         'cabeça de leitura estiver.'
                   // um bloco de música não é um corte: quem conta cortes
                   // quer saber quantas cenas o vídeo tem
-                  // um bloco coberto no meio vira dois pedaços no monitor,
-                  // mas continua sendo um corte
+                  // a clip covered in the middle becomes two pieces on the
+                  // monitor, but it is still one cut
                   : '${{for (final c in _estado.clipesVisiveis) c.id}.length} corte(s)'
                         '${_temMusica ? '  ·  com música' : ''}'
                         '  ·  vídeo de ${formatDuration(duracao)}'
@@ -2124,24 +2126,24 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ];
 
     return LayoutBuilder(
-      builder: (context, caixa) => Column(
+      builder: (context, box) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: caixa.maxHeight * 0.7),
+            constraints: BoxConstraints(maxHeight: box.maxHeight * 0.7),
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: fixo,
+                children: pinned,
               ),
             ),
           ),
           const Divider(height: 1),
           Expanded(
             child: ListView(
-              key: const Key('paineis-da-montagem'),
+              key: const Key('montage-panels'),
               padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
-              children: rolante,
+              children: scrolling,
             ),
           ),
         ],
@@ -2492,7 +2494,7 @@ class _BlocoSelecionado extends StatelessWidget {
     required this.onFreeze,
     required this.onReverse,
     required this.onEstilo,
-    required this.onEscreverNoQuadro,
+    required this.onTypeOnFrame,
   });
 
   final TimelineClip cut;
@@ -2518,8 +2520,8 @@ class _BlocoSelecionado extends StatelessWidget {
   final ValueChanged<bool> onReverse;
   final ValueChanged<ClipTextStyle> onEstilo;
 
-  /// Abre a escrita no monitor, em cima do vídeo.
-  final VoidCallback onEscreverNoQuadro;
+  /// Opens typing on the monitor, over the video.
+  final VoidCallback onTypeOnFrame;
 
   @override
   Widget build(BuildContext context) {
@@ -2636,7 +2638,7 @@ class _BlocoSelecionado extends StatelessWidget {
               _TextoDoClipe(
                 cut: cut,
                 onEstilo: onEstilo,
-                onEscreverNoQuadro: onEscreverNoQuadro,
+                onTypeOnFrame: onTypeOnFrame,
               ),
             // um bloco de música não desenha nada: zoom, cor e congelar não
             // teriam sobre o que agir
@@ -2689,115 +2691,118 @@ class _Passo extends StatelessWidget {
 ///
 /// Um momento não se gasta ao ser usado: o item continua ali, marcado, porque
 /// o mesmo instante pode entrar duas vezes na mesma montagem.
-/// As transições: como o bloco escolhido entra sobre o anterior.
-class _Transicoes extends StatelessWidget {
-  const _Transicoes({
-    required this.escolhidos,
-    required this.duracao,
+/// Transitions: how the selected clip enters over the previous one.
+class _Transitions extends StatelessWidget {
+  const _Transitions({
+    required this.selected,
+    required this.duration,
     required this.enabled,
-    required this.encaixado,
-    required this.onAplicar,
-    required this.onTirar,
-    required this.onDuracao,
-    required this.onGestoInicio,
-    required this.onGestoFim,
+    required this.docked,
+    required this.onApply,
+    required this.onClear,
+    required this.onDuration,
+    required this.onGestureStart,
+    required this.onGestureEnd,
   });
 
-  /// Os blocos de imagem escolhidos na régua — é neles que a transição entra.
-  final List<TimelineClip> escolhidos;
-  final double duracao;
+  /// The picture clips selected on the ruler — the transition goes on them.
+  final List<TimelineClip> selected;
+  final double duration;
   final bool enabled;
-  final bool encaixado;
-  final ValueChanged<String> onAplicar;
-  final VoidCallback onTirar;
-  final ValueChanged<double> onDuracao;
-  final VoidCallback onGestoInicio;
-  final VoidCallback onGestoFim;
+
+  /// `true` when the list lives inside the main column (narrow screen) and so
+  /// cannot scroll on its own.
+  final bool docked;
+  final ValueChanged<String> onApply;
+  final VoidCallback onClear;
+  final ValueChanged<double> onDuration;
+  final VoidCallback onGestureStart;
+  final VoidCallback onGestureEnd;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final pode = enabled && escolhidos.isNotEmpty;
-    // a que todos os escolhidos têm em comum, para acender na lista
-    final kinds = {for (final c in escolhidos) c.transition?.kind};
-    final atual = kinds.length == 1 ? kinds.single : null;
-    final algumaTem = escolhidos.any((c) => c.transition != null);
+    final canApply = enabled && selected.isNotEmpty;
+    // the one all selected clips share, to highlight in the list
+    final kinds = {for (final c in selected) c.transition?.kind};
+    final current = kinds.length == 1 ? kinds.single : null;
+    final anyHasOne = selected.any((c) => c.transition != null);
 
-    final cabecalho = Padding(
-      padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 12, 14, 4),
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 12, 14, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Transições', style: theme.textTheme.titleSmall),
+          Text('Transitions', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
-            escolhidos.isEmpty
-                ? 'Escolha um bloco na régua: a transição vale para a '
-                      'entrada dele, na emenda com o bloco anterior.'
-                : escolhidos.length == 1
-                ? 'Toque numa transição para a entrada do bloco escolhido.'
-                : 'Toque numa transição para a entrada dos '
-                      '${escolhidos.length} blocos escolhidos.',
+            selected.isEmpty
+                ? 'Pick a clip on the ruler: the transition applies to its '
+                      'entrance, at the cut with the previous clip.'
+                : selected.length == 1
+                ? 'Tap a transition for the selected clip\'s entrance.'
+                : 'Tap a transition for the entrance of the '
+                      '${selected.length} selected clips.',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ],
       ),
     );
 
-    final controles = Padding(
-      padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 0, 14, 0),
+    final controls = Padding(
+      padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 0, 14, 0),
       child: Row(
         children: [
-          const Text('Duração'),
+          const Text('Duration'),
           Expanded(
             child: Slider(
-              key: const Key('duracao-da-transicao'),
-              value: duracao,
+              key: const Key('transition-duration'),
+              value: duration,
               min: ClipTransition.minS,
               max: 2,
               divisions: 19,
-              label: '${duracao.toStringAsFixed(1)}s',
-              onChangeStart: (_) => onGestoInicio(),
-              onChangeEnd: (_) => onGestoFim(),
-              onChanged: enabled ? onDuracao : null,
+              label: '${duration.toStringAsFixed(1)}s',
+              onChangeStart: (_) => onGestureStart(),
+              onChangeEnd: (_) => onGestureEnd(),
+              onChanged: enabled ? onDuration : null,
             ),
           ),
-          Text('${duracao.toStringAsFixed(1)}s'),
+          Text('${duration.toStringAsFixed(1)}s'),
         ],
       ),
     );
 
-    final itens = [
-      for (final t in TipoDeTransicao.todos)
+    final items = [
+      for (final t in TransitionType.all)
         ListTile(
-          key: ValueKey('transicao-${t.kind}'),
+          key: ValueKey('transition-${t.kind}'),
           dense: true,
-          enabled: pode,
-          selected: atual == t.kind,
-          contentPadding: EdgeInsets.symmetric(horizontal: encaixado ? 0 : 14),
-          leading: Icon(t.icone),
-          title: Text(t.nome),
-          subtitle: Text(t.descricao),
-          onTap: () => onAplicar(t.kind),
+          enabled: canApply,
+          selected: current == t.kind,
+          contentPadding: EdgeInsets.symmetric(horizontal: docked ? 0 : 14),
+          leading: Icon(t.icon),
+          title: Text(t.name),
+          subtitle: Text(t.description),
+          onTap: () => onApply(t.kind),
         ),
       Padding(
-        padding: EdgeInsets.fromLTRB(encaixado ? 0 : 8, 4, 8, 12),
+        padding: EdgeInsets.fromLTRB(docked ? 0 : 8, 4, 8, 12),
         child: TextButton.icon(
-          key: const Key('sem-transicao'),
-          onPressed: pode && algumaTem ? onTirar : null,
+          key: const Key('no-transition'),
+          onPressed: canApply && anyHasOne ? onClear : null,
           icon: const Icon(Icons.content_cut, size: 18),
-          label: const Text('Corte seco (sem transição)'),
+          label: const Text('Hard cut (no transition)'),
         ),
       ),
     ];
 
-    if (encaixado) {
+    if (docked) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [cabecalho, controles, ...itens],
+        children: [header, controls, ...items],
       );
     }
-    return ListView(children: [cabecalho, controles, ...itens]);
+    return ListView(children: [header, controls, ...items]);
   }
 }
 
@@ -4007,18 +4012,18 @@ class _LinhaDeOpcoes extends StatelessWidget {
   }
 }
 
-/// Como um clipe de texto aparece. **O que** está escrito se edita no próprio
-/// monitor, em cima do vídeo: lá se vê o tamanho, a cor e o lugar de verdade.
+/// How a text clip looks. **What** it says is edited on the monitor itself,
+/// over the video: that is where the real size, colour and position show.
 class _TextoDoClipe extends StatelessWidget {
   const _TextoDoClipe({
     required this.cut,
     required this.onEstilo,
-    required this.onEscreverNoQuadro,
+    required this.onTypeOnFrame,
   });
 
   final TimelineClip cut;
   final ValueChanged<ClipTextStyle> onEstilo;
-  final VoidCallback onEscreverNoQuadro;
+  final VoidCallback onTypeOnFrame;
 
   /// As cores que servem a um rótulo sobre gameplay. Uma paleta pequena vale
   /// mais que um seletor: o que importa é o texto aparecer.
@@ -4040,13 +4045,13 @@ class _TextoDoClipe extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextButton.icon(
-          key: const Key('escrever-no-quadro'),
-          onPressed: onEscreverNoQuadro,
+          key: const Key('type-on-frame'),
+          onPressed: onTypeOnFrame,
           icon: const Icon(Icons.edit, size: 18),
-          label: const Text('Escrever no vídeo'),
+          label: const Text('Type on the video'),
         ),
         Text(
-          'Ou toque no texto, no vídeo, depois de escolhê-lo.',
+          'Or tap the text on the video once it is selected.',
           style: Theme.of(
             context,
           ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),

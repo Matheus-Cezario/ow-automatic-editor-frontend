@@ -77,7 +77,7 @@ class _JobsScreenState extends State<JobsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Partidas'),
+        title: const Text('Matches'),
         actions: [
           IconButton(
             onPressed: _refresh,

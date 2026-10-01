@@ -306,28 +306,29 @@ void main() {
       // o preview não compõe: ele mostra um quadro, e o que vale é o que o
       // servidor vai desenhar por último
       final s = estadoEmCamadas([corte(0, 4, t: 10)], [corte(1, 1, t: 50)]);
-      final debaixo = s.layers[0].clips.single;
+      final below = s.layers[0].clips.single;
 
-      final visiveis = s.clipesVisiveis;
-      expect(visiveis, hasLength(3));
-      expect(visiveis[1].sourceT, 50, reason: 'onde se cobrem, vale a de cima');
+      final visible = s.clipesVisiveis;
+      expect(visible, hasLength(3));
+      expect(visible[1].sourceT, 50, reason: 'where they overlap, upper wins');
       expect(
-        origemEm(visiveis, 1.5),
+        origemEm(visible, 1.5),
         closeTo(50 - 1 * kMomentAnchor + 0.5, 1e-9),
       );
-      // antes e depois, a de baixo continua: ela só foi coberta no meio
-      expect(origemEm(visiveis, 0.5), closeTo(debaixo.startS + 0.5, 1e-9));
+      // before and after, the lower one carries on: it was only covered in
+      // the middle
+      expect(origemEm(visible, 0.5), closeTo(below.startS + 0.5, 1e-9));
       expect(
-        origemEm(visiveis, 3),
-        closeTo(debaixo.startS + 3, 1e-9),
-        reason: 'o pedaço de depois segue a gravação de onde ela estaria',
+        origemEm(visible, 3),
+        closeTo(below.startS + 3, 1e-9),
+        reason: 'the piece after follows the recording where it would be',
       );
-      expect({for (final v in visiveis) v.id}, hasLength(2));
+      expect({for (final v in visible) v.id}, hasLength(2));
     });
 
-    test('texto por cima não apaga o vídeo de baixo', () {
-      // o texto é desenhado por cima da imagem; quando ele acabava, o monitor
-      // ficava preto mesmo com o bloco de vídeo ainda correndo embaixo
+    test('text on top does not erase the video below', () {
+      // text is drawn over the picture; when it ended, the monitor went black
+      // even with the video clip still running underneath
       final s = estadoEmCamadas(
         [corte(0, 6, t: 10)],
         [
@@ -341,10 +342,10 @@ void main() {
         ],
       );
 
-      final visiveis = s.clipesVisiveis;
-      expect(visiveis.single.isText, isFalse);
+      final visible = s.clipesVisiveis;
+      expect(visible.single.isText, isFalse);
       for (final t in [0.5, 2.0, 4.0, 5.5]) {
-        expect(origemEm(visiveis, t), isNotNull, reason: 'preto em $t s');
+        expect(origemEm(visible, t), isNotNull, reason: 'black at $t s');
       }
     });
 
@@ -989,46 +990,46 @@ void main() {
     });
   });
 
-  group('transições', () {
-    const dissolver = ClipTransition(kind: 'dissolve', durationS: 0.5);
+  group('transitions', () {
+    const dissolve = ClipTransition(kind: 'dissolve', durationS: 0.5);
 
-    test('aplicar põe a entrada nos escolhidos, e só neles', () {
+    test('applying sets the entrance on the given clips, and only them', () {
       final s = estadoCom([corte(0, 2), corte(2, 2, t: 40)]);
       final [a, b] = s.clips;
 
-      final depois = aplicarTransicao(s, [b.id], dissolver);
+      final after = applyTransition(s, [b.id], dissolve);
 
-      expect(depois.clipe(b.id)!.transition, dissolver);
-      expect(depois.clipe(a.id)!.transition, isNull);
-      expect(s.clipe(b.id)!.transition, isNull, reason: 'o anterior ficou');
+      expect(after.clipe(b.id)!.transition, dissolve);
+      expect(after.clipe(a.id)!.transition, isNull);
+      expect(s.clipe(b.id)!.transition, isNull, reason: 'the old state stays');
     });
 
-    test('null tira', () {
+    test('null clears it', () {
       var s = estadoCom([corte(0, 2)]);
       final id = s.clips.single.id;
-      s = aplicarTransicao(s, [id], dissolver);
+      s = applyTransition(s, [id], dissolve);
 
-      expect(aplicarTransicao(s, [id], null).clipe(id)!.transition, isNull);
+      expect(applyTransition(s, [id], null).clipe(id)!.transition, isNull);
     });
 
-    test('camada travada não muda', () {
+    test('a locked layer does not change', () {
       var s = estadoCom([corte(0, 2)]);
       final id = s.clips.single.id;
       s = ajustarCamada(s, 0, locked: true);
 
-      expect(aplicarTransicao(s, [id], dissolver), same(s));
+      expect(applyTransition(s, [id], dissolve), same(s));
     });
 
-    test('dividir deixa a entrada só na metade da esquerda', () {
-      // a da direita continua de onde a outra parou: uma transição ali
-      // apareceria no meio da cena
+    test('splitting keeps the entrance on the left half only', () {
+      // the right half carries on where the other stopped: a transition there
+      // would show up mid-scene
       var s = estadoCom([corte(0, 4)]);
       final id = s.clips.single.id;
-      s = aplicarTransicao(s, [id], dissolver);
+      s = applyTransition(s, [id], dissolve);
 
-      final [esquerda, direita] = dividir(s, id, 2).clips;
-      expect(esquerda.transition, dissolver);
-      expect(direita.transition, isNull);
+      final [left, right] = dividir(s, id, 2).clips;
+      expect(left.transition, dissolve);
+      expect(right.transition, isNull);
     });
   });
 }

@@ -78,22 +78,22 @@ void main() {
   });
 
   group('ClipTransition', () {
-    test('vai e volta do servidor', () {
+    test('round-trips through the server format', () {
       const c = TimelineClip(
         atS: 0,
         durationS: 2,
         startS: 1,
         transition: ClipTransition(kind: 'dissolve', durationS: 0.8),
       );
-      final volta = TimelineClip.fromJson(c.toJson());
+      final back = TimelineClip.fromJson(c.toJson());
 
-      expect(volta.transition, c.transition);
-      expect(volta.simples, isFalse, reason: 'transição pede o grafo');
+      expect(back.transition, c.transition);
+      expect(back.simples, isFalse, reason: 'a transition needs the graph');
     });
 
-    test('nunca sai mais longa que o bloco', () {
-      // aparar o bloco depois de pôr a transição não pode deixar a montagem
-      // impossível de gerar: o servidor recusaria
+    test('is never sent longer than the clip', () {
+      // trimming the clip after setting the transition must not leave the
+      // montage impossible to render: the server would refuse it
       const c = TimelineClip(
         atS: 0,
         durationS: 0.4,
@@ -104,7 +104,7 @@ void main() {
       expect((c.toJson()['transition'] as Map)['duration_s'], 0.4);
     });
 
-    test('sem transição, o campo nem vai', () {
+    test('without a transition, the field is not sent', () {
       const c = TimelineClip(atS: 0, durationS: 1, startS: 0);
       expect(c.toJson().containsKey('transition'), isFalse);
       expect(TimelineClip.fromJson(c.toJson()).transition, isNull);

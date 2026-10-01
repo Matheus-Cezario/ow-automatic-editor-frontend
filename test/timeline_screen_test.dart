@@ -1010,177 +1010,175 @@ void main() {
     expect(find.textContaining('Não há'), findsOneWidget);
   });
 
-  group('escrever no vídeo', () {
-    TimelineClip texto(WidgetTester tester) => tester
+  group('typing on the video', () {
+    TimelineClip text(WidgetTester tester) => tester
         .widget<MusicTimeline>(find.byType(MusicTimeline))
         .layers
         .last
         .clips
         .single;
 
-    Future<void> comTexto(WidgetTester tester) async {
+    Future<void> withText(WidgetTester tester) async {
       await abrir(tester);
       await tester.tap(momento(30.0));
       await tester.pump();
       await escrever(tester, 'Texto livre');
     }
 
-    testWidgets('o painel não tem mais campo para o texto', (tester) async {
-      await comTexto(tester);
+    testWidgets('the panel no longer has a field for the text', (tester) async {
+      await withText(tester);
 
       expect(find.text('O que está escrito'), findsNothing);
-      expect(find.byKey(const Key('escrever-no-quadro')), findsOneWidget);
+      expect(find.byKey(const Key('type-on-frame')), findsOneWidget);
     });
 
-    testWidgets('tocar na frase escolhida escreve no próprio quadro', (
+    testWidgets('tapping the selected text types on the frame itself', (
       tester,
     ) async {
-      await comTexto(tester);
-      final id = texto(tester).id;
+      await withText(tester);
+      final id = text(tester).id;
 
-      // ela nasce escolhida: um toque já abre a escrita
+      // it is born selected: one tap opens typing
       await tester.tap(find.byKey(ValueKey('frase-$id')));
       await tester.pump();
-      final campo = find.byKey(ValueKey('escrevendo-$id'));
-      expect(campo, findsOneWidget);
+      final field = find.byKey(ValueKey('typing-$id'));
+      expect(field, findsOneWidget);
 
-      await tester.enterText(campo, 'GG');
+      await tester.enterText(field, 'GG');
       await tester.pump();
-      expect(texto(tester).text, 'GG');
+      expect(text(tester).text, 'GG');
 
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
-      expect(campo, findsNothing);
+      expect(field, findsNothing);
       expect(find.text('GG'), findsWidgets);
     });
 
-    /// O teclado está mesmo no campo? `enterText` escreve direto no
-    /// controlador e passaria mesmo com o foco em outro lugar — o defeito que
-    /// o usuário viu foi justamente esse: o campo aberto, e as teclas indo
-    /// para os atalhos da montagem.
-    bool tecladoNoCampo(WidgetTester tester, String id) {
+    /// Is the keyboard really on the field? `enterText` writes straight into
+    /// the controller and would pass with focus elsewhere — and the bug the
+    /// user saw was exactly that: the field open, and keys going to the
+    /// montage shortcuts.
+    bool keyboardOnField(WidgetTester tester, String id) {
       final ctx = FocusManager.instance.primaryFocus?.context;
       if (ctx == null) return false;
-      final campo = ctx.findAncestorWidgetOfExactType<TextField>();
-      return campo?.key == ValueKey('escrevendo-$id');
+      final field = ctx.findAncestorWidgetOfExactType<TextField>();
+      return field?.key == ValueKey('typing-$id');
     }
 
-    testWidgets('a escrita pega o teclado mesmo com a montagem em foco', (
+    testWidgets('typing takes the keyboard even with the montage focused', (
       tester,
     ) async {
-      await comTexto(tester);
-      final id = texto(tester).id;
-      // o estado normal da tela: o foco está na montagem, para os atalhos
-      // valerem — e é com ele lá que o `autofocus` do campo não fazia nada
+      await withText(tester);
+      final id = text(tester).id;
+      // the screen's normal state: focus on the montage, so shortcuts work —
+      // and with it there, the field's `autofocus` did nothing
       expect(FocusManager.instance.primaryFocus?.debugLabel, 'montagem');
 
       await tester.tap(find.byKey(ValueKey('frase-$id')));
       await tester.pump();
       await tester.pump();
-      expect(tecladoNoCampo(tester, id), isTrue);
+      expect(keyboardOnField(tester, id), isTrue);
 
-      // e de novo, pelo botão do painel, depois de sair da escrita
+      // and again, through the panel button, after leaving
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
-      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.tap(find.byKey(const Key('type-on-frame')));
       await tester.pump();
       await tester.pump();
-      expect(tecladoNoCampo(tester, id), isTrue);
+      expect(keyboardOnField(tester, id), isTrue);
 
-      // um atalho de uma tecla não pode roubar a letra: "s" dividiria o corte
-      final antes = cortes(tester).length;
+      // a one-key shortcut must not steal the letter: "s" would split the clip
+      final before = cortes(tester).length;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.pump();
-      expect(cortes(tester), hasLength(antes));
+      expect(cortes(tester), hasLength(before));
     });
 
-    testWidgets('o botão do painel abre a escrita no quadro', (tester) async {
-      await comTexto(tester);
-      final id = texto(tester).id;
+    testWidgets('the panel button opens typing on the frame', (tester) async {
+      await withText(tester);
+      final id = text(tester).id;
 
-      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.tap(find.byKey(const Key('type-on-frame')));
       await tester.pump();
 
-      expect(find.byKey(ValueKey('escrevendo-$id')), findsOneWidget);
+      expect(find.byKey(ValueKey('typing-$id')), findsOneWidget);
     });
 
-    testWidgets('apagar tudo e sair devolve o que estava escrito', (
+    testWidgets('clearing everything and leaving restores the text', (
       tester,
     ) async {
-      // texto vazio não é texto que o servidor desenhe
-      await comTexto(tester);
-      final id = texto(tester).id;
-      final antes = texto(tester).text;
+      // empty text is not text the server draws
+      await withText(tester);
+      final id = text(tester).id;
+      final before = text(tester).text;
 
-      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.tap(find.byKey(const Key('type-on-frame')));
       await tester.pump();
-      await tester.enterText(find.byKey(ValueKey('escrevendo-$id')), '  ');
+      await tester.enterText(find.byKey(ValueKey('typing-$id')), '  ');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
 
-      expect(texto(tester).text, antes);
+      expect(text(tester).text, before);
     });
 
-    testWidgets('uma escrita inteira é um passo só do desfazer', (
-      tester,
-    ) async {
-      await comTexto(tester);
-      final id = texto(tester).id;
-      final antes = texto(tester).text;
+    testWidgets('a whole typing session is a single undo step', (tester) async {
+      await withText(tester);
+      final id = text(tester).id;
+      final before = text(tester).text;
 
-      await tester.tap(find.byKey(const Key('escrever-no-quadro')));
+      await tester.tap(find.byKey(const Key('type-on-frame')));
       await tester.pump();
-      final campo = find.byKey(ValueKey('escrevendo-$id'));
-      for (final parcial in ['G', 'GG', 'GG W', 'GG WP']) {
-        await tester.enterText(campo, parcial);
+      final field = find.byKey(ValueKey('typing-$id'));
+      for (final partial in ['G', 'GG', 'GG W', 'GG WP']) {
+        await tester.enterText(field, partial);
         await tester.pump();
       }
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
-      expect(texto(tester).text, 'GG WP');
+      expect(text(tester).text, 'GG WP');
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
 
-      expect(texto(tester).text, antes);
+      expect(text(tester).text, before);
     });
   });
 
-  testWidgets('rolar os painéis não tira o monitor nem a régua da tela', (
+  testWidgets('scrolling the panels keeps the monitor and ruler on screen', (
     tester,
   ) async {
     await abrir(tester);
-    // uma janela baixa, em que os painéis não cabem e a tela tem de rolar
+    // a short window, where the panels do not fit and the screen must scroll
     await tester.binding.setSurfaceSize(const Size(1000, 900));
     await tester.pump();
     await tester.tap(momento(30.0));
     await tester.pump();
 
     final monitor = tester.getRect(find.byType(PreviewPlayer));
-    final regua = tester.getRect(find.byType(MusicTimeline));
+    final ruler = tester.getRect(find.byType(MusicTimeline));
 
     await tester.drag(
-      find.byKey(const Key('paineis-da-montagem')),
+      find.byKey(const Key('montage-panels')),
       const Offset(0, -600),
     );
     await tester.pump();
 
-    final rolou = tester
+    final scrolled = tester
         .state<ScrollableState>(
           find
               .descendant(
-                of: find.byKey(const Key('paineis-da-montagem')),
+                of: find.byKey(const Key('montage-panels')),
                 matching: find.byType(Scrollable),
               )
               .first,
         )
         .position
         .pixels;
-    expect(rolou, greaterThan(100), reason: 'os painéis rolaram de verdade');
+    expect(scrolled, greaterThan(100), reason: 'the panels really scrolled');
     expect(tester.getRect(find.byType(PreviewPlayer)), monitor);
-    expect(tester.getRect(find.byType(MusicTimeline)), regua);
+    expect(tester.getRect(find.byType(MusicTimeline)), ruler);
   });
 
   group('painel de saída', () {
@@ -2335,61 +2333,63 @@ void main() {
     });
   });
 
-  group('transições', () {
-    testWidgets('a aba fica na lateral, com momentos e biblioteca', (
+  group('transitions', () {
+    testWidgets('the tab sits in the sidebar, with moments and library', (
       tester,
     ) async {
       await abrir(tester);
 
       expect(find.widgetWithText(Tab, 'Momentos'), findsOneWidget);
       expect(find.widgetWithText(Tab, 'Biblioteca'), findsOneWidget);
-      expect(find.widgetWithText(Tab, 'Transições'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Transitions'), findsOneWidget);
     });
 
-    testWidgets('sem bloco escolhido, nada a aplicar', (tester) async {
+    testWidgets('with no clip selected, there is nothing to apply', (
+      tester,
+    ) async {
       await abrir(tester);
-      await aba(tester, 'Transições');
+      await aba(tester, 'Transitions');
 
-      expect(find.textContaining('Escolha um bloco'), findsOneWidget);
+      expect(find.textContaining('Pick a clip'), findsOneWidget);
       final tile = tester.widget<ListTile>(
-        find.byKey(const ValueKey('transicao-dissolve')),
+        find.byKey(const ValueKey('transition-dissolve')),
       );
       expect(tile.enabled, isFalse);
     });
 
-    testWidgets('tocar numa transição a põe na entrada do bloco escolhido', (
+    testWidgets('tapping a transition sets the selected clip\'s entrance', (
       tester,
     ) async {
       await abrir(tester);
       await tester.tap(momento(30.0));
       await tester.pump();
       final id = primeiroCorte(tester).id;
-      await aba(tester, 'Transições');
+      await aba(tester, 'Transitions');
 
-      await tester.tap(find.byKey(const ValueKey('transicao-fade_black')));
+      await tester.tap(find.byKey(const ValueKey('transition-fade_black')));
       await tester.pump();
 
       expect(primeiroCorte(tester).transition?.kind, 'fade_black');
       expect(primeiroCorte(tester).transition?.durationS, 0.5);
       expect(
-        find.byKey(ValueKey('transicao-no-bloco-$id')),
+        find.byKey(ValueKey('transition-on-clip-$id')),
         findsOneWidget,
-        reason: 'a régua mostra que o bloco tem entrada',
+        reason: 'the ruler shows the clip has an entrance',
       );
 
-      // e o corte seco tira
-      await tester.tap(find.byKey(const Key('sem-transicao')));
+      // and the hard cut clears it
+      await tester.tap(find.byKey(const Key('no-transition')));
       await tester.pump();
       expect(primeiroCorte(tester).transition, isNull);
-      expect(find.byKey(ValueKey('transicao-no-bloco-$id')), findsNothing);
+      expect(find.byKey(ValueKey('transition-on-clip-$id')), findsNothing);
     });
 
-    testWidgets('pôr a transição entra no desfazer', (tester) async {
+    testWidgets('setting a transition can be undone', (tester) async {
       await abrir(tester);
       await tester.tap(momento(30.0));
       await tester.pump();
-      await aba(tester, 'Transições');
-      await tester.tap(find.byKey(const ValueKey('transicao-dissolve')));
+      await aba(tester, 'Transitions');
+      await tester.tap(find.byKey(const ValueKey('transition-dissolve')));
       await tester.pump();
       expect(primeiroCorte(tester).transition, isNotNull);
 
@@ -2401,23 +2401,23 @@ void main() {
       expect(primeiroCorte(tester).transition, isNull);
     });
 
-    testWidgets('o monitor marca a transição enquanto ela acontece', (
+    testWidgets('the monitor marks the transition while it happens', (
       tester,
     ) async {
       await abrir(tester);
       await tester.tap(momento(30.0));
       await tester.pump();
-      await aba(tester, 'Transições');
-      await tester.tap(find.byKey(const ValueKey('transicao-fade_white')));
+      await aba(tester, 'Transitions');
+      await tester.tap(find.byKey(const ValueKey('transition-fade_white')));
       await tester.pump();
       final c = primeiroCorte(tester);
 
       await cursorEm(tester, c.atS + 0.1);
-      expect(find.byKey(const Key('selo-da-transicao')), findsOneWidget);
-      expect(find.byKey(const Key('veu-da-transicao')), findsOneWidget);
+      expect(find.byKey(const Key('transition-badge')), findsOneWidget);
+      expect(find.byKey(const Key('transition-veil')), findsOneWidget);
 
       await cursorEm(tester, c.atS + 2);
-      expect(find.byKey(const Key('selo-da-transicao')), findsNothing);
+      expect(find.byKey(const Key('transition-badge')), findsNothing);
     });
   });
 }

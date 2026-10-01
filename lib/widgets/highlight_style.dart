@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Cada tipo de vídeo gerado ganha um ícone, uma cor e um nome em português.
+/// Each kind of generated video gets an icon, a colour and a display name.
 /// Concentrado aqui para a lista, o detalhe e o player falarem a mesma língua.
 class HighlightStyle {
   const HighlightStyle(this.label, this.icon, this.color);
@@ -10,8 +10,9 @@ class HighlightStyle {
   final Color color;
 
   static const _map = <String, HighlightStyle>{
-    // tudo o que sai do editor. Os tipos por regra (rajada, dardos no alvo…)
-    // eram dos vídeos que o sistema montava sozinho, que não existem mais.
+    // everything that comes out of the editor. The rule-based kinds (kill
+    // streak, sleep darts…) belonged to videos the system assembled on its
+    // own, which no longer exist.
     'custom': HighlightStyle('Montagem', Icons.timeline, Color(0xFF7E57C2)),
   };
 
@@ -60,7 +61,8 @@ String nomeDaHabilidade(String ability) {
   final heroi = barra < 0 ? '' : ability.substring(0, barra);
   final nome = barra < 0 ? ability : ability.substring(barra + 1);
   String bonito(String s) => [
-    for (final palavra in s.replaceAll('-', ' ').replaceAll('_', ' ').split(' '))
+    for (final palavra
+        in s.replaceAll('-', ' ').replaceAll('_', ' ').split(' '))
       if (palavra.isNotEmpty)
         '${palavra[0].toUpperCase()}${palavra.substring(1)}',
   ].join(' ');
@@ -83,60 +85,55 @@ String formatClock(double seconds) {
       '${(s % 60).toString().padLeft(2, '0')}';
 }
 
-/// O que cada transição é, para a tela.
-class TipoDeTransicao {
-  const TipoDeTransicao(this.kind, this.nome, this.descricao, this.icone);
+/// What each transition is, for the screen.
+class TransitionType {
+  const TransitionType(this.kind, this.name, this.description, this.icon);
 
   final String kind;
-  final String nome;
-  final String descricao;
-  final IconData icone;
+  final String name;
+  final String description;
+  final IconData icon;
 
-  static const todos = [
-    TipoDeTransicao(
+  static const all = [
+    TransitionType(
       'dissolve',
-      'Dissolver',
-      'o novo aparece por cima do anterior',
+      'Dissolve',
+      'the new clip appears over the previous one',
       Icons.blur_on,
     ),
-    TipoDeTransicao(
+    TransitionType(
       'fade_black',
-      'Mergulho no preto',
-      'escurece e volta já no novo',
+      'Dip to black',
+      'goes dark and comes back on the new clip',
       Icons.brightness_3,
     ),
-    TipoDeTransicao(
+    TransitionType(
       'fade_white',
-      'Mergulho no branco',
-      'um clarão no corte',
+      'Dip to white',
+      'a flash at the cut',
       Icons.flare,
     ),
-    TipoDeTransicao(
+    TransitionType(
       'slide_left',
-      'Deslizar para a esquerda',
-      'entra pela direita',
+      'Slide left',
+      'comes in from the right',
       Icons.west,
     ),
-    TipoDeTransicao(
+    TransitionType(
       'slide_right',
-      'Deslizar para a direita',
-      'entra pela esquerda',
+      'Slide right',
+      'comes in from the left',
       Icons.east,
     ),
-    TipoDeTransicao(
-      'slide_up',
-      'Deslizar para cima',
-      'entra por baixo',
-      Icons.north,
-    ),
-    TipoDeTransicao(
+    TransitionType('slide_up', 'Slide up', 'comes in from below', Icons.north),
+    TransitionType(
       'slide_down',
-      'Deslizar para baixo',
-      'entra por cima',
+      'Slide down',
+      'comes in from above',
       Icons.south,
     ),
   ];
 
-  static TipoDeTransicao? de(String kind) =>
-      todos.where((t) => t.kind == kind).firstOrNull;
+  static TransitionType? of(String kind) =>
+      all.where((t) => t.kind == kind).firstOrNull;
 }

@@ -80,12 +80,12 @@ class MontageState {
   /// cobrem, o que vale é a de cima, que é o que o servidor vai desenhar por
   /// último.
   ///
-  /// O de cima só esconde o de baixo **no trecho em que os dois se cobrem**:
-  /// antes e depois dele, o de baixo volta a aparecer, como no vídeo final. Os
-  /// pedaços que sobram guardam o `id` do bloco de onde saíram.
+  /// The upper clip only hides the lower one **where the two overlap**: before
+  /// and after that, the lower one shows again, as in the final video. The
+  /// leftover pieces keep the `id` of the clip they came from.
   ///
-  /// Texto não entra: ele é uma tela transparente que o monitor desenha por
-  /// cima da imagem, e tratá-lo como bloco apagava o vídeo que está embaixo.
+  /// Text is left out: it is a transparent canvas the monitor draws over the
+  /// picture, and treating it as a clip erased the video underneath.
   List<TimelineClip> get clipesVisiveis {
     var visiveis = <TimelineClip>[];
     for (final l in layers) {
@@ -94,16 +94,16 @@ class MontageState {
       if (l.hidden || l.isAudio) continue;
       for (final c in l.clips) {
         if (c.isText) continue;
-        visiveis = [for (final v in visiveis) ..._foraDe(v, c)];
+        visiveis = [for (final v in visiveis) ..._outside(v, c)];
         visiveis.add(c);
       }
     }
     return visiveis..sort((a, b) => a.atS.compareTo(b.atS));
   }
 
-  /// O que sobra de [v] fora do intervalo que [c] cobre: nada, ele inteiro, ou
-  /// um pedaço de cada lado.
-  static List<TimelineClip> _foraDe(TimelineClip v, TimelineClip c) {
+  /// What is left of [v] outside the interval [c] covers: nothing, all of it,
+  /// or one piece on each side.
+  static List<TimelineClip> _outside(TimelineClip v, TimelineClip c) {
     const eps = 1e-6;
     if (c.atS >= v.untilS - eps || v.atS >= c.untilS - eps) return [v];
     return [
@@ -112,10 +112,10 @@ class MontageState {
         v.copyWith(
           atS: c.untilS,
           durationS: v.untilS - c.untilS,
-          semTransicao: true,
-          // o pedaço de depois começa mais adiante na fonte, na proporção da
-          // velocidade — senão a imagem pularia para trás ao reaparecer. Quadro
-          // congelado não anda: é o mesmo quadro dos dois lados
+          clearTransition: true,
+          // the piece after starts further into the source, in proportion to
+          // the speed — otherwise the picture would jump back when it shows
+          // again. A frozen frame does not move: same frame on both sides
           startS: v.freeze ? v.startS : v.startS + (c.untilS - v.atS) * v.speed,
         ),
     ];
@@ -506,33 +506,33 @@ MontageState trocarTexto(
   return s.comClipe(camada, i, c.copyWith(text: novo, textStyle: estilo));
 }
 
-/// Põe (ou tira, com `null`) a transição de entrada dos blocos [ids].
+/// Sets (or clears, with `null`) the entrance transition of clips [ids].
 ///
-/// Bloco de música não entra: transição é coisa de imagem. Camada travada
-/// também não, como em qualquer outra edição.
-MontageState aplicarTransicao(
+/// Music clips are skipped: a transition is about the picture. Locked layers
+/// are skipped too, as with any other edit.
+MontageState applyTransition(
   MontageState s,
   Iterable<String> ids,
-  ClipTransition? transicao,
+  ClipTransition? transition,
 ) {
-  var novo = s;
+  var result = s;
   for (final id in ids) {
-    final onde = novo.localizar(id);
-    if (onde == null) continue;
-    final (camada, i) = onde;
-    final l = novo.layers[camada];
+    final where = result.localizar(id);
+    if (where == null) continue;
+    final (layer, i) = where;
+    final l = result.layers[layer];
     if (l.isAudio || l.locked) continue;
     final c = l.clips[i];
-    if (c.transition == transicao) continue;
-    novo = novo.comClipe(
-      camada,
+    if (c.transition == transition) continue;
+    result = result.comClipe(
+      layer,
       i,
-      transicao == null
-          ? c.copyWith(semTransicao: true)
-          : c.copyWith(transition: transicao),
+      transition == null
+          ? c.copyWith(clearTransition: true)
+          : c.copyWith(transition: transition),
     );
   }
-  return novo;
+  return result;
 }
 
 /// O *punch*: a lente fecha rápido e afrouxa até o fim do clipe.
@@ -649,9 +649,10 @@ MontageState dividir(MontageState s, String id, double atS) {
     atS: atS,
     durationS: direita,
     startS: c.startS + esquerda,
-    // a entrada é do bloco original; a metade da direita continua de onde a
-    // outra parou, e uma transição ali apareceria do nada no meio da cena
-    semTransicao: true,
+    // the entrance belongs to the original clip; the right half carries on
+    // where the other stopped, and a transition there would come out of
+    // nowhere mid-scene
+    clearTransition: true,
   );
   final lista = [...s.layers[camada].clips]
     ..[i] = a

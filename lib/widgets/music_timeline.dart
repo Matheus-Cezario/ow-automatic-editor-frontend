@@ -976,9 +976,10 @@ class _BlockState extends State<_Block> {
                     ),
                   ),
 
-                // ── a entrada, quando ela não é um corte seco ──────────────
-                // Do tamanho que ela dura: é o trecho do bloco em que o
-                // anterior ainda aparece, e encaixá-la na batida pede vê-lo.
+                // ── the entrance, when it is not a hard cut ────────────────
+                // As long as it lasts: it is the part of the clip where the
+                // previous one still shows, and fitting it to the beat means
+                // seeing it.
                 if (widget.cut.transition case final tr?)
                   Positioned(
                     left: 0,
@@ -987,7 +988,7 @@ class _BlockState extends State<_Block> {
                     width: math.min(largura, tr.durationS * widget.pxPerSecond),
                     child: IgnorePointer(
                       child: Container(
-                        key: ValueKey('transicao-no-bloco-${widget.cut.id}'),
+                        key: ValueKey('transition-on-clip-${widget.cut.id}'),
                         alignment: Alignment.topLeft,
                         padding: const EdgeInsets.all(2),
                         decoration: BoxDecoration(
@@ -1004,7 +1005,7 @@ class _BlockState extends State<_Block> {
                           ),
                         ),
                         child: Icon(
-                          TipoDeTransicao.de(tr.kind)?.icone ??
+                          TransitionType.of(tr.kind)?.icon ??
                               Icons.compare_arrows,
                           size: 12,
                           color: theme.colorScheme.surface,
