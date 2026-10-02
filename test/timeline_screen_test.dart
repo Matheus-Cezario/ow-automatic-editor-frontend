@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -2418,6 +2419,46 @@ void main() {
 
       await cursorAt(tester, c.atS + 2);
       expect(find.byKey(const Key('transition-badge')), findsNothing);
+    });
+  });
+
+  group('moment hover preview', () {
+    Future<TestGesture> mouse(WidgetTester tester) async {
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.addPointer(location: Offset.zero);
+      addTearDown(g.removePointer);
+      return g;
+    }
+
+    testWidgets('resting the mouse on a moment opens the preview', (
+      tester,
+    ) async {
+      await open(tester);
+      final g = await mouse(tester);
+      await g.moveTo(tester.getCenter(moment(75.0)));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byKey(const Key('moment-preview')), findsOneWidget);
+    });
+
+    testWidgets('sweeping past a moment does not open a player', (tester) async {
+      // one player per card the mouse crosses would choke the browser
+      await open(tester);
+      final g = await mouse(tester);
+      await g.moveTo(tester.getCenter(moment(75.0)));
+      await tester.pump(const Duration(milliseconds: 100));
+      await g.moveTo(Offset.zero);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byKey(const Key('moment-preview')), findsNothing);
+    });
+
+    testWidgets('leaving the moment closes the preview', (tester) async {
+      await open(tester);
+      final g = await mouse(tester);
+      await g.moveTo(tester.getCenter(moment(75.0)));
+      await tester.pump(const Duration(milliseconds: 500));
+      await g.moveTo(Offset.zero);
+      await tester.pump();
+      expect(find.byKey(const Key('moment-preview')), findsNothing);
     });
   });
 }
