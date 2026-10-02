@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Each kind of generated video gets an icon, a colour and a display name.
-/// Concentrado aqui para a lista, o detalhe e o player falarem a mesma língua.
+/// Kept here so the list, the detail and the player speak the same language.
 class HighlightStyle {
   const HighlightStyle(this.label, this.icon, this.color);
 
@@ -13,14 +13,14 @@ class HighlightStyle {
     // everything that comes out of the editor. The rule-based kinds (kill
     // streak, sleep darts…) belonged to videos the system assembled on its
     // own, which no longer exist.
-    'custom': HighlightStyle('Montagem', Icons.timeline, Color(0xFF7E57C2)),
+    'custom': HighlightStyle('Montage', Icons.timeline, Color(0xFF7E57C2)),
   };
 
   static HighlightStyle of(String kind) =>
-      _map[kind] ?? const HighlightStyle('Momento', Icons.movie, Colors.grey);
+      _map[kind] ?? const HighlightStyle('Moment', Icons.movie, Colors.grey);
 }
 
-/// Mesma ideia para os eventos brutos da linha do tempo.
+/// The same idea for the timeline's raw events.
 class EventStyle {
   const EventStyle(this.label, this.color);
 
@@ -28,46 +28,45 @@ class EventStyle {
   final Color color;
 
   static const _map = <String, EventStyle>{
-    'kill': EventStyle('Eliminação', Color(0xFFFFB300)),
-    // o detector reconhece a vida zerar ou a HUD sumir: isso cobre morte,
-    // killcam, troca de round e seleção de herói. O rótulo não promete mais
-    // do que o sinal entrega.
-    'death': EventStyle('Interrupção', Color(0xFF78909C)),
-    'low_hp': EventStyle('Vida baixa', Color(0xFFFF7043)),
-    'escape': EventStyle('Sobreviveu', Color(0xFF4FC3F7)),
-    // pode ser a do jogador (lida no botão do rodapé) ou a de outra pessoa
-    // (lida no killfeed); `meta['side']` separa as duas
+    'kill': EventStyle('Kill', Color(0xFFFFB300)),
+    // the detector recognises health hitting zero or the HUD disappearing:
+    // that covers death, kill cam, round change and hero selection. The label
+    // promises no more than the signal delivers.
+    'death': EventStyle('Interruption', Color(0xFF78909C)),
+    'low_hp': EventStyle('Low health', Color(0xFFFF7043)),
+    'escape': EventStyle('Survived', Color(0xFF4FC3F7)),
+    // it can be the player's (read on the footer button) or someone else's
+    // (read in the killfeed); `meta['side']` tells them apart
     'ult_used': EventStyle('Ultimate', Color(0xFF66BB6A)),
-    'ult_negated': EventStyle('Ultimate anulada', Color(0xFF26A69A)),
-    'headshot': EventStyle('Na cabeça', Color(0xFFEF5350)),
-    'ability_kill': EventStyle('Morte por habilidade', Color(0xFF7E57C2)),
-    'sleep': EventStyle('Dardo no alvo', Color(0xFF29B6F6)),
-    'stun': EventStyle('Pedrada certeira', Color(0xFF8D6E63)),
+    'ult_negated': EventStyle('Negated ultimate', Color(0xFF26A69A)),
+    'headshot': EventStyle('Headshot', Color(0xFFEF5350)),
+    'ability_kill': EventStyle('Ability kill', Color(0xFF7E57C2)),
+    'sleep': EventStyle('Sleep dart', Color(0xFF29B6F6)),
+    'stun': EventStyle('Accretion stun', Color(0xFF8D6E63)),
   };
 
   static EventStyle of(String kind) =>
-      _map[kind] ?? const EventStyle('Evento', Colors.grey);
+      _map[kind] ?? const EventStyle('Event', Colors.grey);
 
   static List<MapEntry<String, EventStyle>> get all => _map.entries.toList();
 }
 
 /// `orisa/energy_javelin` → `Orisa: Energy Javelin`.
 ///
-/// O nome vem do arquivo do ícone, que veio da Blizzard em inglês. Traduzir
-/// aqui exigiria uma tabela de 270 linhas para envelhecer a cada herói novo — e
-/// o nome original é o que o jogador vê na tela de herói e reconhece.
-String nomeDaHabilidade(String ability) {
-  final barra = ability.indexOf('/');
-  final heroi = barra < 0 ? '' : ability.substring(0, barra);
-  final nome = barra < 0 ? ability : ability.substring(barra + 1);
-  String bonito(String s) => [
-    for (final palavra
+/// The name comes from the icon's file, which came from Blizzard in English —
+/// the same name the player sees on the hero screen and recognises.
+String abilityName(String ability) {
+  final bar = ability.indexOf('/');
+  final hero = bar < 0 ? '' : ability.substring(0, bar);
+  final displayName = bar < 0 ? ability : ability.substring(bar + 1);
+  String pretty(String s) => [
+    for (final word
         in s.replaceAll('-', ' ').replaceAll('_', ' ').split(' '))
-      if (palavra.isNotEmpty)
-        '${palavra[0].toUpperCase()}${palavra.substring(1)}',
+      if (word.isNotEmpty)
+        '${word[0].toUpperCase()}${word.substring(1)}',
   ].join(' ');
-  final habilidade = bonito(nome);
-  return heroi.isEmpty ? habilidade : '${bonito(heroi)}: $habilidade';
+  final abilityPart = pretty(displayName);
+  return hero.isEmpty ? abilityPart : '${pretty(hero)}: $abilityPart';
 }
 
 String formatDuration(double seconds) {

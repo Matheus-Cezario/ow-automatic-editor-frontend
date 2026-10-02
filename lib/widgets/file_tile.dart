@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Linha de escolha de arquivo — a mesma no upload da gravação e na hora de
-/// pôr uma trilha num vídeo.
+/// A file-picking row — the same for the recording upload and for adding a
+/// file to the library.
 class FileTile extends StatelessWidget {
   const FileTile({
     super.key,
@@ -25,7 +25,7 @@ class FileTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final lado = dense ? 34.0 : 44.0;
+    final side = dense ? 34.0 : 44.0;
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
@@ -35,8 +35,8 @@ class FileTile extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: lado,
-                height: lado,
+                width: side,
+                height: side,
                 decoration: BoxDecoration(
                   color: (chosen ? scheme.primary : scheme.onSurface)
                       .withValues(alpha: 0.12),
@@ -75,7 +75,7 @@ class FileTile extends StatelessWidget {
                 IconButton(
                   onPressed: onClear,
                   icon: const Icon(Icons.close),
-                  tooltip: 'Remover',
+                  tooltip: 'Remove',
                 )
               else
                 Icon(

@@ -8,27 +8,28 @@ import 'package:video_player/video_player.dart';
 
 import '../api.dart';
 import '../montage.dart';
-import '../exportacao.dart';
+import '../export_options.dart';
 import '../montage_state.dart';
-import '../receita.dart';
-import '../rotulos.dart';
+import '../recipe.dart';
+import '../labels.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/music_timeline.dart';
 import '../widgets/preview_player.dart';
 
-/// Montar o vídeo à mão: ouvir a música e pôr cada momento onde se quiser.
+/// Building the video by hand: listening to the song and placing each moment
+/// wherever you want.
 ///
-/// É a outra metade do sistema. A análise diz *quando* cada coisa aconteceu —
-/// eliminação, dardo, pedrada — e para por aí; aqui é o usuário que decide
-/// quais entram, em que ponto da música cada um cai e quanto tempo dura.
+/// It is the other half of the system. The analysis says *when* each thing
+/// happened — kill, sleep dart, stun — and stops there; here the user decides
+/// which ones go in, at which point of the song each lands and how long it lasts.
 ///
-/// A música sobe antes de existir vídeo nenhum, justamente porque não dá para
-/// decidir nada disso sem ouvi-la. O que a tela desenha — onda, batidas,
-/// duração — vem do servidor junto com ela.
+/// The song goes up before any video exists, precisely because none of this
+/// can be decided without hearing it. What the screen draws — waveform, beats,
+/// duration — comes from the server along with it.
 ///
-/// Em cima fica o monitor: ele abre a gravação original e busca o instante que
-/// a cabeça de leitura pede, então dá para ver o corte antes de mandar gerar.
-/// Nada é renderizado enquanto se edita.
+/// On top sits the monitor: it opens the original recording and seeks the
+/// instant the playhead asks for, so you can see the cut before rendering.
+/// Nothing is rendered while editing.
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key, required this.job});
 
@@ -38,20 +39,20 @@ class TimelineScreen extends StatefulWidget {
   State<TimelineScreen> createState() => _TimelineScreenState();
 }
 
-/// Eventos que valem um bloco. `death` e `low_hp` ficam de fora: são o contexto
-/// que faz uma jogada valer, não a jogada.
+/// Events worth a block. `death` and `low_hp` are left out: they are the
+/// context that makes a play worth it, not the play.
 ///
-/// `headshot` e `ability_kill` entram porque são exatamente o que se procura
-/// numa montagem — o tiro na cabeça e a eliminação com habilidade são a jogada,
-/// não o contexto dela. Ficaram de fora enquanto o editor era só um plano B da
-/// geração automática, e o resultado era o pior dos dois mundos: o detector
-/// achava os momentos, a lista de propostas os anunciava, e quem abria a
-/// montagem manual não os encontrava em lugar nenhum.
+/// `headshot` and `ability_kill` are in because they are exactly what you look
+/// for in a montage — the headshot and the ability kill are the play, not its
+/// context. They were left out while the editor was only a plan B for the
+/// automatic generation, and the result was the worst of both worlds: the
+/// detector found the moments, the proposal list announced them, and whoever
+/// opened the manual montage could not find them anywhere.
 ///
-/// Esta lista tem de casar com `THUMB_KINDS` no servidor: é ela que decide de
-/// que instantes se extrai miniatura. Um tipo aqui que falte lá vira cartão sem
-/// quadro.
-const _momentosUteis = {
+/// This list has to match `THUMB_KINDS` on the server: it decides which
+/// instants get a thumbnail extracted. A kind here that is missing there
+/// becomes a card without a frame.
+const _usefulMoments = {
   'kill',
   'headshot',
   'ability_kill',
@@ -64,55 +65,55 @@ const _momentosUteis = {
 class _TimelineScreenState extends State<TimelineScreen> {
   final _api = ApiClient();
   final _scroll = ScrollController();
-  final _titulo = TextEditingController(text: 'Minha montagem');
+  final _title = TextEditingController(text: 'My montage');
 
-  /// A montagem e tudo o que veio antes dela.
+  /// The montage and everything that came before it.
   ///
-  /// Toda edição passa por aqui — é o que torna o desfazer possível, e é por
-  /// isso que a tela não guarda mais nenhuma lista de blocos por conta própria.
-  late final MontageHistory _historia = MontageHistory(MontageState.vazio());
-  MontageState get _estado => _historia.atual;
+  /// Every edit goes through here — it is what makes undo possible, and it is
+  /// why the screen no longer keeps any list of blocks on its own.
+  late final MontageHistory _history = MontageHistory(MontageState.blank());
+  MontageState get _state => _history.present;
 
-  /// O que foi copiado, esperando um Ctrl+V.
-  List<TimelineClip> _areaDeCopia = const [];
+  /// What was copied, waiting for a Ctrl+V.
+  List<TimelineClip> _clipboard = const [];
 
-  /// A biblioteca de mídia da partida. Começa com o que veio do servidor e
-  /// cresce conforme o usuário traz arquivos.
-  late List<Media> _biblioteca = [...widget.job.media];
-  bool _importando = false;
-  String? _erroImportar;
+  /// The match media library. It starts with what came from the server and
+  /// grows as the user brings files.
+  late List<Media> _library = [...widget.job.media];
+  bool _importing = false;
+  String? _importError;
 
-  /// O player da música que está tocando agora — o do bloco sob a cabeça de
-  /// leitura, e nenhum outro. Trocar de faixa custa rede, então ele só troca
-  /// quando o bloco troca.
+  /// The player of the song playing right now — the one of the block under the
+  /// playhead, and no other. Switching tracks costs network, so it only
+  /// switches when the block switches.
   VideoPlayerController? _audio;
   String? _audioDe;
-  String? _blocoNoPlayer;
-  bool _ajustandoOAudio = false;
-  String? _erroMusica;
+  String? _blockInPlayer;
+  bool _adjustingAudio = false;
+  String? _musicError;
 
-  /// Alguém está escrevendo num campo agora? Guardado em estado, porque a
-  /// resposta muda o conjunto de atalhos registrados — e isso exige
-  /// reconstruir a tela.
-  bool _escrevendo = false;
+  /// Is someone typing in a field right now? Kept in state, because the answer
+  /// changes the set of registered shortcuts — and that requires rebuilding
+  /// the screen.
+  bool _typing = false;
 
-  /// O foco da montagem. É dele que os atalhos valem — e é para ele que o foco
-  /// volta assim que alguém toca na régua.
-  final FocusNode _foco = FocusNode(debugLabel: 'montagem');
+  /// The montage focus. Shortcuts apply from it — and focus goes back to it
+  /// as soon as someone touches the timeline.
+  final FocusNode _focus = FocusNode(debugLabel: 'montage');
 
-  /// O relógio do vídeo. Nulo quando está parado — é ele que responde se está
-  /// tocando.
-  Timer? _relogio;
+  /// The video clock. Null when stopped — it is what tells whether it is
+  /// playing.
+  Timer? _clock;
 
-  /// Zoom da régua. 60 px/s mostra uns 10 segundos num celular — perto o
-  /// bastante para encaixar na batida sem precisar de precisão de cirurgião.
+  /// Timeline zoom. 60 px/s shows about 10 seconds on a phone — close enough
+  /// to snap to the beat without needing a surgeon's precision.
   double _px = 60;
-  bool _ima = true;
+  bool _magnet = true;
   double _cursor = 0;
 
-  /// O que o dedo está fazendo agora, para a tela dizer em número o que o
-  /// arrasto está fazendo em pixels.
-  String? _arrastando;
+  /// What the finger is doing right now, so the screen can say in numbers
+  /// what the drag is doing in pixels.
+  String? _dragLabel;
 
   /// The text clip being typed on the monitor itself, if any.
   String? _editingTextId;
@@ -122,202 +123,201 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// adjustment on each one.
   double _transitionDuration = 0.5;
 
-  /// Altura do monitor, arrastável pela alça abaixo dele.
+  /// Monitor height, draggable by the handle below it.
   double _monitorH = 200;
 
-  /// Estado do salvamento automático, para a tela poder dizer que o trabalho
-  /// está guardado.
-  /// As montagens desta partida, e qual delas está na tela.
+  /// Autosave state, so the screen can say the work is saved.
+  /// The montages of this match, and which one is on screen.
   ///
-  /// Uma partida rende mais de um vídeo — o corte vertical e a montagem longa
-  /// são trabalhos diferentes sobre o mesmo material.
-  late List<SavedMontage> _montagens = [...widget.job.montages];
-  String? _montagemId;
+  /// A match yields more than one video — the vertical cut and the long
+  /// montage are different jobs on the same material.
+  late List<SavedMontage> _montages = [...widget.job.montages];
+  String? _montageId;
 
   Timer? _debounce;
-  bool _salvando = false;
-  DateTime? _salvoEm;
-  String? _erroSalvar;
+  bool _saving = false;
+  DateTime? _savedAt;
+  String? _saveError;
 
-  bool _enviando = false;
-  String? _erro;
+  bool _sending = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    // a mais recente e a que se estava editando -- e a que se quer de volta
-    final atual = _montagens.firstOrNull;
-    final draft = atual?.montage ?? widget.job.draft;
-    _montagemId = atual?.id;
+    // the most recent one is the one being edited -- and the one you want back
+    final present = _montages.firstOrNull;
+    final draft = present?.montage ?? widget.job.draft;
+    _montageId = present?.id;
     if (draft != null) {
-      // havia uma montagem em andamento: continua-se de onde parou. A música,
-      // se houver, está nos blocos dela -- não há trilha a retomar
-      _historia.substituir(montagemDoRascunho(draft));
-      if (draft.title.isNotEmpty) _titulo.text = draft.title;
+      // there was a montage in progress: pick up where it stopped. The song,
+      // if any, is in its blocks -- there is no track to resume
+      _history.replace(montageFromDraft(draft));
+      if (draft.title.isNotEmpty) _title.text = draft.title;
     } else {
-      _historia.substituir(_estado.copyWith(title: _titulo.text));
+      _history.replace(_state.copyWith(title: _title.text));
     }
-    // jobs analisados antes das miniaturas existirem não têm nenhuma; pedir é
-    // barato e o serviço pula o que já está lá
+    // jobs analysed before thumbnails existed have none; asking is cheap and
+    // the service skips what is already there
     _api.requestFrames(widget.job.id).ignore();
-    FocusManager.instance.addListener(_conferirOFoco);
+    FocusManager.instance.addListener(_checkFocus);
   }
 
-  /// Alguém está escrevendo num campo?
+  /// Is someone typing in a field?
   ///
-  /// O foco primário de um `TextField` fica num `Focus` **dentro** do
-  /// `EditableText`, e não nele; por isso a busca é pelo estado ancestral.
-  bool get _alguemEscrevendo {
+  /// The primary focus of a `TextField` sits in a `Focus` **inside** the
+  /// `EditableText`, not on it; that is why the lookup is by ancestor state.
+  bool get _someoneTyping {
     final ctx = FocusManager.instance.primaryFocus?.context;
     if (ctx == null) return false;
     return ctx.findAncestorStateOfType<EditableTextState>() != null;
   }
 
-  void _conferirOFoco() {
-    final agora = _alguemEscrevendo;
-    if (agora != _escrevendo && mounted) {
-      setState(() => _escrevendo = agora);
+  void _checkFocus() {
+    final nowS = _someoneTyping;
+    if (nowS != _typing && mounted) {
+      setState(() => _typing = nowS);
     }
   }
 
   @override
   void dispose() {
-    FocusManager.instance.removeListener(_conferirOFoco);
-    _foco.dispose();
+    FocusManager.instance.removeListener(_checkFocus);
+    _focus.dispose();
     _debounce?.cancel();
-    _relogio?.cancel();
+    _clock?.cancel();
     _audio?.dispose();
     _scroll.dispose();
-    _titulo.dispose();
+    _title.dispose();
     super.dispose();
   }
 
-  // ── edição ────────────────────────────────────────────────────────────────
+  // ── editing ───────────────────────────────────────────────────────────────
 
-  /// Aplica uma edição: vira estado novo, entra no histórico e agenda o salvamento.
-  void _editar(MontageState novo) {
-    if (identical(novo, _estado)) return;
-    setState(() => _historia.aplicar(novo));
-    _agendarSalvamento();
+  /// Applies an edit: it becomes the new state, goes into history and schedules a save.
+  void _edit(MontageState updated) {
+    if (identical(updated, _state)) return;
+    setState(() => _history.apply(updated));
+    _scheduleSave();
   }
 
-  /// Muda o estado **sem** criar um passo de desfazer — seleção e título, que
-  /// não são edições do vídeo.
-  void _semHistorico(MontageState novo) {
-    setState(() => _historia.substituir(novo));
+  /// Changes the state **without** creating an undo step — selection and
+  /// title, which are not edits of the video.
+  void _withoutHistory(MontageState updated) {
+    setState(() => _history.replace(updated));
   }
 
-  void _desfazer() {
-    if (!_historia.podeDesfazer) return;
-    setState(_historia.desfazer);
-    _sincronizarTitulo();
-    _agendarSalvamento();
+  void _undo() {
+    if (!_history.canUndo) return;
+    setState(_history.undo);
+    _syncTitle();
+    _scheduleSave();
   }
 
-  void _refazer() {
-    if (!_historia.podeRefazer) return;
-    setState(_historia.refazer);
-    _sincronizarTitulo();
-    _agendarSalvamento();
+  void _redo() {
+    if (!_history.canRedo) return;
+    setState(_history.redo);
+    _syncTitle();
+    _scheduleSave();
   }
 
-  void _sincronizarTitulo() {
-    if (_titulo.text != _estado.title) _titulo.text = _estado.title;
+  void _syncTitle() {
+    if (_title.text != _state.title) _title.text = _state.title;
   }
 
-  void _selecionar(String? id, {bool alternar = false}) {
+  void _select(String? id, {bool toggle = false}) {
     if (id == null) {
-      _semHistorico(_estado.copyWith(selecao: const {}));
+      _withoutHistory(_state.copyWith(selectionIds: const {}));
       return;
     }
-    final nova = <String>{..._estado.selecao};
-    if (alternar) {
-      // shift-clique tira quem já estava, para dar e desfazer com o mesmo gesto
-      if (!nova.remove(id)) nova.add(id);
+    final fresh = <String>{..._state.selectionIds};
+    if (toggle) {
+      // shift-click removes what was already in, so the same gesture does and undoes
+      if (!fresh.remove(id)) fresh.add(id);
     } else {
-      nova
+      fresh
         ..clear()
         ..add(id);
     }
-    _semHistorico(_estado.copyWith(selecao: nova));
+    _withoutHistory(_state.copyWith(selectionIds: fresh));
   }
 
-  // ── operações sobre os blocos ─────────────────────────────────────────────
+  // ── block operations ──────────────────────────────────────────────────────
 
-  void _adicionar(DetectionEvent e) {
-    _editar(
-      adicionar(
-        _estado,
+  void _add(DetectionEvent e) {
+    _edit(
+      addClip(
+        _state,
         cutForMoment(
           e,
           atS: _cursor,
-          beats: _batidas,
+          beats: _beats,
           sourceDurationS: widget.job.durationS,
         ),
-        beats: _batidas,
-        snap: _ima,
+        beats: _beats,
+        snap: _magnet,
       ),
     );
   }
 
-  void _mover(String id, double atS) =>
-      _editar(moverBloco(_estado, id, atS, beats: _batidas, snap: _ima));
+  void _move(String id, double atS) =>
+      _edit(moveBlock(_state, id, atS, beats: _beats, snap: _magnet));
 
-  void _aparar(String id, double atS) =>
-      _editar(apararBloco(_estado, id, atS, beats: _batidas, snap: _ima));
+  void _trim(String id, double atS) =>
+      _edit(trimBlock(_state, id, atS, beats: _beats, snap: _magnet));
 
-  void _esticar(String id, double duracao) => _editar(
-    esticarBloco(
-      _estado,
+  void _stretch(String id, double durationValue) => _edit(
+    stretchBlock(
+      _state,
       id,
-      duracao,
-      beats: _batidas,
-      snap: _ima,
+      durationValue,
+      beats: _beats,
+      snap: _magnet,
       sourceDurationS: widget.job.durationS,
     ),
   );
 
-  void _deslocar(String id, double delta) => _editar(
-    deslocarConteudo(_estado, id, delta, sourceDurationS: widget.job.durationS),
+  void _shift(String id, double delta) => _edit(
+    shiftContent(_state, id, delta, sourceDurationS: widget.job.durationS),
   );
 
-  void _apagarSelecao() => _editar(remover(_estado, _estado.selecao));
+  void _deleteSelection() => _edit(removeClips(_state, _state.selectionIds));
 
-  // ── texto ─────────────────────────────────────────────────────────────────
+  // ── text ──────────────────────────────────────────────────────────────────
 
-  /// Põe um texto onde a música estiver, na camada de cima.
+  /// Puts a text wherever the song is, on the top layer.
   ///
-  /// Texto quase sempre vai por cima de imagem, então uma camada nova é o
-  /// palpite certo quando só existe uma.
-  void _texto(String conteudo) {
-    var novo = _estado;
-    if (novo.layers.length == 1) novo = adicionarCamada(novo, nome: 'Texto');
-    _editar(
-      adicionar(
-        novo,
-        rotulo(conteudo, atS: _cursor),
-        beats: _batidas,
-        snap: _ima,
+  /// Text almost always goes over the picture, so a new layer is the right
+  /// guess when only one exists.
+  void _addText(String contents) {
+    var updated = _state;
+    if (updated.layers.length == 1) updated = addLayer(updated, displayName: 'Text');
+    _edit(
+      addClip(
+        updated,
+        textClip(contents, atS: _cursor),
+        beats: _beats,
+        snap: _magnet,
       ),
     );
   }
 
-  /// Escreve na montagem o que o sistema já sabe da partida.
-  void _gerarRotulos(List<TimelineClip> novos, String oQue) {
-    if (novos.isEmpty) {
-      _avisar('Não há $oQue para rotular nesta montagem.');
+  /// Writes into the montage what the system already knows about the match.
+  void _generateLabels(List<TimelineClip> added, String what) {
+    if (added.isEmpty) {
+      _notify('There are no $what to label in this montage.');
       return;
     }
-    var s = _estado;
-    if (s.layers.length == 1) s = adicionarCamada(s, nome: 'Texto');
-    for (final r in novos) {
-      s = adicionar(s, r, beats: const [], snap: false);
+    var s = _state;
+    if (s.layers.length == 1) s = addLayer(s, displayName: 'Text');
+    for (final r in added) {
+      s = addClip(s, r, beats: const [], snap: false);
     }
-    _editar(s.copyWith(selecao: const {}));
-    _avisar('${novos.length} rótulo(s) escritos.');
+    _edit(s.copyWith(selectionIds: const {}));
+    _notify('${added.length} label(s) written.');
   }
 
-  void _efeito(
+  void _effect(
     String id, {
     double? speed,
     ClipColor? color,
@@ -325,9 +325,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     List<ZoomKey>? zoom,
     bool? freeze,
     bool? reverse,
-  }) => _editar(
-    ajustarEfeito(
-      _estado,
+  }) => _edit(
+    adjustEffect(
+      _state,
       id,
       speed: speed,
       color: color,
@@ -338,9 +338,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
-  // ── biblioteca de mídia ───────────────────────────────────────────────────
+  // ── media library ─────────────────────────────────────────────────────────
 
-  Future<void> _importar() async {
+  Future<void> _import() async {
     final picked = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: const [
@@ -364,563 +364,562 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
     if (picked == null) return;
     setState(() {
-      _importando = true;
-      _erroImportar = null;
+      _importing = true;
+      _importError = null;
     });
     try {
-      final enviado = await _api.uploadMedia(
+      final sent = await _api.uploadMedia(
         jobId: widget.job.id,
         file: picked,
       );
-      final pronto = await _api.waitForMedia(enviado.id);
+      final ready = await _api.waitForMedia(sent.id);
       if (!mounted) return;
       setState(() {
-        _biblioteca = [..._biblioteca, pronto];
-        if (pronto.isFailed) {
-          _erroImportar = pronto.error ?? 'não consegui ler esse arquivo';
+        _library = [..._library, ready];
+        if (ready.isFailed) {
+          _importError = ready.error ?? 'could not read this file';
         }
       });
     } catch (e) {
-      if (mounted) setState(() => _erroImportar = '$e');
+      if (mounted) setState(() => _importError = '$e');
     } finally {
-      if (mounted) setState(() => _importando = false);
+      if (mounted) setState(() => _importing = false);
     }
   }
 
-  /// Põe um item da biblioteca na régua, na cabeça de leitura.
+  /// Puts a library item on the timeline, at the playhead.
   ///
-  /// Música vai para uma camada de som — se não houver, ela nasce. É o único
-  /// jeito de trazer música para uma montagem, e é o mesmo caminho do vídeo e
-  /// da imagem: a biblioteca é a porta de entrada de tudo o que vem de fora.
-  void _usarMidia(Media item, {double? atS, int? camada}) {
-    final onde = atS ?? _cursor;
+  /// Music goes to a sound layer — if there is none, one is created. It is the
+  /// only way to bring music into a montage, and it is the same path as video
+  /// and images: the library is the entry door for everything from outside.
+  void _useMedia(Media item, {double? atS, int? layerIndex}) {
+    final location = atS ?? _cursor;
     if (item.isAudio) {
-      _porMusicaNaRegua(item, atS: onde, camada: camada);
+      _putMusicOnRuler(item, atS: location, layerIndex: layerIndex);
       return;
     }
-    var base = _estado;
-    if (camada != null && camada >= 0 && camada < base.layers.length) {
-      if (base.layers[camada].isAudio) {
-        _avisar('Essa camada é de som: imagem não entra nela.');
+    var base = _state;
+    if (layerIndex != null && layerIndex >= 0 && layerIndex < base.layers.length) {
+      if (base.layers[layerIndex].isAudio) {
+        _notify('This is a sound layer: pictures do not go in it.');
         return;
       }
-      base = base.copyWith(camadaAtiva: camada);
+      base = base.copyWith(activeLayer: layerIndex);
     }
-    _editar(
-      adicionar(
+    _edit(
+      addClip(
         base,
-        clipeDeMidia(
+        mediaClip(
           item,
-          atS: onde,
-          beats: _batidas,
+          atS: location,
+          beats: _beats,
         ).copyWith(mediaId: item.id),
-        beats: _batidas,
-        snap: _ima,
+        beats: _beats,
+        snap: _magnet,
       ),
     );
   }
 
-  Future<void> _tirarDaBiblioteca(Media item) async {
-    // um clipe que apontasse para ela ficaria órfão, e o pedido seria recusado
-    final emUso = _estado.clips.any((c) => c.mediaId == item.id);
-    if (emUso) {
-      _avisar('Este item está na montagem. Tire os cortes dele primeiro.');
+  Future<void> _removeFromLibrary(Media item) async {
+    // a clip pointing at it would be orphaned, and the request would be refused
+    final inUse = _state.clips.any((c) => c.mediaId == item.id);
+    if (inUse) {
+      _notify('This item is in the montage. Remove its cuts first.');
       return;
     }
     setState(
-      () => _biblioteca = [
-        for (final m in _biblioteca)
+      () => _library = [
+        for (final m in _library)
           if (m.id != item.id) m,
       ],
     );
     try {
       await _api.deleteMedia(item.id);
     } catch (e) {
-      if (mounted) setState(() => _erroImportar = '$e');
+      if (mounted) setState(() => _importError = '$e');
     }
   }
 
-  void _selecionarTudo() => _semHistorico(
-    _estado.copyWith(selecao: {for (final c in _estado.clips) c.id}),
+  void _selectAll() => _withoutHistory(
+    _state.copyWith(selectionIds: {for (final c in _state.clips) c.id}),
   );
 
-  void _copiar() {
-    if (_estado.selecao.isEmpty) return;
-    setState(() => _areaDeCopia = _estado.selecionados);
-    _avisar('${_areaDeCopia.length} corte(s) copiado(s)');
+  void _copy() {
+    if (_state.selectionIds.isEmpty) return;
+    setState(() => _clipboard = _state.selectedClips);
+    _notify('${_clipboard.length} cut(s) copied');
   }
 
-  void _colar() {
-    if (_areaDeCopia.isEmpty) return;
-    _editar(colar(_estado, _areaDeCopia, _cursor));
+  void _paste() {
+    if (_clipboard.isEmpty) return;
+    _edit(paste(_state, _clipboard, _cursor));
   }
 
-  void _duplicar() => _editar(duplicar(_estado, _estado.selecao));
+  void _duplicate() => _edit(duplicate(_state, _state.selectionIds));
 
-  /// Leva a jogada de um bloco para debaixo da cabeça de leitura.
+  /// Brings a block's play under the playhead.
   ///
-  /// O bloco anda; a jogada é que fica onde se pediu. É o gesto de encaixar a
-  /// eliminação na batida sem contar de cabeça quanto embalo há antes dela.
-  void _alinharMomentoAoCursor([String? id]) {
-    final alvo =
-        id ?? (_estado.selecao.length == 1 ? _estado.selecao.first : null);
-    if (alvo == null) {
-      _avisar('Escolha um bloco para alinhar a jogada dele.');
+  /// The block moves; the play is what stays where it was asked. It is the
+  /// gesture of snapping the kill to the beat without counting the run-up.
+  void _alignMomentToCursor([String? id]) {
+    final target =
+        id ?? (_state.selectionIds.length == 1 ? _state.selectionIds.first : null);
+    if (target == null) {
+      _notify('Pick a block to align its play.');
       return;
     }
-    if (momentoNoVideo(_estado.clipe(alvo)!) == null) {
-      _avisar('Este bloco não tem jogada marcada.');
+    if (momentInVideo(_state.clipItem(target)!) == null) {
+      _notify('This block has no marked play.');
       return;
     }
-    final feito = alinharMomento(
-      _estado,
-      alvo,
+    final done = alignMoment(
+      _state,
+      target,
       _cursor,
       sourceDurationS: widget.job.durationS,
     );
-    if (feito == null) {
-      _avisar('A jogada não alcança este ponto: a gravação acaba antes.');
+    if (done == null) {
+      _notify('The play cannot reach this point: the recording ends before.');
       return;
     }
-    _editar(feito.estado);
-    if (feito.deslizou) {
-      // o usuário precisa saber *o que* mudou: o bloco ficou onde estava e o
-      // trecho da gravação é que andou
-      _avisar(
-        'Os vizinhos não deixaram o bloco andar, então o trecho é que '
-        'deslizou dentro dele.',
+    _edit(done.state);
+    if (done.didSlide) {
+      // the user needs to know *what* changed: the block stayed where it was
+      // and it was the recording span that moved
+      _notify(
+        'The neighbours did not let the block move, so the span slid '
+        'inside it instead.',
       );
     }
   }
 
-  /// Corta em dois o bloco que estiver sob a cabeça de leitura.
-  void _dividirNoCursor() {
+  /// Splits in two the block under the playhead.
+  void _splitAtCursor() {
     final at = _cursor;
-    final i = blocoEm(_estado.clips, at);
+    final i = blockAt(_state.clips, at);
     if (i == null) {
-      _avisar('Ponha o cursor em cima de um corte para dividi-lo.');
+      _notify('Put the cursor over a cut to split it.');
       return;
     }
-    final antes = _estado.clips.length;
-    _editar(dividir(_estado, _estado.clips[i].id, at));
-    if (_estado.clips.length == antes) {
-      _avisar('Perto demais da borda: sobraria um pedaço invisível.');
+    final beforeState = _state.clips.length;
+    _edit(split(_state, _state.clips[i].id, at));
+    if (_state.clips.length == beforeState) {
+      _notify('Too close to the edge: an invisible piece would be left.');
     }
   }
 
-  /// Anda um quadro da gravação, para o ajuste que o segundo não alcança.
+  /// Moves one recording frame, for the adjustment a second cannot reach.
   ///
-  /// O passo sai do fps da própria partida: num vídeo a 30 fps são 33 ms, e é
-  /// esse o menor movimento que muda alguma coisa na tela.
-  void _passoDeQuadro(int quantos) {
+  /// The step comes from the match's own fps: in a 30 fps video it is 33 ms,
+  /// and that is the smallest move that changes anything on screen.
+  void _frameStep(int count) {
     final fps = widget.job.fps > 0 ? widget.job.fps : 30.0;
-    _irPara(_cursor + quantos / fps);
+    _goTo(_cursor + count / fps);
   }
 
-  /// Empurra a seleção pelo teclado, para o ajuste que o dedo não acerta.
-  void _empurrar(double delta) {
-    if (_estado.selecao.isEmpty) return;
-    _editar(moverSelecao(_estado, delta, beats: _batidas, snap: false));
+  /// Nudges the selection with the keyboard, for the adjustment a finger misses.
+  void _push(double delta) {
+    if (_state.selectionIds.isEmpty) return;
+    _edit(moveSelection(_state, delta, beats: _beats, snap: false));
   }
 
-  /// Apara a borda do bloco selecionado até a cabeça de leitura.
-  void _apararNoCursor({required bool inicio}) {
-    if (_estado.selecao.length != 1) return;
-    final c = _estado.clipe(_estado.selecao.first)!;
+  /// Trims the selected block's edge up to the playhead.
+  void _trimAtCursor({required bool startTime}) {
+    if (_state.selectionIds.length != 1) return;
+    final c = _state.clipItem(_state.selectionIds.first)!;
     final at = _cursor;
     if (at <= c.atS || at >= c.untilS) return;
-    _editar(
-      inicio
-          ? apararBloco(_estado, c.id, at, beats: _batidas, snap: false)
-          : esticarBloco(
-              _estado,
+    _edit(
+      startTime
+          ? trimBlock(_state, c.id, at, beats: _beats, snap: false)
+          : stretchBlock(
+              _state,
               c.id,
               at - c.atS,
-              beats: _batidas,
+              beats: _beats,
               snap: false,
               sourceDurationS: widget.job.durationS,
             ),
     );
   }
 
-  void _avisar(String texto) {
+  void _notify(String textValue) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(texto)));
+      ..showSnackBar(SnackBar(content: Text(textValue)));
   }
 
-  // ── salvamento ────────────────────────────────────────────────────────────
+  // ── saving ────────────────────────────────────────────────────────────────
 
-  /// Guarda a montagem no servidor, com folga entre um salvamento e outro.
+  /// Saves the montage on the server, with slack between saves.
   ///
-  /// Chamado a cada mexida. O que importa é não perder o trabalho, não
-  /// registrar cada pixel de um arrasto — daí o segundo e meio de espera: um
-  /// arrasto inteiro vira um salvamento só.
-  void _agendarSalvamento() {
+  /// Called on every change. What matters is not losing work, not recording
+  /// every pixel of a drag — hence the second and a half wait: a whole drag
+  /// becomes a single save.
+  void _scheduleSave() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 1500), _salvar);
+    _debounce = Timer(const Duration(milliseconds: 1500), _save);
   }
 
-  Future<void> _salvar() async {
+  Future<void> _save() async {
     if (!mounted) return;
     setState(() {
-      _salvando = true;
-      _erroSalvar = null;
+      _saving = true;
+      _saveError = null;
     });
     try {
-      final montagem = _estado.paraEnvio();
-      var id = _montagemId;
+      final thisMontage = _state.toPayload();
+      var id = _montageId;
       if (id == null) {
-        // a primeira montagem so nasce quando ha o que guardar: abrir o editor
-        // e fecha-lo sem mexer em nada nao deixa lixo na lista
-        final nova = await _api.createMontage(
+        // the first montage is only created when there is something to save:
+        // opening the editor and closing it untouched leaves no junk in the list
+        final fresh = await _api.createMontage(
           widget.job.id,
-          name: _titulo.text.trim(),
-          montage: montagem,
+          name: _title.text.trim(),
+          montage: thisMontage,
         );
-        id = nova.id;
+        id = fresh.id;
         if (mounted) {
           setState(() {
-            _montagemId = id;
-            _montagens = [nova, ..._montagens];
+            _montageId = id;
+            _montages = [fresh, ..._montages];
           });
         }
       } else {
-        await _api.saveMontage(widget.job.id, id, montage: montagem);
+        await _api.saveMontage(widget.job.id, id, montage: thisMontage);
       }
       if (mounted) {
         setState(() {
-          _salvoEm = DateTime.now();
-          _salvando = false;
+          _savedAt = DateTime.now();
+          _saving = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _erroSalvar = '$e';
-          _salvando = false;
+          _saveError = '$e';
+          _saving = false;
         });
       }
     }
   }
 
-  // ── música ────────────────────────────────────────────────────────────────
+  // ── music ─────────────────────────────────────────────────────────────────
 
-  List<DetectionEvent> get _momentosDaPartida =>
-      widget.job.events.where((e) => _momentosUteis.contains(e.kind)).toList();
+  List<DetectionEvent> get _matchMoments =>
+      widget.job.events.where((e) => _usefulMoments.contains(e.kind)).toList();
 
-  /// As batidas em tempo de **vídeo**: é nelas que os blocos grudam, porque a
-  /// posição de um bloco é medida a partir do início do vídeo, não da música.
-  List<double> get _batidas {
-    // Com blocos de música na régua, a grade é a da música que está tocando
-    // sob a cabeça de leitura: um vídeo com duas faixas tem dois andamentos, e
-    // grudar na batida da outra seria pior do que não grudar em nada.
-    final aqui = _musicaEm(_cursor);
-    if (aqui != null) {
-      final ajustada = gradeAjustada(
-        aqui.musica.beats,
-        offsetS: _estado.beatOffsetS,
-        multiplicador: _estado.beatMultiplier,
-        compasso: _estado.beatBar,
+  /// The beats in **video** time: blocks snap to them, because a block's
+  /// position is measured from the start of the video, not of the song.
+  List<double> get _beats {
+    // With music blocks on the timeline, the grid is that of the song playing
+    // under the playhead: a video with two tracks has two tempos, and
+    // snapping to the other one's beat would be worse than not snapping at all.
+    final here = _musicAt(_cursor);
+    if (here != null) {
+      final adjusted = adjustedGrid(
+        here.music.beats,
+        offsetS: _state.beatOffsetS,
+        multiplier: _state.beatMultiplier,
+        bar: _state.beatBar,
       );
-      // as batidas da música são medidas nela; o bloco as traz para o tempo do
-      // vídeo, descontando o pedaço da faixa que ficou de fora
-      final desloca = aqui.bloco.atS - aqui.bloco.startS;
+      // the song's beats are measured in it; the block brings them to video
+      // time, discounting the part of the track left out
+      final shifts = here.block.atS - here.block.startS;
       return [
-        for (final b in ajustada)
-          if (b >= aqui.bloco.startS && b <= aqui.bloco.endS) b + desloca,
+        for (final b in adjusted)
+          if (b >= here.block.startS && b <= here.block.endS) b + shifts,
       ];
     }
 
-    // sem bloco nenhum sob a cabeça de leitura não há grade: o ímã não tem a
-    // que grudar, e inventar uma batida seria pior do que não ter nenhuma
+    // with no block under the playhead there is no grid: the magnet has
+    // nothing to snap to, and inventing a beat would be worse than having none
     return const [];
   }
 
-  // ── música na régua ───────────────────────────────────────────────────────
+  // ── music on the timeline ─────────────────────────────────────────────────
 
-  /// As músicas da partida, por id — é delas que sai a onda de cada bloco.
+  /// The match songs, by id — each block's waveform comes from them.
   ///
-  /// Saem da **biblioteca**, que é a porta de entrada de tudo o que vem de
-  /// fora: uma música enviada agora já está aqui, e não só no retrato que veio
-  /// com a partida.
-  Map<String, Track> get _musicas => {
-    for (final m in _biblioteca)
-      if (m.isAudio && m.isReady) m.id: m.comoMusica,
+  /// They come from the **library**, the entry door of everything from
+  /// outside: a song uploaded just now is already here, not only in the
+  /// snapshot that came with the match.
+  Map<String, Track> get _tracks => {
+    for (final m in _library)
+      if (m.isAudio && m.isReady) m.id: m.asMusic,
   };
 
-  /// O bloco de música que está tocando em [t] segundos de vídeo, se houver.
-  ({TimelineClip bloco, Track musica})? _musicaEm(double t) {
-    for (final camada in _estado.layers) {
-      if (!camada.isAudio || camada.muted) continue;
-      for (final c in camada.clips) {
+  /// The music block playing at [t] seconds of video, if any.
+  ({TimelineClip block, Track music})? _musicAt(double t) {
+    for (final layerIndex in _state.layers) {
+      if (!layerIndex.isAudio || layerIndex.muted) continue;
+      for (final c in layerIndex.clips) {
         if (t < c.atS - 1e-6 || t >= c.untilS - 1e-6) continue;
-        final m = _musicas[c.mediaId];
-        if (m != null) return (bloco: c, musica: m);
+        final m = _tracks[c.mediaId];
+        if (m != null) return (block: c, music: m);
       }
     }
     return null;
   }
 
-  /// O item da biblioteca de que um bloco saiu, se ele veio de um.
+  /// The library item a block came from, if it came from one.
   ///
-  /// É o que faz o painel de baixo falar do arquivo em vez de falar de evento:
-  /// um bloco de mídia não veio de um momento da partida, e um de música não
-  /// desenha nada.
-  Media? _midiaDoBloco(String id) {
-    final clip = _estado.clipe(id);
+  /// It is what makes the bottom panel talk about the file instead of the
+  /// event: a media block did not come from a match moment, and a music one
+  /// draws nothing.
+  Media? _blockMedia(String id) {
+    final clip = _state.clipItem(id);
     if (clip == null || clip.mediaId == null) return null;
-    return _biblioteca.where((m) => m.id == clip.mediaId).firstOrNull;
+    return _library.where((m) => m.id == clip.mediaId).firstOrNull;
   }
 
-  /// Abre uma camada só de som e leva o foco para ela.
-  void _novaCamadaDeMusica() {
-    _editar(adicionarCamadaDeMusica(_estado));
-    _avisar('Arraste uma música da Biblioteca para esta camada.');
+  /// Opens a sound-only layer and moves the focus to it.
+  void _newMusicLayer() {
+    _edit(addMusicLayer(_state));
+    _notify('Drag a song from the Library onto this layer.');
   }
 
-  /// Leva um bloco para outra camada — e, quando não dá, diz por quê.
+  /// Moves a block to another layer — and, when it cannot, says why.
   ///
-  /// Recusar em silêncio é o pior dos dois mundos: o bloco volta para o lugar
-  /// e quem arrastou fica sem saber se o gesto não pegou ou se a operação não
-  /// era possível.
-  void _trocarDeCamada(String id, int destino) {
-    if (destino < 0 || destino >= _estado.layers.length) {
-      _avisar('Não há camada aí. Abra uma nova para levar o bloco.');
+  /// Refusing silently is the worst of both worlds: the block goes back to its
+  /// place and whoever dragged it cannot tell whether the gesture missed or
+  /// the operation was impossible.
+  void _changeLayer(String id, int destination) {
+    if (destination < 0 || destination >= _state.layers.length) {
+      _notify('There is no layer there. Open a new one to move the block.');
       return;
     }
-    final onde = _estado.localizar(id);
-    if (onde == null) return;
-    final origem = _estado.layers[onde.$1];
-    final alvo = _estado.layers[destino];
+    final location = _state.locate(id);
+    if (location == null) return;
+    final origin = _state.layers[location.$1];
+    final target = _state.layers[destination];
 
-    if (origem.isAudio != alvo.isAudio) {
-      _avisar(
-        origem.isAudio
-            ? 'Música só entra em camada de som.'
-            : 'Essa camada é de som: imagem não entra nela.',
+    if (origin.isAudio != target.isAudio) {
+      _notify(
+        origin.isAudio
+            ? 'Music only goes on a sound layer.'
+            : 'This is a sound layer: pictures do not go in it.',
       );
       return;
     }
-    if (alvo.locked) {
-      _avisar('A camada "${alvo.name}" está travada.');
+    if (target.locked) {
+      _notify('The layer "${target.name}" is locked.');
       return;
     }
-    final novo = moverParaCamada(_estado, id, destino);
-    if (identical(novo, _estado)) {
-      _avisar('Já há um bloco nesse instante da outra camada.');
+    final updated = moveToLayer(_state, id, destination);
+    if (identical(updated, _state)) {
+      _notify('There is already a block at that instant on the other layer.');
       return;
     }
-    _editar(novo);
+    _edit(updated);
   }
 
-  /// Os clipes de texto que o monitor desenha por cima da imagem.
+  /// The text clips the monitor draws over the picture.
   ///
-  /// Camada escondida não entra: o monitor mostra o que vai sair, e o que está
-  /// escondido não vai.
-  List<TimelineClip> get _textosVisiveis => [
-    for (final l in _estado.layers)
+  /// A hidden layer is left out: the monitor shows what will come out, and
+  /// what is hidden will not.
+  List<TimelineClip> get _visibleTexts => [
+    for (final l in _state.layers)
       if (!l.hidden && !l.isAudio)
         for (final c in l.clips)
           if (c.isText) c,
   ];
 
-  /// A montagem tem música? É o que decide se a mistura tem o que equilibrar.
-  bool get _temMusica =>
-      _estado.layers.any((l) => l.isAudio && l.clips.isNotEmpty);
+  /// Does the montage have music? It decides whether the mix has anything to balance.
+  bool get _hasMusic =>
+      _state.layers.any((l) => l.isAudio && l.clips.isNotEmpty);
 
-  /// O que caiu na régua, e onde.
+  /// What was dropped on the timeline, and where.
   ///
-  /// Arrastar é o caminho de quem já sabe onde quer a coisa; clicar continua
-  /// pondo na cabeça de leitura. As duas portas levam à mesma operação.
-  void _soltarNaRegua(ArrastoParaARegua o, double atS, int camada) {
+  /// Dragging is the path for whoever already knows where they want the thing;
+  /// clicking still places at the playhead. Both doors lead to the same operation.
+  void _dropOnRuler(RulerDrop o, double atS, int layerIndex) {
     final media = o.media;
     if (media != null) {
-      _usarMidia(media, atS: atS, camada: camada);
+      _useMedia(media, atS: atS, layerIndex: layerIndex);
       return;
     }
-    final evento = o.evento!;
-    if (camada >= 0 &&
-        camada < _estado.layers.length &&
-        _estado.layers[camada].isAudio) {
-      _avisar('Essa camada é de som: um momento da partida não entra nela.');
+    final event = o.event!;
+    if (layerIndex >= 0 &&
+        layerIndex < _state.layers.length &&
+        _state.layers[layerIndex].isAudio) {
+      _notify('This is a sound layer: a match moment does not go in it.');
       return;
     }
-    var base = _estado;
-    if (camada >= 0 && camada < base.layers.length) {
-      base = base.copyWith(camadaAtiva: camada);
+    var base = _state;
+    if (layerIndex >= 0 && layerIndex < base.layers.length) {
+      base = base.copyWith(activeLayer: layerIndex);
     }
-    _editar(
-      adicionar(
+    _edit(
+      addClip(
         base,
         cutForMoment(
-          evento,
+          event,
           atS: atS,
-          beats: _batidas,
+          beats: _beats,
           sourceDurationS: widget.job.durationS,
         ),
-        beats: _batidas,
-        snap: _ima,
+        beats: _beats,
+        snap: _magnet,
       ),
     );
   }
 
-  /// Põe uma música da biblioteca na régua.
+  /// Puts a library song on the timeline.
   ///
-  /// Sem camada de som escolhida ela abre uma — pedir música e receber um
-  /// pedido de camada seria burocracia.
-  void _porMusicaNaRegua(Media item, {double? atS, int? camada}) {
-    final musica = _musicas[item.id];
-    if (musica == null) {
-      _avisar(
+  /// With no sound layer chosen it opens one — asking for music and getting
+  /// a request for a layer would be red tape.
+  void _putMusicOnRuler(Media item, {double? atS, int? layerIndex}) {
+    final music = _tracks[item.id];
+    if (music == null) {
+      _notify(
         item.isFailed
-            ? 'Não consegui ouvir esse arquivo.'
-            : 'Ainda estou ouvindo essa música.',
+            ? 'Could not listen to this file.'
+            : 'Still listening to this song.',
       );
       return;
     }
-    var base = _estado;
-    // a camada sob o dedo só manda se for de som; largar música numa pista de
-    // imagem quer dizer "põe aqui neste instante", e não "desenha isto"
-    if (camada != null &&
-        camada >= 0 &&
-        camada < base.layers.length &&
-        base.layers[camada].isAudio) {
-      base = base.copyWith(camadaAtiva: camada);
+    var base = _state;
+    // the layer under the finger only counts if it is a sound one; dropping
+    // music on a picture track means "put it here at this instant", not "draw this"
+    if (layerIndex != null &&
+        layerIndex >= 0 &&
+        layerIndex < base.layers.length &&
+        base.layers[layerIndex].isAudio) {
+      base = base.copyWith(activeLayer: layerIndex);
     }
-    final antes = base.clips.length;
-    final novo = porMusica(base, musica, atS: atS ?? _cursor);
-    _editar(novo);
-    if (novo.clips.length == antes) {
-      _avisar('Não coube: já há música nesse ponto.');
+    final beforeState = base.clips.length;
+    final updated = putMusic(base, music, atS: atS ?? _cursor);
+    _edit(updated);
+    if (updated.clips.length == beforeState) {
+      _notify('It did not fit: there is already music at that point.');
     }
   }
 
-  // ── transporte ────────────────────────────────────────────────────────────
+  // ── transport ─────────────────────────────────────────────────────────────
   //
-  // O relógio é o **vídeo**, e não a música. Enquanto a faixa era contínua o
-  // player dela podia mandar no tempo — havia um som tocando do primeiro ao
-  // último quadro. Com blocos que entram e saem não há player nenhum tocando o
-  // vídeo inteiro, então a cabeça de leitura ganhou relógio próprio e a música
-  // passou a segui-la: o bloco que estiver sob ela toca, no ponto dele que
-  // corresponde àquele instante.
+  // The clock is the **video**, not the song. While the track was continuous
+  // its player could own the time — there was a sound playing from the first
+  // to the last frame. With blocks that come and go there is no player
+  // playing the whole video, so the playhead got its own clock and the music
+  // follows it: the block under it plays, at its point matching that instant.
 
-  bool get _tocando => _relogio != null;
+  bool get _playing => _clock != null;
 
-  /// De quanto em quanto a cabeça de leitura anda enquanto toca.
-  static const _passoDoRelogio = Duration(milliseconds: 33);
+  /// How often the playhead moves while playing.
+  static const _clockStep = Duration(milliseconds: 33);
 
-  void _tocarOuPausar() => _tocando ? _pausar() : _tocar();
+  void _togglePlay() => _playing ? _pause() : _play();
 
-  void _tocar() {
-    if (_estado.vazia) return;
-    // no fim, tocar recomeça: parar no último quadro e não fazer nada seria
-    // deixar o botão sem efeito
-    final fim = duracaoDoVideo(_estado.clips);
+  void _play() {
+    if (_state.isBlank) return;
+    // at the end, play restarts: stopping on the last frame and doing nothing
+    // would leave the button without effect
+    final endTime = videoDuration(_state.clips);
     setState(() {
-      if (_cursor >= fim - 0.05) _cursor = 0;
-      _relogio = Timer.periodic(_passoDoRelogio, (_) => _correr());
+      if (_cursor >= endTime - 0.05) _cursor = 0;
+      _clock = Timer.periodic(_clockStep, (_) => _tick());
     });
-    _acertarAMusica();
+    _syncMusic();
   }
 
-  void _pausar() {
-    _relogio?.cancel();
+  void _pause() {
+    _clock?.cancel();
     _audio?.pause();
-    if (mounted) setState(() => _relogio = null);
+    if (mounted) setState(() => _clock = null);
   }
 
-  /// Um passo do relógio.
+  /// One clock step.
   ///
-  /// Enquanto há música tocando, **ela** é o relógio: a posição do player vira
-  /// a posição da cabeça de leitura. É o som que o usuário está ouvindo, e
-  /// puxá-lo de volta a cada deriva daria um soluço audível a cada poucos
-  /// segundos. Nos trechos sem música, o passo do timer basta.
-  void _correr() {
-    final fim = duracaoDoVideo(_estado.clips);
-    var t = _cursor + _passoDoRelogio.inMilliseconds / 1000.0;
+  /// While music is playing, **it** is the clock: the player position becomes
+  /// the playhead position. It is the sound the user is hearing, and pulling it
+  /// back on every drift would cause an audible hiccup every few seconds. In
+  /// stretches without music, the timer step is enough.
+  void _tick() {
+    final endTime = videoDuration(_state.clips);
+    var t = _cursor + _clockStep.inMilliseconds / 1000.0;
 
-    final aqui = _musicaEm(_cursor);
+    final here = _musicAt(_cursor);
     final c = _audio;
-    if (aqui != null &&
+    if (here != null &&
         c != null &&
         c.value.isInitialized &&
         c.value.isPlaying &&
-        _blocoNoPlayer == aqui.bloco.id) {
-      final pela =
-          aqui.bloco.atS +
-          (c.value.position.inMilliseconds / 1000.0 - aqui.bloco.startS);
-      // o player engasga de vez em quando; quando ele se perde de vez, o
-      // relógio segue sem ele em vez de pular a cabeça de leitura para longe
-      if ((pela - t).abs() < 0.5) t = pela;
+        _blockInPlayer == here.block.id) {
+      final byRecording =
+          here.block.atS +
+          (c.value.position.inMilliseconds / 1000.0 - here.block.startS);
+      // the player stutters now and then; when it gets lost for good, the
+      // clock goes on without it instead of throwing the playhead far away
+      if ((byRecording - t).abs() < 0.5) t = byRecording;
     }
 
-    if (t >= fim) {
-      setState(() => _cursor = fim);
-      _pausar();
+    if (t >= endTime) {
+      setState(() => _cursor = endTime);
+      _pause();
       return;
     }
     setState(() => _cursor = t);
-    _seguirCursor(t);
-    _acertarAMusica();
+    _followCursor(t);
+    _syncMusic();
   }
 
-  /// Põe o player no ponto da música que corresponde ao cursor.
+  /// Puts the player at the point of the song matching the cursor.
   ///
-  /// Trocar de faixa custa uma carga de rede, então só se troca quando o bloco
-  /// sob a cabeça de leitura muda. Fora isso corrige-se a deriva: o relógio do
-  /// vídeo e o do elemento de áudio andam separados, e num vídeo longo eles se
-  /// afastam o suficiente para a batida sair do lugar.
-  Future<void> _acertarAMusica() async {
-    if (_ajustandoOAudio) return;
-    _ajustandoOAudio = true;
+  /// Switching tracks costs a network load, so it only switches when the block
+  /// under the playhead changes. Otherwise the drift is corrected: the video
+  /// clock and the audio element's run separately, and in a long video they
+  /// drift apart enough for the beat to slip.
+  Future<void> _syncMusic() async {
+    if (_adjustingAudio) return;
+    _adjustingAudio = true;
     try {
-      final aqui = _musicaEm(_cursor);
-      if (aqui == null) {
-        // silêncio é a falta de bloco, e não um bloco de silêncio
+      final here = _musicAt(_cursor);
+      if (here == null) {
+        // silence is the lack of a block, not a block of silence
         if (_audio?.value.isPlaying ?? false) await _audio?.pause();
-        _blocoNoPlayer = null;
+        _blockInPlayer = null;
         return;
       }
-      if (_blocoNoPlayer != aqui.bloco.id || _audioDe != aqui.musica.id) {
-        _blocoNoPlayer = aqui.bloco.id;
-        if (_audioDe != aqui.musica.id) await _abrirAudio(aqui.musica);
+      if (_blockInPlayer != here.block.id || _audioDe != here.music.id) {
+        _blockInPlayer = here.block.id;
+        if (_audioDe != here.music.id) await _openAudio(here.music);
       }
       final c = _audio;
       if (c == null || !c.value.isInitialized) return;
 
-      final onde = aqui.bloco.startS + (_cursor - aqui.bloco.atS);
-      final agora = c.value.position.inMilliseconds / 1000.0;
-      if ((agora - onde).abs() > 0.2) {
-        await c.seekTo(Duration(milliseconds: (onde * 1000).round()));
+      final location = here.block.startS + (_cursor - here.block.atS);
+      final nowS = c.value.position.inMilliseconds / 1000.0;
+      if ((nowS - location).abs() > 0.2) {
+        await c.seekTo(Duration(milliseconds: (location * 1000).round()));
       }
-      if (_tocando && !c.value.isPlaying) {
+      if (_playing && !c.value.isPlaying) {
         await c.play();
-      } else if (!_tocando && c.value.isPlaying) {
+      } else if (!_playing && c.value.isPlaying) {
         await c.pause();
       }
     } finally {
-      _ajustandoOAudio = false;
+      _adjustingAudio = false;
     }
   }
 
-  Future<void> _abrirAudio(Track musica) async {
-    final antigo = _audio;
+  Future<void> _openAudio(Track music) async {
+    final old = _audio;
     _audio = null;
     _audioDe = null;
-    await antigo?.dispose();
+    await old?.dispose();
 
     final controller = VideoPlayerController.networkUrl(
-      Uri.parse(musica.audioUrl),
+      Uri.parse(music.audioUrl),
     );
     try {
       await controller.initialize();
     } catch (e) {
-      // sem player a montagem continua possível: a onda e as batidas já estão
-      // desenhadas, e é por elas que se encaixa o corte
+      // without a player the montage is still possible: the waveform and the
+      // beats are already drawn, and they are what you snap the cut to
       await controller.dispose();
-      if (mounted) setState(() => _erroMusica = 'não consigo tocar aqui ($e)');
+      if (mounted) setState(() => _musicError = 'cannot play here ($e)');
       return;
     }
     if (!mounted) {
@@ -929,222 +928,222 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
     setState(() {
       _audio = controller;
-      _audioDe = musica.id;
-      _erroMusica = null;
+      _audioDe = music.id;
+      _musicError = null;
     });
   }
 
-  /// Mantém a cabeça de leitura na tela enquanto o vídeo corre.
-  void _seguirCursor(double t) {
+  /// Keeps the playhead on screen while the video runs.
+  void _followCursor(double t) {
     if (!_scroll.hasClients) return;
     final x = t * _px;
-    final janela = _scroll.position.viewportDimension;
-    final inicio = _scroll.offset;
-    if (x < inicio + 40 || x > inicio + janela - 80) {
+    final window = _scroll.position.viewportDimension;
+    final startTime = _scroll.offset;
+    if (x < startTime + 40 || x > startTime + window - 80) {
       _scroll.jumpTo(
-        (x - janela / 3).clamp(0.0, _scroll.position.maxScrollExtent),
+        (x - window / 3).clamp(0.0, _scroll.position.maxScrollExtent),
       );
     }
   }
 
-  Future<void> _irPara(double s) async {
-    // não se limita ao fim da montagem: pôr a cabeça depois do último bloco é
-    // justamente como se põe o próximo
+  Future<void> _goTo(double s) async {
+    // not limited to the end of the montage: putting the playhead after the
+    // last block is exactly how you place the next one
     final t = math.max(0.0, s);
     setState(() => _cursor = t);
-    await _acertarAMusica();
+    await _syncMusic();
   }
 
-  // ── pedido e descarte ─────────────────────────────────────────────────────
+  // ── request and discard ───────────────────────────────────────────────────
 
-  Future<void> _gerar() async {
+  Future<void> _render() async {
     setState(() {
-      _enviando = true;
-      _erro = null;
+      _sending = true;
+      _error = null;
     });
     try {
-      await _salvar();
+      await _save();
       await _api.createRender(
         jobId: widget.job.id,
-        montages: [_estado.paraEnvio()],
+        montages: [_state.toPayload()],
       );
-      // o que saiu foi *isto*: guardar a foto aqui e o que torna o historico
-      // util sem encher o banco a cada salvamento automatico
-      final id = _montagemId;
+      // what came out was *this*: keeping the snapshot here is what makes the
+      // history useful without filling the database on every autosave
+      final id = _montageId;
       if (id != null) {
         await _api
-            .createVersion(widget.job.id, id, label: 'gerou o video')
+            .createVersion(widget.job.id, id, label: 'rendered the video')
             .catchError((_) => false);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
         setState(() {
-          _erro = '$e';
-          _enviando = false;
+          _error = '$e';
+          _sending = false;
         });
       }
     }
   }
 
-  // ── montagens da partida ──────────────────────────────────────────────────
+  // ── match montages ────────────────────────────────────────────────────────
 
-  SavedMontage? get _montagemAtual =>
-      _montagens.where((m) => m.id == _montagemId).firstOrNull;
+  SavedMontage? get _currentMontage =>
+      _montages.where((m) => m.id == _montageId).firstOrNull;
 
-  String get _nomeDaMontagem => _montagemAtual?.name ?? 'Montagem';
+  String get _montageName => _currentMontage?.name ?? 'Montage';
 
-  /// Põe uma montagem na tela, guardando antes a que estava.
+  /// Puts a montage on screen, saving the one that was there first.
   ///
-  /// O histórico de desfazer **não** atravessa a troca: ele é a memória de uma
-  /// sessão de trabalho numa montagem, e desfazer para dentro de outra seria
-  /// apagar o que se acabou de abrir.
-  Future<void> _abrir(SavedMontage m) async {
-    if (m.id == _montagemId) return;
+  /// The undo history does **not** cross the switch: it is the memory of a
+  /// work session on one montage, and undoing into another would erase what
+  /// was just opened.
+  Future<void> _open(SavedMontage m) async {
+    if (m.id == _montageId) return;
     _debounce?.cancel();
-    await _salvar();
+    await _save();
     if (!mounted) return;
 
     setState(() {
-      _montagemId = m.id;
-      _titulo.text = m.montage.title;
+      _montageId = m.id;
+      _title.text = m.montage.title;
     });
-    _historia.limpar();
-    _historia.substituir(montagemDoRascunho(m.montage));
-    // a outra montagem tem a música dela, nos blocos dela
-    _blocoNoPlayer = null;
-    await _acertarAMusica();
+    _history.reset();
+    _history.replace(montageFromDraft(m.montage));
+    // the other montage has its own music, in its own blocks
+    _blockInPlayer = null;
+    await _syncMusic();
   }
 
-  Future<void> _recarregarMontagens({String? abrir}) async {
+  Future<void> _reloadMontages({String? open}) async {
     try {
-      final lista = await _api.listMontages(widget.job.id);
+      final list = await _api.listMontages(widget.job.id);
       if (!mounted) return;
-      setState(() => _montagens = lista);
-      if (abrir != null) {
-        final nova = lista.where((m) => m.id == abrir).firstOrNull;
-        if (nova != null) await _abrir(nova);
+      setState(() => _montages = list);
+      if (open != null) {
+        final fresh = list.where((m) => m.id == open).firstOrNull;
+        if (fresh != null) await _open(fresh);
       }
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  Future<void> _novaMontagem() async {
+  Future<void> _newMontage() async {
     _debounce?.cancel();
-    await _salvar();
+    await _save();
     try {
-      final nova = await _api.createMontage(widget.job.id);
+      final fresh = await _api.createMontage(widget.job.id);
       if (!mounted) return;
       setState(() {
-        _montagens = [nova, ..._montagens];
-        _montagemId = nova.id;
-        _titulo.text = '';
+        _montages = [fresh, ..._montages];
+        _montageId = fresh.id;
+        _title.text = '';
       });
-      _historia.limpar();
-      _historia.substituir(MontageState.vazio());
+      _history.reset();
+      _history.replace(MontageState.blank());
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  Future<void> _duplicarMontagem() async {
-    final atual = _montagemId;
-    if (atual == null) return;
+  Future<void> _duplicateMontage() async {
+    final present = _montageId;
+    if (present == null) return;
     _debounce?.cancel();
-    await _salvar();
+    await _save();
     try {
-      final copia = await _api.duplicateMontage(widget.job.id, atual);
-      await _recarregarMontagens(abrir: copia.id);
+      final copy = await _api.duplicateMontage(widget.job.id, present);
+      await _reloadMontages(open: copy.id);
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  Future<void> _renomearMontagem() async {
-    final atual = _montagemAtual;
-    if (atual == null) return;
-    final nome = await _pedirNome('Renomear', inicial: atual.name);
-    if (nome == null || !mounted) return;
+  Future<void> _renameMontage() async {
+    final present = _currentMontage;
+    if (present == null) return;
+    final displayName = await _askName('Rename', initial: present.name);
+    if (displayName == null || !mounted) return;
     try {
-      await _api.saveMontage(widget.job.id, atual.id, name: nome);
-      await _recarregarMontagens();
+      await _api.saveMontage(widget.job.id, present.id, name: displayName);
+      await _reloadMontages();
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  Future<void> _apagarMontagem() async {
-    final atual = _montagemAtual;
-    if (atual == null) return;
-    final ok = await _confirmar(
-      'Apagar "${atual.name}"?',
-      'Os cortes desta montagem somem. As outras montagens desta partida '
-          'ficam como estão.',
+  Future<void> _deleteMontage() async {
+    final present = _currentMontage;
+    if (present == null) return;
+    final ok = await _confirm(
+      'Delete "${present.name}"?',
+      'The cuts of this montage are gone. The other montages of this match '
+          'stay as they are.',
     );
     if (!ok || !mounted) return;
 
     _debounce?.cancel();
     try {
-      await _api.deleteMontage(widget.job.id, atual.id);
-      final restantes = [..._montagens]..removeWhere((m) => m.id == atual.id);
+      await _api.deleteMontage(widget.job.id, present.id);
+      final remainingOnes = [..._montages]..removeWhere((m) => m.id == present.id);
       if (!mounted) return;
       setState(() {
-        _montagens = restantes;
-        _montagemId = null;
+        _montages = remainingOnes;
+        _montageId = null;
       });
-      _historia.limpar();
-      if (restantes.isNotEmpty) {
-        await _abrir(restantes.first);
+      _history.reset();
+      if (remainingOnes.isNotEmpty) {
+        await _open(remainingOnes.first);
       } else {
-        _historia.substituir(MontageState.vazio());
-        setState(() => _titulo.text = '');
+        _history.replace(MontageState.blank());
+        setState(() => _title.text = '');
       }
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  Future<String?> _pedirNome(String titulo, {String inicial = ''}) {
-    final campo = TextEditingController(text: inicial);
+  Future<String?> _askName(String heading, {String initial = ''}) {
+    final inputField = TextEditingController(text: initial);
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(titulo),
+        title: Text(heading),
         content: TextField(
-          controller: campo,
+          controller: inputField,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Nome'),
+          decoration: const InputDecoration(labelText: 'Name'),
           onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(campo.text.trim()),
-            child: const Text('Salvar'),
+            onPressed: () => Navigator.of(ctx).pop(inputField.text.trim()),
+            child: const Text('Save'),
           ),
         ],
       ),
     ).then((v) => (v == null || v.isEmpty) ? null : v);
   }
 
-  Future<bool> _confirmar(String titulo, String texto) async {
+  Future<bool> _confirm(String heading, String textValue) async {
     final r = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(titulo),
-        content: Text(texto),
+        title: Text(heading),
+        content: Text(textValue),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Apagar'),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -1152,66 +1151,66 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return r ?? false;
   }
 
-  // ── histórico de versões ──────────────────────────────────────────────────
+  // ── version history ───────────────────────────────────────────────────────
 
-  Future<void> _marcarVersao() async {
-    final atual = _montagemId;
-    if (atual == null) return;
+  Future<void> _markVersion() async {
+    final present = _montageId;
+    if (present == null) return;
     _debounce?.cancel();
-    await _salvar();
+    await _save();
     try {
-      final houve = await _api.createVersion(
+      final happened = await _api.createVersion(
         widget.job.id,
-        atual,
-        label: 'marcada a mão',
+        present,
+        label: 'marked by hand',
       );
       if (!mounted) return;
-      _avisar(
-        houve ? 'Versão marcada.' : 'Nada mudou desde a última versão marcada.',
+      _notify(
+        happened ? 'Version marked.' : 'Nothing changed since the last marked version.',
       );
-      await _recarregarMontagens();
+      await _reloadMontages();
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  Future<void> _verHistorico() async {
-    final atual = _montagemId;
-    if (atual == null) return;
+  Future<void> _showHistory() async {
+    final present = _montageId;
+    if (present == null) return;
     _debounce?.cancel();
-    await _salvar();
+    await _save();
 
-    List<MontageVersion> fotos;
+    List<MontageVersion> snapshots;
     try {
-      fotos = await _api.listVersions(widget.job.id, atual);
+      snapshots = await _api.listVersions(widget.job.id, present);
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
       return;
     }
     if (!mounted) return;
 
-    final escolhida = await showDialog<MontageVersion>(
+    final selectedOne = await showDialog<MontageVersion>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Histórico'),
+        title: const Text('History'),
         content: SizedBox(
           width: 420,
-          child: fotos.isEmpty
+          child: snapshots.isEmpty
               ? const Text(
-                  'Ainda não há versões. Uma é guardada a cada vídeo gerado, '
-                  'e dá para marcar uma agora pelo menu.',
+                  'No versions yet. One is kept for every rendered video, '
+                  'and you can mark one now from the menu.',
                 )
               : ListView(
                   shrinkWrap: true,
                   children: [
-                    for (final v in fotos)
+                    for (final v in snapshots)
                       ListTile(
-                        key: ValueKey('versao-${v.id}'),
-                        title: Text(v.label.isEmpty ? 'sem rótulo' : v.label),
+                        key: ValueKey('version-${v.id}'),
+                        title: Text(v.label.isEmpty ? 'unlabelled' : v.label),
                         subtitle: Text(
-                          '${v.nClips} corte(s) · '
+                          '${v.nClips} cut(s) · '
                           '${formatDuration(v.durationS)} · '
-                          '${_quando(v.createdAt)}',
+                          '${_when(v.createdAt)}',
                         ),
                         trailing: const Icon(Icons.restore),
                         onTap: () => Navigator.of(ctx).pop(v),
@@ -1222,106 +1221,105 @@ class _TimelineScreenState extends State<TimelineScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Fechar'),
+            child: const Text('Close'),
           ),
         ],
       ),
     );
-    if (escolhida == null || !mounted) return;
+    if (selectedOne == null || !mounted) return;
 
     try {
-      final volta = await _api.restoreVersion(
+      final back = await _api.restoreVersion(
         widget.job.id,
-        atual,
-        escolhida.id,
+        present,
+        selectedOne.id,
       );
       if (!mounted) return;
-      _historia.limpar();
-      _historia.substituir(montagemDoRascunho(volta.montage));
-      setState(() => _titulo.text = volta.montage.title);
-      _avisar(
-        'Voltou para "${escolhida.label}". O que estava na frente virou '
-        'uma versão também.',
+      _history.reset();
+      _history.replace(montageFromDraft(back.montage));
+      setState(() => _title.text = back.montage.title);
+      _notify(
+        'Back to "${selectedOne.label}". What was there before became '
+        'a version too.',
       );
-      await _recarregarMontagens();
+      await _reloadMontages();
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  static String _quando(DateTime t) {
+  static String _when(DateTime t) {
     final d = t.toLocal();
-    String dois(int n) => n.toString().padLeft(2, '0');
-    return '${dois(d.day)}/${dois(d.month)} ${dois(d.hour)}:${dois(d.minute)}';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)}';
   }
 
-  // ── predefinições ─────────────────────────────────────────────────────────
+  // ── presets ───────────────────────────────────────────────────────────────
 
-  Future<void> _salvarPredefinicao() async {
-    final nome = await _pedirNome('Salvar como predefinição');
-    if (nome == null || !mounted) return;
+  Future<void> _savePreset() async {
+    final displayName = await _askName('Save as preset');
+    if (displayName == null || !mounted) return;
     try {
       await _api.createPreset(
-        nome,
-        receitaDaMontagem(_estado, beatsPerCut: _batidasPorCorte),
+        displayName,
+        recipeFromMontage(_state, beatsPerCut: _beatsPerCut),
       );
       if (mounted) {
-        _avisar('"$nome" vale para qualquer partida agora.');
+        _notify('"$displayName" now works for any match.');
       }
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
     }
   }
 
-  /// Quantas batidas cada corte ocupa, se é que ocupa um número redondo delas.
+  /// How many beats each cut takes, if it takes a round number of them.
   ///
-  /// É o que distingue "cortes de 1,8 s" de "cortes de duas batidas": a
-  /// segunda leitura sobrevive a uma música de outro andamento, e a primeira
-  /// não.
-  double? get _batidasPorCorte {
-    final grade = _batidas;
-    if (grade.length < 3 || _estado.clips.isEmpty) return null;
-    var soma = 0.0;
-    for (var i = 1; i < grade.length; i++) {
-      soma += grade[i] - grade[i - 1];
+  /// It is what tells "1.8 s cuts" from "two-beat cuts": the second reading
+  /// survives a song with another tempo, and the first does not.
+  double? get _beatsPerCut {
+    final grid = _beats;
+    if (grid.length < 3 || _state.clips.isEmpty) return null;
+    var sum = 0.0;
+    for (var i = 1; i < grid.length; i++) {
+      sum += grid[i] - grid[i - 1];
     }
-    final compasso = soma / (grade.length - 1);
-    if (compasso <= 0) return null;
+    final bar = sum / (grid.length - 1);
+    if (bar <= 0) return null;
 
-    final duracoes = [
-      for (final c in _estado.clips)
+    final durations = [
+      for (final c in _state.clips)
         if (!c.isText) c.durationS,
     ];
-    if (duracoes.isEmpty) return null;
-    final media = duracoes.reduce((a, b) => a + b) / duracoes.length;
-    final quantas = media / compasso;
-    final redondo = quantas.roundToDouble();
-    // longe de um número inteiro de batidas, a montagem não é de ritmo
-    if (redondo < 1 || (quantas - redondo).abs() > 0.15) return null;
-    return redondo;
+    if (durations.isEmpty) return null;
+    final media = durations.reduce((a, b) => a + b) / durations.length;
+    final howMany = media / bar;
+    final isRound = howMany.roundToDouble();
+    // far from a whole number of beats, the montage is not a rhythm one
+    if (isRound < 1 || (howMany - isRound).abs() > 0.15) return null;
+    return isRound;
   }
 
-  Future<void> _aplicarPredefinicao() async {
+  Future<void> _applyPreset() async {
     List<Preset> presets;
     try {
       presets = await _api.listPresets();
     } catch (e) {
-      if (mounted) setState(() => _erroSalvar = '$e');
+      if (mounted) setState(() => _saveError = '$e');
       return;
     }
     if (!mounted) return;
 
-    final escolhido = await showDialog<Preset>(
+    final pickedOne = await showDialog<Preset>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Predefinições'),
+        title: const Text('Presets'),
         content: SizedBox(
           width: 420,
           child: presets.isEmpty
               ? const Text(
-                  'Nenhuma ainda. Monte um vídeo do jeito que gosta e use '
-                  '"Salvar como predefinição" — daí em diante a próxima '
-                  'partida sai pronta.',
+                  'None yet. Build a video the way you like it and use '
+                  '"Save as preset" — from then on the next match '
+                  'comes out ready.',
                 )
               : ListView(
                   shrinkWrap: true,
@@ -1330,7 +1328,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       ListTile(
                         key: ValueKey('preset-${p.id}'),
                         title: Text(p.name),
-                        subtitle: Text(_descreverReceita(p.receita)),
+                        subtitle: Text(_describeRecipe(p.recipe)),
                         onTap: () => Navigator.of(ctx).pop(p),
                       ),
                   ],
@@ -1339,57 +1337,57 @@ class _TimelineScreenState extends State<TimelineScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Fechar'),
+            child: const Text('Close'),
           ),
         ],
       ),
     );
-    if (escolhido == null || !mounted) return;
+    if (pickedOne == null || !mounted) return;
 
-    if (!_estado.vazia) {
-      final ok = await _confirmar(
-        'Aplicar "${escolhido.name}"?',
-        'Os cortes que estão na tela são substituídos. Dá para desfazer '
-            'com Ctrl+Z.',
+    if (!_state.isBlank) {
+      final ok = await _confirm(
+        'Apply "${pickedOne.name}"?',
+        'The cuts on screen are replaced. You can undo it '
+            'with Ctrl+Z.',
       );
       if (!ok || !mounted) return;
     }
 
-    _editar(
-      aplicarReceita(
-        escolhido.receita,
-        eventos: _momentosDaPartida,
+    _edit(
+      applyRecipe(
+        pickedOne.recipe,
+        eventList: _matchMoments,
         sourceDurationS: widget.job.durationS,
-        batidas: _batidas,
-        base: _estado,
+        beatTimes: _beats,
+        base: _state,
       ),
     );
-    _avisar('"${escolhido.name}" aplicada: ${_estado.clips.length} corte(s).');
+    _notify('"${pickedOne.name}" applied: ${_state.clips.length} cut(s).');
   }
 
-  String _descreverReceita(Receita r) {
-    final tamanho = r.beatsPerCut > 0
-        ? '${r.beatsPerCut.toStringAsFixed(0)} batida(s) por corte'
-        : '${r.durationS.toStringAsFixed(1)}s por corte';
+  String _describeRecipe(Recipe r) {
+    final sizeValue = r.beatsPerCut > 0
+        ? '${r.beatsPerCut.toStringAsFixed(0)} beat(s) per cut'
+        : '${r.durationS.toStringAsFixed(1)}s per cut';
     final extras = [
       if (r.zoom) 'zoom',
-      if (r.counter) 'contador',
-      if (r.streaks) 'rajadas',
+      if (r.counter) 'counter',
+      if (r.streaks) 'streaks',
       if (r.export.width > 0) '${r.export.width}x${r.export.height}',
     ];
-    return '${r.kinds.join(', ')} · $tamanho'
+    return '${r.kinds.join(', ')} · $sizeValue'
         '${extras.isEmpty ? '' : ' · ${extras.join(' · ')}'}';
   }
 
-  // ── teclado ───────────────────────────────────────────────────────────────
+  // ── keyboard ──────────────────────────────────────────────────────────────
 
-  /// Devolve o foco à montagem — e com ele os atalhos.
+  /// Gives the focus back to the montage — and the shortcuts with it.
   ///
-  /// Chamado pelos campos quando o toque cai **fora** deles. Nada tira o foco
-  /// de um `TextField` por conta própria no Flutter: sem isto, tocar no campo
-  /// de nome uma vez deixava "S" e Delete mortos para o resto da sessão.
-  void _devolverOFoco() {
-    if (mounted) _foco.requestFocus();
+  /// Called by the fields when a tap lands **outside** them. Nothing takes the
+  /// focus away from a `TextField` on its own in Flutter: without this, tapping
+  /// the name field once left "S" and Delete dead for the rest of the session.
+  void _restoreFocus() {
+    if (mounted) _focus.requestFocus();
   }
 
   /// Opens (id) or closes (`null`) typing on the monitor.
@@ -1398,183 +1396,183 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// keystroke, Ctrl+Z would erase one letter at a time.
   void _typeOnFrame(String? id) {
     if (id == _editingTextId) return;
-    if (_editingTextId != null) _historia.fecharGesto();
+    if (_editingTextId != null) _history.endGesture();
     if (id != null) {
-      _historia.abrirGesto();
-      _pausar();
+      _history.startGesture();
+      _pause();
     }
     setState(() => _editingTextId = id);
-    if (id != null) _semHistorico(_estado.copyWith(selecao: {id}));
-    if (id == null) _devolverOFoco();
+    if (id != null) _withoutHistory(_state.copyWith(selectionIds: {id}));
+    if (id == null) _restoreFocus();
   }
 
-  /// Os atalhos, com Ctrl e Cmd valendo igual.
-  Map<ShortcutActivator, VoidCallback> get _atalhos {
+  /// The shortcuts, with Ctrl and Cmd working the same.
+  Map<ShortcutActivator, VoidCallback> get _shortcuts {
     final b = <ShortcutActivator, VoidCallback>{
-      const SingleActivator(LogicalKeyboardKey.space): _tocarOuPausar,
-      const SingleActivator(LogicalKeyboardKey.keyK): _tocarOuPausar,
+      const SingleActivator(LogicalKeyboardKey.space): _togglePlay,
+      const SingleActivator(LogicalKeyboardKey.keyK): _togglePlay,
       const SingleActivator(LogicalKeyboardKey.keyL): () {
-        if (!_tocando) _tocar();
+        if (!_playing) _play();
       },
       const SingleActivator(LogicalKeyboardKey.keyJ): () =>
-          _irPara(_cursor - 2),
-      const SingleActivator(LogicalKeyboardKey.keyS): _dividirNoCursor,
-      const SingleActivator(LogicalKeyboardKey.keyM): _alinharMomentoAoCursor,
-      // vírgula e ponto andam um quadro, como em qualquer editor. As setas
-      // ficam com o passo grosso, de um segundo — os dois têm uso.
-      const SingleActivator(LogicalKeyboardKey.comma): () => _passoDeQuadro(-1),
-      const SingleActivator(LogicalKeyboardKey.period): () => _passoDeQuadro(1),
-      const SingleActivator(LogicalKeyboardKey.delete): _apagarSelecao,
-      const SingleActivator(LogicalKeyboardKey.backspace): _apagarSelecao,
-      const SingleActivator(LogicalKeyboardKey.escape): () => _selecionar(null),
+          _goTo(_cursor - 2),
+      const SingleActivator(LogicalKeyboardKey.keyS): _splitAtCursor,
+      const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
+      // comma and period move one frame, like in any editor. The arrows keep
+      // the coarse one-second step — both have their use.
+      const SingleActivator(LogicalKeyboardKey.comma): () => _frameStep(-1),
+      const SingleActivator(LogicalKeyboardKey.period): () => _frameStep(1),
+      const SingleActivator(LogicalKeyboardKey.delete): _deleteSelection,
+      const SingleActivator(LogicalKeyboardKey.backspace): _deleteSelection,
+      const SingleActivator(LogicalKeyboardKey.escape): () => _select(null),
       const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
-          _irPara(_cursor - 1),
+          _goTo(_cursor - 1),
       const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
-          _irPara(_cursor + 1),
+          _goTo(_cursor + 1),
       const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): () =>
-          _empurrar(-0.1),
+          _push(-0.1),
       const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
-          _empurrar(0.1),
+          _push(0.1),
       const SingleActivator(LogicalKeyboardKey.bracketLeft): () =>
-          _apararNoCursor(inicio: true),
+          _trimAtCursor(startTime: true),
       const SingleActivator(LogicalKeyboardKey.bracketRight): () =>
-          _apararNoCursor(inicio: false),
+          _trimAtCursor(startTime: false),
     };
 
-    // Ctrl no Windows/Linux, Cmd no Mac: o mesmo atalho registrado duas vezes
-    // custa uma linha e evita um "por que não funciona aqui".
-    void comando(
-      LogicalKeyboardKey tecla,
-      VoidCallback acao, {
+    // Ctrl on Windows/Linux, Cmd on Mac: the same shortcut registered twice
+    // costs one line and avoids a "why does it not work here".
+    void command(
+      LogicalKeyboardKey keyName,
+      VoidCallback action, {
       bool shift = false,
     }) {
-      b[SingleActivator(tecla, control: true, shift: shift)] = acao;
-      b[SingleActivator(tecla, meta: true, shift: shift)] = acao;
+      b[SingleActivator(keyName, control: true, shift: shift)] = action;
+      b[SingleActivator(keyName, meta: true, shift: shift)] = action;
     }
 
-    comando(LogicalKeyboardKey.keyZ, _desfazer);
-    comando(LogicalKeyboardKey.keyZ, _refazer, shift: true);
-    comando(LogicalKeyboardKey.keyY, _refazer);
-    comando(LogicalKeyboardKey.keyC, _copiar);
-    comando(LogicalKeyboardKey.keyV, _colar);
-    comando(LogicalKeyboardKey.keyD, _duplicar);
-    comando(LogicalKeyboardKey.keyA, _selecionarTudo);
+    command(LogicalKeyboardKey.keyZ, _undo);
+    command(LogicalKeyboardKey.keyZ, _redo, shift: true);
+    command(LogicalKeyboardKey.keyY, _redo);
+    command(LogicalKeyboardKey.keyC, _copy);
+    command(LogicalKeyboardKey.keyV, _paste);
+    command(LogicalKeyboardKey.keyD, _duplicate);
+    command(LogicalKeyboardKey.keyA, _selectAll);
 
     return b;
   }
 
-  // ── tela ──────────────────────────────────────────────────────────────────
+  // ── screen ────────────────────────────────────────────────────────────────
 
-  /// Abaixo desta largura a barra lateral não cabe, e a tela vira uma coluna
-  /// só — o app continua sendo usável num celular.
-  static const double _larguraDeEditor = 900;
+  /// Below this width the sidebar does not fit, and the screen becomes a
+  /// single column — the app stays usable on a phone.
+  static const double _editorWidth = 900;
 
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
-      // Enquanto alguém escreve, **não há atalho registrado** — e isso é bem
-      // diferente de haver um que não faz nada: o `CallbackShortcuts` marca a
-      // tecla como tratada assim que algum atalho a aceita, e no navegador
-      // tecla tratada vira `preventDefault`. A letra deixaria de chegar ao
-      // campo, que foi o estado intermediário desta correção.
-      bindings: _escrevendo
+      // While someone is typing, **no shortcut is registered** — and that is
+      // quite different from having one that does nothing: `CallbackShortcuts`
+      // marks the key as handled as soon as some shortcut accepts it, and in
+      // the browser a handled key becomes `preventDefault`. The letter would no
+      // longer reach the field, which was the intermediate state of this fix.
+      bindings: _typing
           ? const <ShortcutActivator, VoidCallback>{}
-          : _atalhos,
+          : _shortcuts,
       child: Focus(
-        focusNode: _foco,
+        focusNode: _focus,
         autofocus: true,
         child: Scaffold(
           appBar: AppBar(
-            title: _SeletorDeMontagem(
-              nome: _nomeDaMontagem,
-              montagens: _montagens,
-              atual: _montagemId,
-              onAbrir: _abrir,
-              onNova: _novaMontagem,
+            title: _MontagePicker(
+              displayName: _montageName,
+              montageList: _montages,
+              present: _montageId,
+              onOpen: _open,
+              onNew: _newMontage,
             ),
             actions: [
-              _EstadoDoRascunho(
-                salvando: _salvando,
-                salvoEm: _salvoEm,
-                erro: _erroSalvar,
-                onTentarDeNovo: _salvar,
+              _DraftStatus(
+                saving: _saving,
+                savedAt: _savedAt,
+                err: _saveError,
+                onRetry: _save,
               ),
               IconButton(
-                tooltip: 'Desfazer (Ctrl+Z)',
-                onPressed: _historia.podeDesfazer ? _desfazer : null,
+                tooltip: 'Undo (Ctrl+Z)',
+                onPressed: _history.canUndo ? _undo : null,
                 icon: const Icon(Icons.undo),
               ),
               IconButton(
-                tooltip: 'Refazer (Ctrl+Shift+Z)',
-                onPressed: _historia.podeRefazer ? _refazer : null,
+                tooltip: 'Redo (Ctrl+Shift+Z)',
+                onPressed: _history.canRedo ? _redo : null,
                 icon: const Icon(Icons.redo),
               ),
               IconButton(
-                tooltip: _ima ? 'ímã ligado: gruda na batida' : 'ímã desligado',
-                onPressed: () => setState(() => _ima = !_ima),
-                icon: Icon(_ima ? Icons.grid_on : Icons.grid_off),
+                tooltip: _magnet ? 'magnet on: snaps to the beat' : 'magnet off',
+                onPressed: () => setState(() => _magnet = !_magnet),
+                icon: Icon(_magnet ? Icons.grid_on : Icons.grid_off),
               ),
               PopupMenuButton<String>(
-                key: const Key('menu-da-tela'),
+                key: const Key('screen-menu'),
                 onSelected: (v) {
-                  if (v == 'descartar') _apagarMontagem();
-                  if (v == 'atalhos') _mostrarAtalhos();
-                  if (v == 'renomear') _renomearMontagem();
-                  if (v == 'duplicar') _duplicarMontagem();
-                  if (v == 'marcar') _marcarVersao();
-                  if (v == 'historico') _verHistorico();
-                  if (v == 'aplicar-preset') _aplicarPredefinicao();
-                  if (v == 'salvar-preset') _salvarPredefinicao();
+                  if (v == 'discard') _deleteMontage();
+                  if (v == 'shortcuts') _showShortcuts();
+                  if (v == 'rename') _renameMontage();
+                  if (v == 'duplicate') _duplicateMontage();
+                  if (v == 'mark') _markVersion();
+                  if (v == 'history') _showHistory();
+                  if (v == 'apply-preset') _applyPreset();
+                  if (v == 'save-preset') _savePreset();
                 },
                 itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'renomear', child: Text('Renomear')),
+                  PopupMenuItem(value: 'rename', child: Text('Rename')),
                   PopupMenuItem(
-                    value: 'duplicar',
-                    child: Text('Duplicar esta montagem'),
+                    value: 'duplicate',
+                    child: Text('Duplicate this montage'),
                   ),
                   PopupMenuDivider(),
                   PopupMenuItem(
-                    value: 'aplicar-preset',
-                    child: Text('Aplicar predefinição…'),
+                    value: 'apply-preset',
+                    child: Text('Apply preset…'),
                   ),
                   PopupMenuItem(
-                    value: 'salvar-preset',
-                    child: Text('Salvar como predefinição…'),
-                  ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
-                    value: 'marcar',
-                    child: Text('Marcar esta versão'),
-                  ),
-                  PopupMenuItem(
-                    value: 'historico',
-                    child: Text('Histórico de versões…'),
+                    value: 'save-preset',
+                    child: Text('Save as preset…'),
                   ),
                   PopupMenuDivider(),
                   PopupMenuItem(
-                    value: 'atalhos',
-                    child: Text('Atalhos do teclado'),
+                    value: 'mark',
+                    child: Text('Mark this version'),
                   ),
                   PopupMenuItem(
-                    value: 'descartar',
-                    child: Text('Apagar esta montagem'),
+                    value: 'history',
+                    child: Text('Version history…'),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'shortcuts',
+                    child: Text('Keyboard shortcuts'),
+                  ),
+                  PopupMenuItem(
+                    value: 'discard',
+                    child: Text('Delete this montage'),
                   ),
                 ],
               ),
             ],
           ),
           body: LayoutBuilder(
-            builder: (context, restricoes) {
-              final cabeLateral = restricoes.maxWidth >= _larguraDeEditor;
-              if (!cabeLateral) {
-                return _principal(encaixarMomentos: true);
+            builder: (context, bounds) {
+              final sidebarFits = bounds.maxWidth >= _editorWidth;
+              if (!sidebarFits) {
+                return _main(dockMoments: true);
               }
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(width: 300, child: _lateral()),
+                  SizedBox(width: 300, child: _sidebar()),
                   const VerticalDivider(width: 1),
-                  Expanded(child: _principal(encaixarMomentos: false)),
+                  Expanded(child: _main(dockMoments: false)),
                 ],
               );
             },
@@ -1584,48 +1582,48 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  void _mostrarAtalhos() {
+  void _showShortcuts() {
     showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Atalhos'),
+        title: const Text('Shortcuts'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: const [
-              _Atalho('Espaço / K', 'tocar ou pausar'),
-              _Atalho('J / L', 'voltar 2s / tocar'),
-              _Atalho('← →', 'mover a cabeça de leitura (1s)'),
-              _Atalho(', / .', 'andar um quadro'),
-              _Atalho('Shift + ← →', 'empurrar os cortes selecionados'),
-              _Atalho('S', 'dividir o corte sob o cursor'),
-              _Atalho('M', 'alinhar a jogada do bloco escolhido ao cursor'),
-              _Atalho('[ / ]', 'aparar o começo / o fim até o cursor'),
-              _Atalho('Delete', 'tirar da montagem'),
-              _Atalho('Ctrl+Z / Ctrl+Shift+Z', 'desfazer / refazer'),
-              _Atalho('Ctrl+C / Ctrl+V', 'copiar / colar'),
-              _Atalho('Ctrl+D', 'duplicar'),
-              _Atalho('Ctrl+A', 'selecionar tudo'),
-              _Atalho('Shift + clique', 'somar à seleção'),
-              _Atalho('arrastar ↑ ↓', 'levar o corte para outra camada'),
-              _Atalho('Esc', 'limpar a seleção'),
+              _Shortcut('Space / K', 'play or pause'),
+              _Shortcut('J / L', 'back 2s / play'),
+              _Shortcut('← →', 'move the playhead (1s)'),
+              _Shortcut(', / .', 'step one frame'),
+              _Shortcut('Shift + ← →', 'nudge the selected cuts'),
+              _Shortcut('S', 'split the cut under the cursor'),
+              _Shortcut('M', 'align the selected block\'s play to the cursor'),
+              _Shortcut('[ / ]', 'trim the start / end to the cursor'),
+              _Shortcut('Delete', 'remove from the montage'),
+              _Shortcut('Ctrl+Z / Ctrl+Shift+Z', 'undo / redo'),
+              _Shortcut('Ctrl+C / Ctrl+V', 'copy / paste'),
+              _Shortcut('Ctrl+D', 'duplicate'),
+              _Shortcut('Ctrl+A', 'select all'),
+              _Shortcut('Shift + click', 'add to the selection'),
+              _Shortcut('drag ↑ ↓', 'move the cut to another layer'),
+              _Shortcut('Esc', 'clear the selection'),
             ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fechar'),
+            child: const Text('Close'),
           ),
         ],
       ),
     );
   }
 
-  /// A lateral: o que o sistema achou e o que o usuário trouxe, lado a lado —
-  /// as duas respondem à mesma pergunta, "o que eu ponho agora?".
-  Widget _lateral() => DefaultTabController(
+  /// The sidebar: what the system found and what the user brought, side by
+  /// side — both answer the same question, "what do I put in now?".
+  Widget _sidebar() => DefaultTabController(
     length: 3,
     child: Column(
       children: [
@@ -1633,16 +1631,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
           // three tabs in 300px: full labels would not fit side by side
           labelPadding: EdgeInsets.symmetric(horizontal: 4),
           tabs: [
-            Tab(text: 'Momentos'),
-            Tab(text: 'Biblioteca'),
+            Tab(text: 'Moments'),
+            Tab(text: 'Library'),
             Tab(text: 'Transitions'),
           ],
         ),
         Expanded(
           child: TabBarView(
             children: [
-              _momentos(encaixado: false),
-              _biblioteca_(encaixado: false),
+              _moments(docked: false),
+              _libraryPanel(docked: false),
               _transitions(docked: false),
             ],
           ),
@@ -1653,73 +1651,73 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _transitions({required bool docked}) {
     final selected = [
-      for (final id in _estado.selecao)
-        if (_estado.clipe(id) case final c?)
+      for (final id in _state.selectionIds)
+        if (_state.clipItem(id) case final c?)
           if (!_isAudioClip(id)) c,
     ];
     return _Transitions(
       selected: selected,
       duration: _transitionDuration,
-      enabled: !_enviando,
+      enabled: !_sending,
       docked: docked,
-      onApply: (kind) => _editar(
-        applyTransition(_estado, [
+      onApply: (kind) => _edit(
+        applyTransition(_state, [
           for (final c in selected) c.id,
         ], ClipTransition(kind: kind, durationS: _transitionDuration)),
       ),
-      onClear: () => _editar(
-        applyTransition(_estado, [for (final c in selected) c.id], null),
+      onClear: () => _edit(
+        applyTransition(_state, [for (final c in selected) c.id], null),
       ),
       onDuration: (d) {
         setState(() => _transitionDuration = d);
         // clips that already have a transition follow the adjustment: it is
         // the clip being looked at, and moving the control without changing
         // it would be odd
-        var s = _estado;
+        var s = _state;
         for (final c in selected) {
           final t = c.transition;
           if (t != null) {
             s = applyTransition(s, [c.id], t.copyWith(durationS: d));
           }
         }
-        _editar(s);
+        _edit(s);
       },
-      onGestureStart: _historia.abrirGesto,
-      onGestureEnd: _historia.fecharGesto,
+      onGestureStart: _history.startGesture,
+      onGestureEnd: _history.endGesture,
     );
   }
 
   /// Does the clip live on an audio layer?
   bool _isAudioClip(String id) {
-    final where = _estado.localizar(id);
-    return where != null && _estado.layers[where.$1].isAudio;
+    final where = _state.locate(id);
+    return where != null && _state.layers[where.$1].isAudio;
   }
 
-  Widget _biblioteca_({required bool encaixado}) => _Biblioteca(
-    itens: _biblioteca,
-    enviando: _importando,
-    erro: _erroImportar,
-    enabled: !_enviando,
-    encaixado: encaixado,
-    onImportar: _importar,
-    onUsar: _usarMidia,
-    onTirar: _tirarDaBiblioteca,
+  Widget _libraryPanel({required bool docked}) => _Library(
+    itemList: _library,
+    sending: _importing,
+    err: _importError,
+    enabled: !_sending,
+    docked: docked,
+    onImport: _import,
+    onUse: _useMedia,
+    onRemove: _removeFromLibrary,
   );
 
-  Widget _momentos({required bool encaixado}) => _Momentos(
+  Widget _moments({required bool docked}) => _Moments(
     jobId: widget.job.id,
-    momentos: _momentosDaPartida,
-    usados: {for (final c in _estado.clips) chaveDoMomento(c.kind, c.sourceT)},
-    enabled: !_enviando,
-    encaixado: encaixado,
-    onAdicionar: _adicionar,
+    moments: _matchMoments,
+    usedKeys: {for (final c in _state.clips) momentKey(c.kind, c.sourceT)},
+    enabled: !_sending,
+    docked: docked,
+    onAdd: _add,
   );
 
-  Widget _principal({required bool encaixarMomentos}) {
+  Widget _main({required bool dockMoments}) {
     final theme = Theme.of(context);
-    final duracao = duracaoDoVideo(_estado.clips);
-    final preto = duracaoEmPreto(_estado.clips);
-    final selecao = _estado.selecao;
+    final durationValue = videoDuration(_state.clips);
+    final blackS = blackDuration(_state.clips);
+    final selectionIds = _state.selectionIds;
 
     // The monitor, transport and ruler stay pinned at the top; only the panels
     // below scroll. Scrolling to the bottom to adjust an effect and losing
@@ -1729,7 +1727,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     // of the height it scrolls by itself, and the panels stay within reach.
     final pinned = <Widget>[
       const SizedBox(height: 8),
-      // ── o monitor, com a alça de altura ─────────────────────────────────
+      // ── the monitor, with the height handle ─────────────────────────────
       if (widget.job.monitorUrl != null) ...[
         SizedBox(
           height: _monitorH,
@@ -1737,47 +1735,47 @@ class _TimelineScreenState extends State<TimelineScreen> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: PreviewPlayer(
-                // o proxy quando houver; nas partidas antigas, a gravação
+                // the proxy when there is one; for old matches, the recording
                 videoUrl: widget.job.monitorUrl!,
-                cuts: _estado.clipesVisiveis,
+                cuts: _state.visibleClips,
                 atS: _cursor,
-                playing: _tocando,
-                // o texto é desenhado por cima da imagem, e arrastá-lo ali é
-                // como se decide onde ele fica: a alternativa era digitar
-                // dois números e gerar o vídeo para conferir
-                textos: _textosVisiveis,
-                selecao: _estado.selecao,
-                onSelecionarTexto: _selecionar,
-                onMoverTexto: (id, x, y) =>
-                    _editar(posicionarNoQuadro(_estado, id, x: x, y: y)),
-                onArrastando: (t) => setState(() => _arrastando = t),
+                playing: _playing,
+                // the text is drawn over the picture, and dragging it there is
+                // how you decide where it goes: the alternative was typing two
+                // numbers and rendering the video to check
+                texts: _visibleTexts,
+                selectionIds: _state.selectionIds,
+                onSelectText: _select,
+                onMoveText: (id, x, y) =>
+                    _edit(positionOnFrame(_state, id, x: x, y: y)),
+                onDragging: (t) => setState(() => _dragLabel = t),
                 editingId: _editingTextId,
                 onEditing: _typeOnFrame,
                 onTextChanged: (id, v) =>
-                    _editar(trocarTexto(_estado, id, texto: v)),
-                onGestureStart: _historia.abrirGesto,
-                onGestureEnd: _historia.fecharGesto,
+                    _edit(changeText(_state, id, textValue: v)),
+                onGestureStart: _history.startGesture,
+                onGestureEnd: _history.endGesture,
               ),
             ),
           ),
         ),
-        _AlcaDeAltura(
-          key: const Key('alca-monitor'),
-          onArrastar: (dy) =>
+        _HeightHandle(
+          key: const Key('monitor-handle'),
+          onDrag: (dy) =>
               setState(() => _monitorH = (_monitorH + dy).clamp(120.0, 560.0)),
         ),
       ],
 
-      // ── transporte ──────────────────────────────────────────────────────
+      // ── transport ───────────────────────────────────────────────────────
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
         child: Row(
           children: [
             IconButton.filledTonal(
-              // depende de haver o que tocar, e não de haver música: um
-              // vídeo sem trilha nenhuma continua sendo um vídeo a rever
-              onPressed: _estado.vazia ? null : _tocarOuPausar,
-              icon: Icon(_tocando ? Icons.pause : Icons.play_arrow),
+              // depends on there being something to play, not on music: a
+              // video with no track at all is still a video to review
+              onPressed: _state.isBlank ? null : _togglePlay,
+              icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
             ),
             const SizedBox(width: 10),
             Column(
@@ -1785,19 +1783,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(formatClock(_cursor), style: theme.textTheme.titleMedium),
-                // a régua é o tempo do vídeo que vai sair, e nada mais: a
-                // música mora nele, e não ele nela
+                // the ruler is the time of the output video, and nothing else:
+                // the music lives in it, not it in the music
                 Text(
-                  'de ${formatClock(duracaoDoVideo(_estado.clips))}',
+                  'of ${formatClock(videoDuration(_state.clips))}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.hintColor,
                   ),
                 ),
               ],
             ),
-            // Numa tela estreita estes controles não cabem ao lado do
-            // relógio. `reverse` os mantém encostados à direita quando cabem,
-            // e rolando quando não — em vez de estourar o layout.
+            // On a narrow screen these controls do not fit next to the
+            // clock. `reverse` keeps them against the right edge when they
+            // fit, and scrolling when not — instead of breaking the layout.
             Expanded(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -1805,59 +1803,59 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      tooltip: 'Dividir no cursor (S)',
-                      onPressed: _estado.vazia ? null : _dividirNoCursor,
+                      tooltip: 'Split at the cursor (S)',
+                      onPressed: _state.isBlank ? null : _splitAtCursor,
                       icon: const Icon(Icons.content_cut),
                     ),
                     PopupMenuButton<String>(
-                      tooltip: 'Escrever na tela',
+                      tooltip: 'Write on screen',
                       icon: const Icon(Icons.title),
                       onSelected: (v) => switch (v) {
-                        'livre' => _texto('TEXTO'),
-                        'contador' => _gerarRotulos(
-                          contadorDeEliminacoes(_estado.clips),
-                          'eliminações',
+                        'free' => _addText('TEXT'),
+                        'counter' => _generateLabels(
+                          killCounter(_state.clips),
+                          'kills',
                         ),
-                        'rajada' => _gerarRotulos(
-                          rotulosDeRajada(_estado.clips),
-                          'rajadas',
+                        'streak' => _generateLabels(
+                          streakLabels(_state.clips),
+                          'streaks',
                         ),
                         _ => null,
                       },
                       itemBuilder: (_) => const [
                         PopupMenuItem(
-                          value: 'livre',
-                          child: Text('Texto livre'),
+                          value: 'free',
+                          child: Text('Free text'),
                         ),
                         PopupMenuDivider(),
                         PopupMenuItem(
-                          value: 'contador',
-                          child: Text('Contador de eliminações'),
+                          value: 'counter',
+                          child: Text('Kill counter'),
                         ),
                         PopupMenuItem(
-                          value: 'rajada',
-                          child: Text('Rótulos de rajada'),
+                          value: 'streak',
+                          child: Text('Streak labels'),
                         ),
                       ],
                     ),
                     IconButton(
-                      tooltip: 'Nova camada',
-                      onPressed: () => _editar(adicionarCamada(_estado)),
+                      tooltip: 'New layer',
+                      onPressed: () => _edit(addLayer(_state)),
                       icon: const Icon(Icons.layers_outlined),
                     ),
                     IconButton(
-                      key: const Key('nova-camada-de-musica'),
-                      tooltip: 'Nova camada de música',
-                      onPressed: _novaCamadaDeMusica,
+                      key: const Key('new-music-layer'),
+                      tooltip: 'New music layer',
+                      onPressed: _newMusicLayer,
                       icon: const Icon(Icons.queue_music_outlined),
                     ),
                     IconButton(
-                      tooltip: _estado.layers.length > 1
-                          ? 'Tirar a camada ativa'
-                          : 'A última camada não sai',
-                      onPressed: _estado.layers.length > 1
-                          ? () => _editar(
-                              removerCamada(_estado, _estado.camadaAtiva),
+                      tooltip: _state.layers.length > 1
+                          ? 'Remove the active layer'
+                          : 'The last layer cannot be removed',
+                      onPressed: _state.layers.length > 1
+                          ? () => _edit(
+                              removeLayer(_state, _state.activeLayer),
                             )
                           : null,
                       icon: const Icon(Icons.layers_clear_outlined),
@@ -1881,52 +1879,52 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       ),
 
-      // ── a régua da música com os blocos ─────────────────────────────────
+      // ── the music ruler with the blocks ─────────────────────────────────
       MusicTimeline(
-        musicas: _musicas,
-        batidas: _batidas,
-        layers: _estado.layers,
-        camadaAtiva: _estado.camadaAtiva,
-        selecao: selecao,
+        tracks: _tracks,
+        beatTimes: _beats,
+        layers: _state.layers,
+        activeLayer: _state.activeLayer,
+        selectionIds: selectionIds,
         pxPerSecond: _px,
         playheadS: _cursor,
         scroll: _scroll,
-        onSeek: _irPara,
-        onSelect: _selecionar,
-        onMove: _mover,
-        onTrim: _aparar,
-        onStretch: _esticar,
-        onDragLabel: (texto) => setState(() => _arrastando = texto),
-        onGestoInicio: _historia.abrirGesto,
-        onGestoFim: _historia.fecharGesto,
-        onTrocarDeCamada: _trocarDeCamada,
-        onCamadaAtiva: (i) => _semHistorico(_estado.copyWith(camadaAtiva: i)),
-        onReordenarCamadas: (de, para) =>
-            _editar(reordenarCamadas(_estado, de, para)),
-        onAjustarCamada: (i, {muted, hidden, locked}) => _editar(
-          ajustarCamada(
-            _estado,
+        onSeek: _goTo,
+        onSelect: _select,
+        onMove: _move,
+        onTrim: _trim,
+        onStretch: _stretch,
+        onDragLabel: (textValue) => setState(() => _dragLabel = textValue),
+        onGestureStart: _history.startGesture,
+        onGestureEnd: _history.endGesture,
+        onChangeLayer: _changeLayer,
+        onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
+        onReorderLayers: (from, to) =>
+            _edit(reorderLayers(_state, from, to)),
+        onAdjustLayer: (i, {muted, hidden, locked}) => _edit(
+          adjustLayer(
+            _state,
             i,
             muted: muted,
             hidden: hidden,
             locked: locked,
           ),
         ),
-        ondaDaPartida: widget.job.waveform,
-        duracaoDaPartida: widget.job.durationS,
-        onSoltar: _soltarNaRegua,
+        matchWaveform: widget.job.waveform,
+        matchDuration: widget.job.durationS,
+        onDrop: _dropOnRuler,
       ),
 
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
         child: Text(
-          _arrastando ??
-              (_erroMusica ??
-                  'Arraste um momento ou um item da Biblioteca para a régua.'),
+          _dragLabel ??
+              (_musicError ??
+                  'Drag a moment or a Library item onto the timeline.'),
           style: theme.textTheme.bodySmall?.copyWith(
-            color: _arrastando != null
+            color: _dragLabel != null
                 ? theme.colorScheme.primary
-                : _erroMusica != null
+                : _musicError != null
                 ? theme.colorScheme.error
                 : theme.hintColor,
           ),
@@ -1937,86 +1935,86 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ];
 
     final scrolling = <Widget>[
-      if (selecao.length == 1) ...[
+      if (selectionIds.length == 1) ...[
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _BlocoSelecionado(
-            cut: _estado.clipe(selecao.first)!,
-            midia: _midiaDoBloco(selecao.first),
-            onSpeed: (v) => _efeito(selecao.first, speed: v),
-            onColor: (v) => _efeito(selecao.first, color: v),
-            onFade: (v) => _efeito(selecao.first, fade: v),
-            onZoom: (v) => _efeito(selecao.first, zoom: v),
-            onFreeze: (v) => _efeito(selecao.first, freeze: v),
-            onReverse: (v) => _efeito(selecao.first, reverse: v),
-            onEstilo: (v) =>
-                _editar(trocarTexto(_estado, selecao.first, estilo: v)),
-            onTypeOnFrame: () => _typeOnFrame(selecao.first),
-            onDuracao: (d) => _esticar(selecao.first, d),
-            onDeslocar: (d) => _deslocar(selecao.first, d),
-            onParaOCursor: () => _mover(selecao.first, _cursor),
-            onMomentoNoCursor: () => _alinharMomentoAoCursor(selecao.first),
-            onApagar: _apagarSelecao,
-            onDividir: _dividirNoCursor,
-            onDuplicar: _duplicar,
+          child: _SelectedBlock(
+            cut: _state.clipItem(selectionIds.first)!,
+            mediaItem: _blockMedia(selectionIds.first),
+            onSpeed: (v) => _effect(selectionIds.first, speed: v),
+            onColor: (v) => _effect(selectionIds.first, color: v),
+            onFade: (v) => _effect(selectionIds.first, fade: v),
+            onZoom: (v) => _effect(selectionIds.first, zoom: v),
+            onFreeze: (v) => _effect(selectionIds.first, freeze: v),
+            onReverse: (v) => _effect(selectionIds.first, reverse: v),
+            onStyle: (v) =>
+                _edit(changeText(_state, selectionIds.first, styleSpec: v)),
+            onTypeOnFrame: () => _typeOnFrame(selectionIds.first),
+            onDurationChange: (d) => _stretch(selectionIds.first, d),
+            onShift: (d) => _shift(selectionIds.first, d),
+            onToCursor: () => _move(selectionIds.first, _cursor),
+            onMomentAtCursor: () => _alignMomentToCursor(selectionIds.first),
+            onDelete: _deleteSelection,
+            onSplit: _splitAtCursor,
+            onDuplicate: _duplicate,
           ),
         ),
-      ] else if (selecao.length > 1) ...[
+      ] else if (selectionIds.length > 1) ...[
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _SelecaoMultipla(
-            quantos: selecao.length,
-            onApagar: _apagarSelecao,
-            onDuplicar: _duplicar,
-            onLimpar: () => _selecionar(null),
+          child: _MultiSelection(
+            count: selectionIds.length,
+            onDelete: _deleteSelection,
+            onDuplicate: _duplicate,
+            onClearSelection: () => _select(null),
           ),
         ),
       ],
 
-      if (_temMusica) ...[
+      if (_hasMusic) ...[
         const SizedBox(height: 16),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _Mistura(
-            musicVolume: _estado.musicVolume,
-            gameVolume: _estado.gameVolume,
-            temMusica: true,
-            onMudou: (musica, jogo) => _editar(
-              _estado.copyWith(musicVolume: musica, gameVolume: jogo),
+          child: _Mix(
+            musicVolume: _state.musicVolume,
+            gameVolume: _state.gameVolume,
+            hasMusic: true,
+            onChange: (music, game) => _edit(
+              _state.copyWith(musicVolume: music, gameVolume: game),
             ),
           ),
         ),
         const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _GradeDeBatidas(
-            offsetS: _estado.beatOffsetS,
-            multiplicador: _estado.beatMultiplier,
-            compasso: _estado.beatBar,
-            quantas: _batidas.length,
-            onMudou: (offset, mult, compasso) => _editar(
-              _estado.copyWith(
+          child: _BeatGrid(
+            offsetS: _state.beatOffsetS,
+            multiplier: _state.beatMultiplier,
+            bar: _state.beatBar,
+            howMany: _beats.length,
+            onChange: (offset, mult, bar) => _edit(
+              _state.copyWith(
                 beatOffsetS: offset,
                 beatMultiplier: mult,
-                beatBar: compasso,
+                beatBar: bar,
               ),
             ),
           ),
         ),
       ],
 
-      if (encaixarMomentos) ...[
+      if (dockMoments) ...[
         const SizedBox(height: 18),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _momentos(encaixado: true),
+          child: _moments(docked: true),
         ),
         const SizedBox(height: 18),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _biblioteca_(encaixado: true),
+          child: _libraryPanel(docked: true),
         ),
         const SizedBox(height: 18),
         Padding(
@@ -2028,20 +2026,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SizedBox(height: 14),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: _Exportacao(
-          spec: _estado.export,
-          duracaoS: duracao,
-          largura: widget.job.width,
-          altura: widget.job.height,
-          temSelecao: selecao.isNotEmpty,
-          imagens: [
-            for (final m in _biblioteca)
+        child: _ExportPanel(
+          spec: _state.export,
+          durationSecs: durationValue,
+          widthPx: widget.job.width,
+          heightPx: widget.job.height,
+          hasSelection: selectionIds.isNotEmpty,
+          pictures: [
+            for (final m in _library)
               if (m.kind == 'image' && m.isReady) m,
           ],
-          enabled: !_enviando,
-          onMudou: (e) => _editar(_estado.copyWith(export: e)),
-          onExportarSelecao: () => _editar(exportarSelecao(_estado)),
-          onExportarTudo: () => _editar(exportarTudo(_estado)),
+          enabled: !_sending,
+          onChange: (e) => _edit(_state.copyWith(export: e)),
+          onExportSelection: () => _edit(exportSelection(_state)),
+          onExportAll: () => _edit(exportAll(_state)),
         ),
       ),
 
@@ -2052,48 +2050,49 @@ class _TimelineScreenState extends State<TimelineScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             TextField(
-              controller: _titulo,
-              enabled: !_enviando,
-              // Tocar fora devolve o foco à montagem, e com ele os atalhos.
-              // Nada tira o foco de um `TextField` por conta própria: sem
-              // isto, um toque aqui matava o "S" e o Delete para sempre.
-              onTapOutside: (_) => _devolverOFoco(),
-              onChanged: (v) => _semHistorico(_estado.copyWith(title: v)),
+              controller: _title,
+              enabled: !_sending,
+              // Tapping outside gives the focus back to the montage, and the
+              // shortcuts with it. Nothing takes the focus away from a
+              // `TextField` on its own: without this, one tap here killed "S"
+              // and Delete for good.
+              onTapOutside: (_) => _restoreFocus(),
+              onChanged: (v) => _withoutHistory(_state.copyWith(title: v)),
               decoration: const InputDecoration(
-                labelText: 'Nome do vídeo',
+                labelText: 'Video name',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              _estado.vazia
-                  ? 'Escolha um momento para pôr o primeiro corte onde a '
-                        'cabeça de leitura estiver.'
-                  // um bloco de música não é um corte: quem conta cortes
-                  // quer saber quantas cenas o vídeo tem
+              _state.isBlank
+                  ? 'Pick a moment to place the first cut where the '
+                        'playhead is.'
+                  // a music block is not a cut: whoever counts cuts wants to
+                  // know how many scenes the video has
                   // a clip covered in the middle becomes two pieces on the
                   // monitor, but it is still one cut
-                  : '${{for (final c in _estado.clipesVisiveis) c.id}.length} corte(s)'
-                        '${_temMusica ? '  ·  com música' : ''}'
-                        '  ·  vídeo de ${formatDuration(duracao)}'
-                        '${preto > 0.05 ? '  ·  ${formatDuration(preto)} de tela preta' : ''}',
+                  : '${{for (final c in _state.visibleClips) c.id}.length} cut(s)'
+                        '${_hasMusic ? '  ·  with music' : ''}'
+                        '  ·  ${formatDuration(durationValue)} video'
+                        '${blackS > 0.05 ? '  ·  ${formatDuration(blackS)} of black screen' : ''}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
             ),
-            if (preto > 0.05)
+            if (blackS > 0.05)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Os espaços vazios entre os blocos ficam pretos, com a '
-                  'música tocando.',
+                  'Empty gaps between blocks stay black, with the '
+                  'music playing.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.hintColor,
                   ),
                 ),
               ),
-            if (_erro != null) ...[
+            if (_error != null) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -2102,22 +2101,22 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  _erro!,
+                  _error!,
                   style: TextStyle(color: theme.colorScheme.error),
                 ),
               ),
             ],
             const SizedBox(height: 16),
-            if (_enviando)
+            if (_sending)
               const Center(child: CircularProgressIndicator())
             else
               FilledButton.icon(
-                onPressed: _estado.vazia ? null : _gerar,
+                onPressed: _state.isBlank ? null : _render,
                 icon: const Icon(Icons.movie_creation_outlined),
                 label: Text(
-                  _estado.vazia
-                      ? 'Ponha ao menos um corte'
-                      : 'Gerar este vídeo',
+                  _state.isBlank
+                      ? 'Add at least one cut'
+                      : 'Render this video',
                 ),
               ),
           ],
@@ -2152,49 +2151,49 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 }
 
-/// O nome da montagem aberta, e a porta para as outras.
+/// The name of the open montage, and the door to the others.
 ///
-/// Fica no lugar do título da tela de propósito: numa partida com três
-/// montagens, saber **qual** está aberta importa mais do que ler "Montar
-/// vídeo" pela décima vez.
-class _SeletorDeMontagem extends StatelessWidget {
-  const _SeletorDeMontagem({
-    required this.nome,
-    required this.montagens,
-    required this.atual,
-    required this.onAbrir,
-    required this.onNova,
+/// It takes the place of the screen title on purpose: in a match with three
+/// montages, knowing **which** one is open matters more than reading "Build
+/// video" for the tenth time.
+class _MontagePicker extends StatelessWidget {
+  const _MontagePicker({
+    required this.displayName,
+    required this.montageList,
+    required this.present,
+    required this.onOpen,
+    required this.onNew,
   });
 
-  final String nome;
-  final List<SavedMontage> montagens;
-  final String? atual;
-  final ValueChanged<SavedMontage> onAbrir;
-  final VoidCallback onNova;
+  final String displayName;
+  final List<SavedMontage> montageList;
+  final String? present;
+  final ValueChanged<SavedMontage> onOpen;
+  final VoidCallback onNew;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return PopupMenuButton<String>(
-      key: const Key('seletor-de-montagem'),
-      tooltip: 'Montagens desta partida',
+      key: const Key('montage-picker'),
+      tooltip: 'Montages of this match',
       onSelected: (v) {
         if (v == '+') {
-          onNova();
+          onNew();
           return;
         }
-        final m = montagens.where((x) => x.id == v).firstOrNull;
-        if (m != null) onAbrir(m);
+        final m = montageList.where((x) => x.id == v).firstOrNull;
+        if (m != null) onOpen(m);
       },
       itemBuilder: (_) => [
-        for (final m in montagens)
+        for (final m in montageList)
           PopupMenuItem(
             value: m.id,
-            key: ValueKey('abrir-${m.id}'),
+            key: ValueKey('open-${m.id}'),
             child: Row(
               children: [
                 Icon(
-                  m.id == atual ? Icons.check : Icons.movie_outlined,
+                  m.id == present ? Icons.check : Icons.movie_outlined,
                   size: 18,
                 ),
                 const SizedBox(width: 8),
@@ -2206,8 +2205,8 @@ class _SeletorDeMontagem extends StatelessWidget {
                       Text(m.name, overflow: TextOverflow.ellipsis),
                       Text(
                         m.isEmpty
-                            ? 'vazia'
-                            : '${m.nClips} corte(s) · '
+                            ? 'empty'
+                            : '${m.nClips} cut(s) · '
                                   '${formatDuration(m.durationS)}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.hintColor,
@@ -2219,14 +2218,14 @@ class _SeletorDeMontagem extends StatelessWidget {
               ],
             ),
           ),
-        if (montagens.isNotEmpty) const PopupMenuDivider(),
+        if (montageList.isNotEmpty) const PopupMenuDivider(),
         const PopupMenuItem(
           value: '+',
           child: Row(
             children: [
               Icon(Icons.add, size: 18),
               SizedBox(width: 8),
-              Text('Nova montagem'),
+              Text('New montage'),
             ],
           ),
         ),
@@ -2234,7 +2233,7 @@ class _SeletorDeMontagem extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Flexible(child: Text(nome, overflow: TextOverflow.ellipsis)),
+          Flexible(child: Text(displayName, overflow: TextOverflow.ellipsis)),
           const Icon(Icons.arrow_drop_down),
         ],
       ),
@@ -2242,12 +2241,12 @@ class _SeletorDeMontagem extends StatelessWidget {
   }
 }
 
-/// Uma linha da lista de atalhos.
-class _Atalho extends StatelessWidget {
-  const _Atalho(this.tecla, this.oQueFaz);
+/// A row of the shortcut list.
+class _Shortcut extends StatelessWidget {
+  const _Shortcut(this.keyName, this.whatItDoes);
 
-  final String tecla;
-  final String oQueFaz;
+  final String keyName;
+  final String whatItDoes;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -2256,11 +2255,11 @@ class _Atalho extends StatelessWidget {
       children: [
         SizedBox(
           width: 170,
-          child: Text(tecla, style: const TextStyle(fontFeatures: [])),
+          child: Text(keyName, style: const TextStyle(fontFeatures: [])),
         ),
         Expanded(
           child: Text(
-            oQueFaz,
+            whatItDoes,
             style: TextStyle(color: Theme.of(context).hintColor),
           ),
         ),
@@ -2269,33 +2268,33 @@ class _Atalho extends StatelessWidget {
   );
 }
 
-/// O controle da grade de batidas.
+/// The beat grid control.
 ///
-/// O detector de ritmo acerta o andamento quase sempre e erra de duas maneiras
-/// previsíveis: pega o contratempo, ou conta o dobro/metade das batidas.
-/// Nenhuma das duas se conserta arrastando bloco por bloco — quem está errada é
-/// a régua, e endireitá-la conserta todos de uma vez.
-class _GradeDeBatidas extends StatelessWidget {
-  const _GradeDeBatidas({
+/// The rhythm detector gets the tempo right almost always and fails in two
+/// predictable ways: it picks the off-beat, or counts double/half the beats.
+/// Neither is fixed by dragging block by block — what is wrong is the ruler,
+/// and straightening it fixes all of them at once.
+class _BeatGrid extends StatelessWidget {
+  const _BeatGrid({
     required this.offsetS,
-    required this.multiplicador,
-    required this.compasso,
-    required this.quantas,
-    required this.onMudou,
+    required this.multiplier,
+    required this.bar,
+    required this.howMany,
+    required this.onChange,
   });
 
   final double offsetS;
-  final double multiplicador;
-  final int compasso;
-  final int quantas;
+  final double multiplier;
+  final int bar;
+  final int howMany;
 
-  /// (deslocamento, multiplicador, compasso)
-  final void Function(double, double, int) onMudou;
+  /// (offset, multiplier, bar)
+  final void Function(double, double, int) onChange;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final ajustada = offsetS != 0 || multiplicador != 1 || compasso != 1;
+    final adjusted = offsetS != 0 || multiplier != 1 || bar != 1;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -2310,26 +2309,26 @@ class _GradeDeBatidas extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Grade de batidas',
+                    'Beat grid',
                     style: theme.textTheme.titleSmall,
                   ),
                 ),
                 Text(
-                  '$quantas no vídeo',
+                  '$howMany in the video',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.hintColor,
                   ),
                 ),
-                if (ajustada)
+                if (adjusted)
                   TextButton(
-                    onPressed: () => onMudou(0, 1, 1),
-                    child: const Text('Como veio'),
+                    onPressed: () => onChange(0, 1, 1),
+                    child: const Text('As detected'),
                   ),
               ],
             ),
             Text(
-              'Se o ímã estiver grudando fora do tempo, é aqui que se conserta '
-              '— e conserta para todos os cortes de uma vez.',
+              'If the magnet snaps off the beat, this is where you fix it '
+              '— and it fixes every cut at once.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -2337,7 +2336,7 @@ class _GradeDeBatidas extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Expanded(child: Text('Densidade')),
+                const Expanded(child: Text('Density')),
                 SegmentedButton<double>(
                   showSelectedIcon: false,
                   style: const ButtonStyle(
@@ -2348,28 +2347,28 @@ class _GradeDeBatidas extends StatelessWidget {
                     ButtonSegment(value: 1.0, label: Text('1×')),
                     ButtonSegment(value: 2.0, label: Text('2×')),
                   ],
-                  selected: {multiplicador},
+                  selected: {multiplier},
                   onSelectionChanged: (v) =>
-                      onMudou(offsetS, v.first, compasso),
+                      onChange(offsetS, v.first, bar),
                 ),
               ],
             ),
             Row(
               children: [
-                const Expanded(child: Text('Grudar no')),
+                const Expanded(child: Text('Snap to')),
                 SegmentedButton<int>(
                   showSelectedIcon: false,
                   style: const ButtonStyle(
                     visualDensity: VisualDensity.compact,
                   ),
                   segments: const [
-                    ButtonSegment(value: 1, label: Text('tempo')),
+                    ButtonSegment(value: 1, label: Text('beat')),
                     ButtonSegment(value: 2, label: Text('2')),
-                    ButtonSegment(value: 4, label: Text('compasso')),
+                    ButtonSegment(value: 4, label: Text('bar')),
                   ],
-                  selected: {compasso},
+                  selected: {bar},
                   onSelectionChanged: (v) =>
-                      onMudou(offsetS, multiplicador, v.first),
+                      onChange(offsetS, multiplier, v.first),
                 ),
               ],
             ),
@@ -2378,16 +2377,16 @@ class _GradeDeBatidas extends StatelessWidget {
                 Expanded(
                   child: Text(
                     offsetS == 0
-                        ? 'Deslocamento'
-                        : 'Deslocamento ${offsetS > 0 ? '+' : ''}'
+                        ? 'Offset'
+                        : 'Offset ${offsetS > 0 ? '+' : ''}'
                               '${offsetS.toStringAsFixed(2)}s',
                   ),
                 ),
-                _Passo(
-                  onMenos: () =>
-                      onMudou(offsetS - 0.02, multiplicador, compasso),
-                  onMais: () =>
-                      onMudou(offsetS + 0.02, multiplicador, compasso),
+                _Step(
+                  onLess: () =>
+                      onChange(offsetS - 0.02, multiplier, bar),
+                  onMore: () =>
+                      onChange(offsetS + 0.02, multiplier, bar),
                 ),
               ],
             ),
@@ -2398,19 +2397,19 @@ class _GradeDeBatidas extends StatelessWidget {
   }
 }
 
-/// O painel de quando há mais de um bloco escolhido.
-class _SelecaoMultipla extends StatelessWidget {
-  const _SelecaoMultipla({
-    required this.quantos,
-    required this.onApagar,
-    required this.onDuplicar,
-    required this.onLimpar,
+/// The panel for when more than one block is selected.
+class _MultiSelection extends StatelessWidget {
+  const _MultiSelection({
+    required this.count,
+    required this.onDelete,
+    required this.onDuplicate,
+    required this.onClearSelection,
   });
 
-  final int quantos;
-  final VoidCallback onApagar;
-  final VoidCallback onDuplicar;
-  final VoidCallback onLimpar;
+  final int count;
+  final VoidCallback onDelete;
+  final VoidCallback onDuplicate;
+  final VoidCallback onClearSelection;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -2419,20 +2418,20 @@ class _SelecaoMultipla extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
       child: Row(
         children: [
-          Expanded(child: Text('$quantos cortes selecionados')),
+          Expanded(child: Text('$count cuts selected')),
           IconButton(
-            tooltip: 'Duplicar (Ctrl+D)',
-            onPressed: onDuplicar,
+            tooltip: 'Duplicate (Ctrl+D)',
+            onPressed: onDuplicate,
             icon: const Icon(Icons.copy_all_outlined),
           ),
           IconButton(
-            tooltip: 'Tirar da montagem (Delete)',
-            onPressed: onApagar,
+            tooltip: 'Remove from the montage (Delete)',
+            onPressed: onDelete,
             icon: const Icon(Icons.delete_outline),
           ),
           IconButton(
-            tooltip: 'Limpar a seleção (Esc)',
-            onPressed: onLimpar,
+            tooltip: 'Clear the selection (Esc)',
+            onPressed: onClearSelection,
             icon: const Icon(Icons.deselect),
           ),
         ],
@@ -2441,14 +2440,14 @@ class _SelecaoMultipla extends StatelessWidget {
   );
 }
 
-/// A alça que muda a altura do monitor.
+/// The handle that changes the monitor height.
 ///
-/// Um editor divide a tela entre ver o quadro e ver o ritmo, e a divisão certa
-/// muda a cada minuto de trabalho — então quem decide é quem está editando.
-class _AlcaDeAltura extends StatelessWidget {
-  const _AlcaDeAltura({super.key, required this.onArrastar});
+/// An editor splits the screen between seeing the frame and seeing the rhythm,
+/// and the right split changes every minute of work — so whoever is editing decides.
+class _HeightHandle extends StatelessWidget {
+  const _HeightHandle({super.key, required this.onDrag});
 
-  final ValueChanged<double> onArrastar;
+  final ValueChanged<double> onDrag;
 
   @override
   Widget build(BuildContext context) {
@@ -2457,7 +2456,7 @@ class _AlcaDeAltura extends StatelessWidget {
       cursor: SystemMouseCursors.resizeUpDown,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onVerticalDragUpdate: (d) => onArrastar(d.delta.dy),
+        onVerticalDragUpdate: (d) => onDrag(d.delta.dy),
         child: SizedBox(
           height: 16,
           child: Center(
@@ -2476,49 +2475,49 @@ class _AlcaDeAltura extends StatelessWidget {
   }
 }
 
-class _BlocoSelecionado extends StatelessWidget {
-  const _BlocoSelecionado({
+class _SelectedBlock extends StatelessWidget {
+  const _SelectedBlock({
     required this.cut,
-    required this.midia,
-    required this.onDuracao,
-    required this.onDeslocar,
-    required this.onParaOCursor,
-    required this.onMomentoNoCursor,
-    required this.onApagar,
-    required this.onDividir,
-    required this.onDuplicar,
+    required this.mediaItem,
+    required this.onDurationChange,
+    required this.onShift,
+    required this.onToCursor,
+    required this.onMomentAtCursor,
+    required this.onDelete,
+    required this.onSplit,
+    required this.onDuplicate,
     required this.onSpeed,
     required this.onColor,
     required this.onFade,
     required this.onZoom,
     required this.onFreeze,
     required this.onReverse,
-    required this.onEstilo,
+    required this.onStyle,
     required this.onTypeOnFrame,
   });
 
   final TimelineClip cut;
 
-  /// O arquivo de onde o bloco saiu, quando ele veio da biblioteca. Um bloco
-  /// de música fala do som, e não da imagem — que ele não tem.
-  final Media? midia;
+  /// The file the block came from, when it came from the library. A music
+  /// block talks about the sound, not the picture — which it does not have.
+  final Media? mediaItem;
 
-  final ValueChanged<double> onDuracao;
-  final ValueChanged<double> onDeslocar;
-  final VoidCallback onParaOCursor;
+  final ValueChanged<double> onDurationChange;
+  final ValueChanged<double> onShift;
+  final VoidCallback onToCursor;
 
-  /// Leva a jogada deste bloco para debaixo da cabeça de leitura.
-  final VoidCallback onMomentoNoCursor;
-  final VoidCallback onApagar;
-  final VoidCallback onDividir;
-  final VoidCallback onDuplicar;
+  /// Brings this block's play under the playhead.
+  final VoidCallback onMomentAtCursor;
+  final VoidCallback onDelete;
+  final VoidCallback onSplit;
+  final VoidCallback onDuplicate;
   final ValueChanged<double> onSpeed;
   final ValueChanged<ClipColor> onColor;
   final ValueChanged<ClipFade> onFade;
   final ValueChanged<List<ZoomKey>> onZoom;
   final ValueChanged<bool> onFreeze;
   final ValueChanged<bool> onReverse;
-  final ValueChanged<ClipTextStyle> onEstilo;
+  final ValueChanged<ClipTextStyle> onStyle;
 
   /// Opens typing on the monitor, over the video.
   final VoidCallback onTypeOnFrame;
@@ -2527,8 +2526,8 @@ class _BlocoSelecionado extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final style = EventStyle.of(cut.kind);
-    final m = midia;
-    final som = m?.isAudio ?? false;
+    final m = mediaItem;
+    final sound = m?.isAudio ?? false;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -2540,7 +2539,7 @@ class _BlocoSelecionado extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  som
+                  sound
                       ? Icons.music_note
                       : m != null
                       ? Icons.movie_outlined
@@ -2552,7 +2551,7 @@ class _BlocoSelecionado extends StatelessWidget {
                 Expanded(
                   child: Text(
                     m == null
-                        ? '${style.label} de ${formatClock(cut.sourceT)}'
+                        ? '${style.label} at ${formatClock(cut.sourceT)}'
                         : m.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -2560,31 +2559,31 @@ class _BlocoSelecionado extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Dividir no cursor (S)',
+                  tooltip: 'Split at the cursor (S)',
                   visualDensity: VisualDensity.compact,
-                  onPressed: onDividir,
+                  onPressed: onSplit,
                   icon: const Icon(Icons.content_cut),
                 ),
                 IconButton(
-                  tooltip: 'Duplicar (Ctrl+D)',
+                  tooltip: 'Duplicate (Ctrl+D)',
                   visualDensity: VisualDensity.compact,
-                  onPressed: onDuplicar,
+                  onPressed: onDuplicate,
                   icon: const Icon(Icons.copy_all_outlined),
                 ),
                 IconButton(
-                  tooltip: 'Tirar da montagem (Delete)',
+                  tooltip: 'Remove from the montage (Delete)',
                   visualDensity: VisualDensity.compact,
-                  onPressed: onApagar,
+                  onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline),
                 ),
               ],
             ),
             Text(
-              'entra em ${formatClock(cut.atS)} do vídeo  ·  '
+              'enters at ${formatClock(cut.atS)} of the video  ·  '
               '${cut.durationS.toStringAsFixed(2)}s'
-              // de que ponto da faixa este pedaço saiu: é o que diz se o
-              // bloco pegou o refrão ou a introdução
-              '${som ? '  ·  a partir de ${formatClock(cut.startS)} da música' : ''}',
+              // which point of the track this piece came from: it tells whether
+              // the block took the chorus or the intro
+              '${sound ? '  ·  from ${formatClock(cut.startS)} of the song' : ''}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -2592,21 +2591,21 @@ class _BlocoSelecionado extends StatelessWidget {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Expanded(child: Text('Duração')),
-                _Passo(
-                  onMenos: () => onDuracao(cut.durationS - 0.1),
-                  onMais: () => onDuracao(cut.durationS + 0.1),
+                const Expanded(child: Text('Duration')),
+                _Step(
+                  onLess: () => onDurationChange(cut.durationS - 0.1),
+                  onMore: () => onDurationChange(cut.durationS + 0.1),
                 ),
               ],
             ),
             Row(
               children: [
                 Expanded(
-                  child: Text(som ? 'Trecho da música' : 'Enquadramento'),
+                  child: Text(sound ? 'Song span' : 'Framing'),
                 ),
-                _Passo(
-                  onMenos: () => onDeslocar(-0.2),
-                  onMais: () => onDeslocar(0.2),
+                _Step(
+                  onLess: () => onShift(-0.2),
+                  onMore: () => onShift(0.2),
                 ),
               ],
             ),
@@ -2616,34 +2615,34 @@ class _BlocoSelecionado extends StatelessWidget {
                 alignment: WrapAlignment.end,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  // Alinhar pela **jogada**, e não pela borda: o corte começa
-                  // antes dela para dar embalo, e é ela que precisa cair na
-                  // batida. Só aparece quando há jogada dentro do bloco.
-                  if (momentoNoVideo(cut) != null)
+                  // Align by the **play**, not by the edge: the cut starts
+                  // before it for the run-up, and it is the play that must land
+                  // on the beat. Only shown when there is a play inside the block.
+                  if (momentInVideo(cut) != null)
                     TextButton.icon(
-                      key: const Key('alinhar-momento'),
-                      onPressed: onMomentoNoCursor,
+                      key: const Key('align-moment'),
+                      onPressed: onMomentAtCursor,
                       icon: const Icon(Icons.center_focus_strong, size: 18),
-                      label: const Text('Alinhar a jogada ao cursor'),
+                      label: const Text('Align the play to the cursor'),
                     ),
                   TextButton.icon(
-                    onPressed: onParaOCursor,
+                    onPressed: onToCursor,
                     icon: const Icon(Icons.vertical_align_center, size: 18),
-                    label: const Text('Mover para o cursor'),
+                    label: const Text('Move to the cursor'),
                   ),
                 ],
               ),
             ),
             if (cut.isText)
-              _TextoDoClipe(
+              _ClipText(
                 cut: cut,
-                onEstilo: onEstilo,
+                onStyle: onStyle,
                 onTypeOnFrame: onTypeOnFrame,
               ),
-            // um bloco de música não desenha nada: zoom, cor e congelar não
-            // teriam sobre o que agir
-            if (!som)
-              _Efeitos(
+            // a music block draws nothing: zoom, colour and freeze would have
+            // nothing to act on
+            if (!sound)
+              _Effects(
                 cut: cut,
                 onSpeed: onSpeed,
                 onColor: onColor,
@@ -2659,11 +2658,11 @@ class _BlocoSelecionado extends StatelessWidget {
   }
 }
 
-class _Passo extends StatelessWidget {
-  const _Passo({required this.onMenos, required this.onMais});
+class _Step extends StatelessWidget {
+  const _Step({required this.onLess, required this.onMore});
 
-  final VoidCallback onMenos;
-  final VoidCallback onMais;
+  final VoidCallback onLess;
+  final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -2671,26 +2670,18 @@ class _Passo extends StatelessWidget {
     children: [
       IconButton(
         visualDensity: VisualDensity.compact,
-        onPressed: onMenos,
+        onPressed: onLess,
         icon: const Icon(Icons.remove_circle_outline),
       ),
       IconButton(
         visualDensity: VisualDensity.compact,
-        onPressed: onMais,
+        onPressed: onMore,
         icon: const Icon(Icons.add_circle_outline),
       ),
     ],
   );
 }
 
-/// A prateleira de momentos: o que dá para pôr no vídeo.
-///
-/// Cada item traz o quadro daquele instante da partida. Sem imagem, escolher
-/// entre trinta eliminações é escolher entre trinta relógios — e a diferença
-/// entre a jogada que vale e as outras está justamente no que se vê.
-///
-/// Um momento não se gasta ao ser usado: o item continua ali, marcado, porque
-/// o mesmo instante pode entrar duas vezes na mesma montagem.
 /// Transitions: how the selected clip enters over the previous one.
 class _Transitions extends StatelessWidget {
   const _Transitions({
@@ -2806,90 +2797,99 @@ class _Transitions extends StatelessWidget {
   }
 }
 
-class _Momentos extends StatelessWidget {
-  const _Momentos({
+/// The moment shelf: what can go into the video.
+///
+/// Each item carries the frame of that instant of the match. Without a picture,
+/// choosing among thirty kills is choosing among thirty clocks — and the
+/// difference between the play that matters and the others is precisely in
+/// what you see.
+///
+/// A moment is not used up: the item stays there, marked, because the same
+/// instant can go into the same montage twice.
+class _Moments extends StatelessWidget {
+  const _Moments({
     required this.jobId,
-    required this.momentos,
-    required this.usados,
+    required this.moments,
+    required this.usedKeys,
     required this.enabled,
-    required this.encaixado,
-    required this.onAdicionar,
+    required this.docked,
+    required this.onAdd,
   });
 
   final String jobId;
-  final List<DetectionEvent> momentos;
+  final List<DetectionEvent> moments;
 
-  /// Os momentos que já estão na régua, por [chaveDoMomento].
+  /// The moments already on the ruler, by [momentKey].
   ///
-  /// Por tipo **e** instante, e não só pelo instante: uma eliminação na cabeça
-  /// acende os dois detectores quase junto, e marcar pelo tempo faria pôr a
-  /// eliminação riscar o headshot que ainda não entrou.
-  final Set<String> usados;
+  /// By kind **and** instant, not only by instant: a headshot kill lights up
+  /// both detectors almost together, and marking by time would make placing the
+  /// kill strike out the headshot that has not gone in yet.
+  final Set<String> usedKeys;
   final bool enabled;
 
-  /// `true` quando a lista mora dentro da coluna principal (tela estreita) e
-  /// portanto não pode ter rolagem própria.
-  final bool encaixado;
-  final ValueChanged<DetectionEvent> onAdicionar;
+  /// `true` when the list lives inside the main column (narrow screen) and so
+  /// cannot scroll on its own.
+  final bool docked;
+  final ValueChanged<DetectionEvent> onAdd;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (momentos.isEmpty) {
+    if (moments.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(16),
         child: Text(
-          'A análise não achou nenhum momento nesta partida.',
+          'The analysis found no moments in this match.',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         ),
       );
     }
 
-    final cabecalho = Padding(
-      padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 12, 14, 8),
+    final headerWidget = Padding(
+      padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 12, 14, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Momentos da partida', style: theme.textTheme.titleSmall),
+          Text('Match moments', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
-            'Clique para pôr o corte onde a música estiver. O mesmo momento '
-            'pode entrar mais de uma vez.',
+            'Click to place the cut where the song is. The same moment '
+            'can go in more than once.',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ],
       ),
     );
 
-    final itens = [
-      for (final e in momentos)
-        _MomentoTile(
-          // tipo + instante: dois detectores podem cair no mesmo tempo, e duas
-          // chaves iguais na mesma lista derrubam a tela
-          key: ValueKey('momento-${chaveDoMomento(e.kind, e.t)}'),
+    final itemList = [
+      for (final e in moments)
+        _MomentTile(
+          // kind + instant: two detectors can land on the same time, and two
+          // equal keys in the same list bring the screen down
+          key: ValueKey('moment-${momentKey(e.kind, e.t)}'),
           jobId: jobId,
-          evento: e,
-          usado: usados.contains(chaveDoMomento(e.kind, e.t)),
+          event: e,
+          used: usedKeys.contains(momentKey(e.kind, e.t)),
           enabled: enabled,
-          onAdicionar: () => onAdicionar(e),
+          onAdd: () => onAdd(e),
         ),
     ];
 
-    if (encaixado) {
+    if (docked) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [cabecalho, ...itens],
+        children: [headerWidget, ...itemList],
       );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        cabecalho,
+        headerWidget,
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
-            children: itens,
+            children: itemList,
           ),
         ),
       ],
@@ -2897,15 +2897,15 @@ class _Momentos extends StatelessWidget {
   }
 }
 
-/// O que fica sob o dedo enquanto se arrasta para a régua.
+/// What sits under the finger while dragging to the ruler.
 ///
-/// Um retângulo do tamanho e da cor do bloco que vai nascer: o gesto mostra o
-/// resultado antes de acontecer.
-class _Fantasma extends StatelessWidget {
-  const _Fantasma({required this.rotulo, required this.cor});
+/// A rectangle the size and colour of the block about to be born: the gesture
+/// shows the result before it happens.
+class _DropGhost extends StatelessWidget {
+  const _DropGhost({required this.textClip, required this.fillColour});
 
-  final String rotulo;
-  final Color cor;
+  final String textClip;
+  final Color fillColour;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -2916,11 +2916,11 @@ class _Fantasma extends StatelessWidget {
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.85),
+        color: fillColour.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        rotulo,
+        textClip,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -2929,64 +2929,64 @@ class _Fantasma extends StatelessWidget {
   );
 }
 
-class _MomentoTile extends StatelessWidget {
-  const _MomentoTile({
+class _MomentTile extends StatelessWidget {
+  const _MomentTile({
     super.key,
     required this.jobId,
-    required this.evento,
-    required this.usado,
+    required this.event,
+    required this.used,
     required this.enabled,
-    required this.onAdicionar,
+    required this.onAdd,
   });
 
   final String jobId;
-  final DetectionEvent evento;
-  final bool usado;
+  final DetectionEvent event;
+  final bool used;
   final bool enabled;
-  final VoidCallback onAdicionar;
+  final VoidCallback onAdd;
 
-  /// O nome que este momento leva no cartão e no fantasma.
+  /// The name this moment carries on the card and on the ghost.
   ///
-  /// Uma eliminação com habilidade diz **qual** — "Orisa: Energy Javelin" e não
-  /// "Morte por habilidade". Numa partida com cinco habilidades diferentes, o
-  /// rótulo genérico daria cinco cartões idênticos, e escolher entre eles seria
-  /// escolher no escuro.
-  String get _rotulo {
-    final ability = evento.ability;
+  /// An ability kill says **which** — "Orisa: Energy Javelin" and not "Ability
+  /// kill". In a match with five different abilities, the generic label would
+  /// give five identical cards, and choosing among them would be choosing in
+  /// the dark.
+  String get _label {
+    final ability = event.ability;
     return ability != null
-        ? nomeDaHabilidade(ability)
-        : EventStyle.of(evento.kind).label;
+        ? abilityName(ability)
+        : EventStyle.of(event.kind).label;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = EventStyle.of(evento.kind);
+    final style = EventStyle.of(event.kind);
 
-    // `affinity: horizontal` deixa a prateleira continuar rolando na vertical:
-    // o arrasto que interessa é o que sai dela em direção à régua
-    return Draggable<ArrastoParaARegua>(
-      data: ArrastoParaARegua.momento(evento),
+    // `affinity: horizontal` lets the shelf keep scrolling vertically: the
+    // drag that matters is the one leaving it towards the ruler
+    return Draggable<RulerDrop>(
+      data: RulerDrop.moment(event),
       affinity: Axis.horizontal,
-      // o fantasma pendurado no dedo, e não no ponto do cartão em que se
-      // pegou: é o dedo que diz onde o bloco cai, e a régua faz essa conta com
-      // o canto do fantasma
+      // the ghost hangs from the finger, not from the point of the card where
+      // it was grabbed: the finger says where the block lands, and the ruler
+      // does that maths with the ghost's corner
       dragAnchorStrategy: pointerDragAnchorStrategy,
       maxSimultaneousDrags: enabled ? 1 : 0,
-      feedback: _Fantasma(rotulo: _rotulo, cor: style.color),
+      feedback: _DropGhost(textClip: _label, fillColour: style.color),
       childWhenDragging: Opacity(
         opacity: 0.4,
-        child: _cartao(context, theme, style),
+        child: _card(context, theme, style),
       ),
-      child: _cartao(context, theme, style),
+      child: _card(context, theme, style),
     );
   }
 
-  Widget _cartao(BuildContext context, ThemeData theme, EventStyle style) {
+  Widget _card(BuildContext context, ThemeData theme, EventStyle style) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
-        onTap: enabled ? onAdicionar : null,
+        onTap: enabled ? onAdd : null,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
@@ -2994,9 +2994,9 @@ class _MomentoTile extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: _Frame(
-                  url: frameUrl(jobId, evento.t),
-                  cor: style.color,
-                  largura: 104,
+                  url: frameUrl(jobId, event.t),
+                  fillColour: style.color,
+                  widthPx: 104,
                 ),
               ),
               const SizedBox(width: 10),
@@ -3006,7 +3006,7 @@ class _MomentoTile extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _rotulo,
+                      _label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelMedium?.copyWith(
@@ -3015,7 +3015,7 @@ class _MomentoTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      formatClock(evento.t),
+                      formatClock(event.t),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.hintColor,
                       ),
@@ -3024,9 +3024,9 @@ class _MomentoTile extends StatelessWidget {
                 ),
               ),
               Icon(
-                usado ? Icons.check_circle : Icons.add_circle_outline,
+                used ? Icons.check_circle : Icons.add_circle_outline,
                 size: 20,
-                color: usado ? style.color : theme.hintColor,
+                color: used ? style.color : theme.hintColor,
               ),
             ],
           ),
@@ -3036,119 +3036,119 @@ class _MomentoTile extends StatelessWidget {
   }
 }
 
-/// O quadro de um momento, com paciência para esperá-lo existir.
+/// A moment's frame, patient enough to wait for it to exist.
 ///
-/// As miniaturas são extraídas por um worker depois da análise, então numa
-/// partida recém-aberta elas ainda podem não estar lá — e uma partida antiga
-/// só ganha as suas quando o editor pede. Em vez de mostrar um erro definitivo,
-/// o quadro tenta de novo algumas vezes e vai aparecendo sozinho.
+/// Thumbnails are extracted by a worker after the analysis, so in a freshly
+/// opened match they may not be there yet — and an old match only gets its
+/// own when the editor asks. Instead of showing a final error, the frame
+/// retries a few times and shows up on its own.
 class _Frame extends StatefulWidget {
-  const _Frame({required this.url, required this.cor, required this.largura});
+  const _Frame({required this.url, required this.fillColour, required this.widthPx});
 
   final String url;
-  final Color cor;
-  final double largura;
+  final Color fillColour;
+  final double widthPx;
 
   @override
   State<_Frame> createState() => _FrameState();
 }
 
 class _FrameState extends State<_Frame> {
-  static const _maxTentativas = 6;
-  int _tentativa = 0;
-  Timer? _proxima;
+  static const _maxAttempts = 6;
+  int _attempt = 0;
+  Timer? _next;
 
   @override
   void dispose() {
-    _proxima?.cancel();
+    _next?.cancel();
     super.dispose();
   }
 
-  void _tentarDeNovo() {
-    if (_tentativa >= _maxTentativas || _proxima != null) return;
-    _proxima = Timer(const Duration(seconds: 3), () async {
-      _proxima = null;
-      // sem despejar, o Flutter guarda o 404 e nunca mais busca esta URL
+  void _retry() {
+    if (_attempt >= _maxAttempts || _next != null) return;
+    _next = Timer(const Duration(seconds: 3), () async {
+      _next = null;
+      // without evicting, Flutter keeps the 404 and never fetches this URL again
       await NetworkImage(widget.url).evict();
-      if (mounted) setState(() => _tentativa++);
+      if (mounted) setState(() => _attempt++);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final altura = widget.largura * 9 / 16;
+    final heightPx = widget.widthPx * 9 / 16;
     return SizedBox(
-      width: widget.largura,
-      height: altura,
+      width: widget.widthPx,
+      height: heightPx,
       child: Image.network(
         widget.url,
-        key: ValueKey('${widget.url}#$_tentativa'),
+        key: ValueKey('${widget.url}#$_attempt'),
         fit: BoxFit.cover,
         errorBuilder: (context, _, _) {
-          _tentarDeNovo();
+          _retry();
           return ColoredBox(
-            color: widget.cor.withValues(alpha: 0.18),
+            color: widget.fillColour.withValues(alpha: 0.18),
             child: Center(
               child: Icon(
                 Icons.image_outlined,
                 size: 18,
-                color: widget.cor.withValues(alpha: 0.7),
+                color: widget.fillColour.withValues(alpha: 0.7),
               ),
             ),
           );
         },
-        loadingBuilder: (context, child, progresso) => progresso == null
+        loadingBuilder: (context, child, progress) => progress == null
             ? child
-            : ColoredBox(color: widget.cor.withValues(alpha: 0.10)),
+            : ColoredBox(color: widget.fillColour.withValues(alpha: 0.10)),
       ),
     );
   }
 }
 
-/// Diz, discretamente, que o trabalho está guardado.
+/// Says, discreetly, that the work is saved.
 ///
-/// Existe porque a montagem passou a viver no servidor: sem um sinal, o
-/// usuário não teria como saber que pode fechar a aba — e foi justamente
-/// perder tudo num F5 que motivou o salvamento automático.
-class _EstadoDoRascunho extends StatelessWidget {
-  const _EstadoDoRascunho({
-    required this.salvando,
-    required this.salvoEm,
-    required this.erro,
-    required this.onTentarDeNovo,
+/// It exists because the montage came to live on the server: without a sign,
+/// the user would have no way of knowing they can close the tab — and losing
+/// everything on an F5 is precisely what motivated the autosave.
+class _DraftStatus extends StatelessWidget {
+  const _DraftStatus({
+    required this.saving,
+    required this.savedAt,
+    required this.err,
+    required this.onRetry,
   });
 
-  final bool salvando;
-  final DateTime? salvoEm;
-  final String? erro;
-  final VoidCallback onTentarDeNovo;
+  final bool saving;
+  final DateTime? savedAt;
+  final String? err;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (erro != null) {
+    if (err != null) {
       return TextButton.icon(
-        onPressed: onTentarDeNovo,
+        onPressed: onRetry,
         icon: Icon(Icons.cloud_off, size: 16, color: theme.colorScheme.error),
         label: Text(
-          'não salvou',
+          'not saved',
           style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
         ),
       );
     }
-    if (salvando) {
+    if (saving) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Center(
           child: Text(
-            'salvando…',
+            'saving…',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ),
       );
     }
-    if (salvoEm == null) return const SizedBox.shrink();
+    if (savedAt == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Center(
@@ -3158,7 +3158,7 @@ class _EstadoDoRascunho extends StatelessWidget {
             Icon(Icons.cloud_done_outlined, size: 15, color: theme.hintColor),
             const SizedBox(width: 5),
             Text(
-              'salvo',
+              'saved',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -3170,47 +3170,47 @@ class _EstadoDoRascunho extends StatelessWidget {
   }
 }
 
-/// A biblioteca de mídia da partida: o que o usuário trouxe de fora.
+/// The match media library: what the user brought from outside.
 ///
-/// Fica ao lado da prateleira de momentos porque as duas respondem à mesma
-/// pergunta — "o que eu ponho agora?". A diferença é que os momentos o sistema
-/// achou, e isto aqui o usuário trouxe.
-class _Biblioteca extends StatelessWidget {
-  const _Biblioteca({
-    required this.itens,
-    required this.enviando,
-    required this.erro,
+/// It sits next to the moment shelf because both answer the same question —
+/// "what do I put in now?". The difference is that the system found the
+/// moments, and the user brought these.
+class _Library extends StatelessWidget {
+  const _Library({
+    required this.itemList,
+    required this.sending,
+    required this.err,
     required this.enabled,
-    required this.encaixado,
-    required this.onImportar,
-    required this.onUsar,
-    required this.onTirar,
+    required this.docked,
+    required this.onImport,
+    required this.onUse,
+    required this.onRemove,
   });
 
-  final List<Media> itens;
-  final bool enviando;
-  final String? erro;
+  final List<Media> itemList;
+  final bool sending;
+  final String? err;
   final bool enabled;
-  final bool encaixado;
-  final VoidCallback onImportar;
-  final ValueChanged<Media> onUsar;
-  final ValueChanged<Media> onTirar;
+  final bool docked;
+  final VoidCallback onImport;
+  final ValueChanged<Media> onUse;
+  final ValueChanged<Media> onRemove;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final cabecalho = Padding(
-      padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 12, 14, 8),
+    final headerWidget = Padding(
+      padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 12, 14, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Expanded(
-                child: Text('Biblioteca', style: theme.textTheme.titleSmall),
+                child: Text('Library', style: theme.textTheme.titleSmall),
               ),
-              if (enviando)
+              if (sending)
                 const SizedBox(
                   width: 16,
                   height: 16,
@@ -3218,23 +3218,23 @@ class _Biblioteca extends StatelessWidget {
                 )
               else
                 TextButton.icon(
-                  onPressed: enabled ? onImportar : null,
+                  onPressed: enabled ? onImport : null,
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Trazer'),
+                  label: const Text('Import'),
                 ),
             ],
           ),
           Text(
-            'Vídeo, imagem ou música de fora da partida — é por aqui que a '
-            'música entra. Clique para pôr na cabeça de leitura, ou arraste '
-            'para a régua.',
+            'Video, image or music from outside the match — this is where '
+            'music comes in. Click to place it at the playhead, or drag it '
+            'onto the timeline.',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
-          if (erro != null)
+          if (err != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                erro!,
+                err!,
                 style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
               ),
             ),
@@ -3242,17 +3242,17 @@ class _Biblioteca extends StatelessWidget {
       ),
     );
 
-    // a música mora aqui junto com o resto: ela é mídia de fora da partida como
-    // qualquer outra, e ter uma segunda porta só para ela era o que fazia
-    // parecer que havia dois jeitos de pôr som no vídeo
-    final visuais = itens;
+    // music lives here with the rest: it is media from outside the match like
+    // any other, and having a second door just for it is what made it look
+    // like there were two ways of putting sound in the video
+    final visuals = itemList;
 
-    final lista = visuais.isEmpty
+    final list = visuals.isEmpty
         ? [
             Padding(
-              padding: EdgeInsets.fromLTRB(encaixado ? 0 : 14, 0, 14, 12),
+              padding: EdgeInsets.fromLTRB(docked ? 0 : 14, 0, 14, 12),
               child: Text(
-                'Nada aqui ainda.',
+                'Nothing here yet.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.hintColor,
                 ),
@@ -3260,30 +3260,30 @@ class _Biblioteca extends StatelessWidget {
             ),
           ]
         : [
-            for (final m in visuais)
-              _ItemDaBiblioteca(
-                key: ValueKey('midia-${m.id}'),
+            for (final m in visuals)
+              _LibraryItem(
+                key: ValueKey('media-${m.id}'),
                 item: m,
                 enabled: enabled,
-                onUsar: () => onUsar(m),
-                onTirar: () => onTirar(m),
+                onUse: () => onUse(m),
+                onRemove: () => onRemove(m),
               ),
           ];
 
-    if (encaixado) {
+    if (docked) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [cabecalho, ...lista],
+        children: [headerWidget, ...list],
       );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        cabecalho,
+        headerWidget,
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
-            children: lista,
+            children: list,
           ),
         ),
       ],
@@ -3291,46 +3291,46 @@ class _Biblioteca extends StatelessWidget {
   }
 }
 
-class _ItemDaBiblioteca extends StatelessWidget {
-  const _ItemDaBiblioteca({
+class _LibraryItem extends StatelessWidget {
+  const _LibraryItem({
     super.key,
     required this.item,
     required this.enabled,
-    required this.onUsar,
-    required this.onTirar,
+    required this.onUse,
+    required this.onRemove,
   });
 
   final Media item;
   final bool enabled;
-  final VoidCallback onUsar;
-  final VoidCallback onTirar;
+  final VoidCallback onUse;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final pronto = item.isReady;
+    final ready = item.isReady;
 
-    return Draggable<ArrastoParaARegua>(
-      data: ArrastoParaARegua.midia(item),
+    return Draggable<RulerDrop>(
+      data: RulerDrop.mediaItem(item),
       affinity: Axis.horizontal,
       dragAnchorStrategy: pointerDragAnchorStrategy,
-      maxSimultaneousDrags: enabled && pronto ? 1 : 0,
-      feedback: _Fantasma(
-        rotulo: item.name,
-        cor: item.isAudio
+      maxSimultaneousDrags: enabled && ready ? 1 : 0,
+      feedback: _DropGhost(
+        textClip: item.name,
+        fillColour: item.isAudio
             ? theme.colorScheme.primary
             : theme.colorScheme.secondary,
       ),
-      childWhenDragging: Opacity(opacity: 0.4, child: _cartao(theme, pronto)),
-      child: _cartao(theme, pronto),
+      childWhenDragging: Opacity(opacity: 0.4, child: _card(theme, ready)),
+      child: _card(theme, ready),
     );
   }
 
-  Widget _cartao(ThemeData theme, bool pronto) {
+  Widget _card(ThemeData theme, bool ready) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
-        onTap: enabled && pronto ? onUsar : null,
+        onTap: enabled && ready ? onUse : null,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
@@ -3358,7 +3358,7 @@ class _ItemDaBiblioteca extends StatelessWidget {
                           ),
                         )
                       : Image.network(item.thumbUrl!, fit: BoxFit.cover),
-                  // som não tem miniatura: o ícone é o que diz o que é
+                  // sound has no thumbnail: the icon is what says what it is
                 ),
               ),
               const SizedBox(width: 10),
@@ -3376,17 +3376,17 @@ class _ItemDaBiblioteca extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       item.isFailed
-                          ? (item.error ?? 'não consegui ler este arquivo')
+                          ? (item.error ?? 'could not read this file')
                           : item.isPending
-                          ? 'analisando…'
+                          ? 'analysing…'
                           : [
                               item.isImage
-                                  ? 'imagem'
+                                  ? 'image'
                                   : formatDuration(item.durationS),
                               if (item.width > 0)
                                 '${item.width}×${item.height}',
-                              // de música o que importa é o andamento: é por
-                              // ele que se decide o tamanho do corte
+                              // for music what matters is the tempo: it is
+                              // what decides the cut length
                               if (item.isAudio && item.bpm > 0)
                                 '${item.bpm.round()} BPM',
                             ].join('  ·  '),
@@ -3402,9 +3402,9 @@ class _ItemDaBiblioteca extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: 'Tirar da biblioteca',
+                tooltip: 'Remove from the library',
                 visualDensity: VisualDensity.compact,
-                onPressed: enabled ? onTirar : null,
+                onPressed: enabled ? onRemove : null,
                 icon: const Icon(Icons.close, size: 18),
               ),
             ],
@@ -3415,12 +3415,12 @@ class _ItemDaBiblioteca extends StatelessWidget {
   }
 }
 
-/// Os efeitos do clipe escolhido.
+/// The effects of the selected clip.
 ///
-/// Fica recolhido por padrão: a maioria das montagens é corte seco, e um painel
-/// sempre aberto empurraria a régua para fora da tela.
-class _Efeitos extends StatelessWidget {
-  const _Efeitos({
+/// Collapsed by default: most montages are hard cuts, and an always-open
+/// panel would push the timeline off the screen.
+class _Effects extends StatelessWidget {
+  const _Effects({
     required this.cut,
     required this.onSpeed,
     required this.onColor,
@@ -3438,12 +3438,12 @@ class _Efeitos extends StatelessWidget {
   final ValueChanged<bool> onFreeze;
   final ValueChanged<bool> onReverse;
 
-  /// Quantos efeitos estão em uso — para o título dizer que há algo ali sem
-  /// precisar abrir.
-  int get _ativos =>
+  /// How many effects are in use — so the title says something is there
+  /// without having to open it.
+  int get _active =>
       (cut.speed != 1 ? 1 : 0) +
-      (cut.color.neutra ? 0 : 1) +
-      (cut.fade.neutro ? 0 : 1) +
+      (cut.color.isNeutral ? 0 : 1) +
+      (cut.fade.isNeutral ? 0 : 1) +
       (cut.zoom.isEmpty ? 0 : 1) +
       (cut.freeze ? 1 : 0) +
       (cut.reverse ? 1 : 0);
@@ -3459,11 +3459,11 @@ class _Efeitos extends StatelessWidget {
         children: [
           const Icon(Icons.auto_fix_high, size: 16),
           const SizedBox(width: 8),
-          Text('Efeitos', style: theme.textTheme.labelLarge),
-          if (_ativos > 0) ...[
+          Text('Effects', style: theme.textTheme.labelLarge),
+          if (_active > 0) ...[
             const SizedBox(width: 8),
             Text(
-              '$_ativos em uso',
+              '$_active in use',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.primary,
               ),
@@ -3472,31 +3472,31 @@ class _Efeitos extends StatelessWidget {
         ],
       ),
       children: [
-        // O zoom vem pronto: dois pontos resolvem o efeito mais usado numa
-        // montagem, e é melhor isso do que um editor de curvas que ninguém abre.
+        // The zoom comes ready-made: two points cover the most used effect in a
+        // montage, and that beats a curve editor nobody opens.
         Row(
           children: [
-            const SizedBox(width: 92, child: Text('Aproximar')),
+            const SizedBox(width: 92, child: Text('Zoom in')),
             Expanded(
               child: Wrap(
                 spacing: 6,
                 children: [
-                  for (final (rotulo, ate) in const [
-                    ('leve', 1.3),
-                    ('médio', 1.6),
-                    ('forte', 2.2),
+                  for (final (textClip, until) in const [
+                    ('light', 1.3),
+                    ('medium', 1.6),
+                    ('strong', 2.2),
                   ])
                     ChoiceChip(
-                      label: Text(rotulo),
+                      label: Text(textClip),
                       selected:
                           cut.zoom.isNotEmpty &&
-                          (cut.zoom[1].scale - ate).abs() < 0.01,
-                      onSelected: (_) => onZoom(punch(ate: ate)),
+                          (cut.zoom[1].scale - until).abs() < 0.01,
+                      onSelected: (_) => onZoom(punch(until: until)),
                     ),
                   if (cut.zoom.isNotEmpty)
                     ActionChip(
                       avatar: const Icon(Icons.close, size: 14),
-                      label: const Text('tirar'),
+                      label: const Text('remove'),
                       onPressed: () => onZoom(const []),
                     ),
                 ],
@@ -3509,83 +3509,83 @@ class _Efeitos extends StatelessWidget {
           dense: true,
           value: cut.freeze,
           onChanged: onFreeze,
-          title: const Text('Congelar'),
-          subtitle: const Text('a imagem para; o bloco dura o mesmo'),
+          title: const Text('Freeze'),
+          subtitle: const Text('the picture stops; the block lasts the same'),
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           dense: true,
           value: cut.reverse,
           onChanged: onReverse,
-          title: const Text('De trás para frente'),
+          title: const Text('Reverse'),
         ),
-        _Deslizante(
-          rotulo: 'Velocidade',
-          valor: cut.speed,
-          minimo: 0.25,
-          maximo: 4,
-          // a duração no vídeo não muda: o que muda é quanto da gravação entra
-          legenda: cut.speed == 1
+        _LabeledSlider(
+          textClip: 'Speed',
+          amount: cut.speed,
+          minimum: 0.25,
+          maximum: 4,
+          // the duration in the video does not change: what changes is how much of the recording goes in
+          caption: cut.speed == 1
               ? 'normal'
-              : '${cut.speed.toStringAsFixed(2)}×  ·  come '
-                    '${cut.fonteConsumidaS.toStringAsFixed(1)}s da gravação',
+              : '${cut.speed.toStringAsFixed(2)}×  ·  eats '
+                    '${cut.sourceConsumedS.toStringAsFixed(1)}s of recording',
           onChanged: onSpeed,
-          onZerar: cut.speed == 1 ? null : () => onSpeed(1),
+          onReset: cut.speed == 1 ? null : () => onSpeed(1),
         ),
-        _Deslizante(
-          rotulo: 'Entrada',
-          valor: cut.fade.inS,
-          minimo: 0,
-          maximo: 2,
-          legenda: cut.fade.inS == 0
-              ? 'corte seco'
-              : 'aparece em ${cut.fade.inS.toStringAsFixed(2)}s',
+        _LabeledSlider(
+          textClip: 'Fade in',
+          amount: cut.fade.inS,
+          minimum: 0,
+          maximum: 2,
+          caption: cut.fade.inS == 0
+              ? 'hard cut'
+              : 'appears over ${cut.fade.inS.toStringAsFixed(2)}s',
           onChanged: (v) => onFade(cut.fade.copyWith(inS: v)),
-          onZerar: cut.fade.inS == 0
+          onReset: cut.fade.inS == 0
               ? null
               : () => onFade(cut.fade.copyWith(inS: 0)),
         ),
-        _Deslizante(
-          rotulo: 'Saída',
-          valor: cut.fade.outS,
-          minimo: 0,
-          maximo: 2,
-          legenda: cut.fade.outS == 0
-              ? 'corte seco'
-              : 'some em ${cut.fade.outS.toStringAsFixed(2)}s',
+        _LabeledSlider(
+          textClip: 'Fade out',
+          amount: cut.fade.outS,
+          minimum: 0,
+          maximum: 2,
+          caption: cut.fade.outS == 0
+              ? 'hard cut'
+              : 'vanishes over ${cut.fade.outS.toStringAsFixed(2)}s',
           onChanged: (v) => onFade(cut.fade.copyWith(outS: v)),
-          onZerar: cut.fade.outS == 0
+          onReset: cut.fade.outS == 0
               ? null
               : () => onFade(cut.fade.copyWith(outS: 0)),
         ),
-        _Deslizante(
-          rotulo: 'Brilho',
-          valor: cut.color.brightness,
-          minimo: -0.5,
-          maximo: 0.5,
+        _LabeledSlider(
+          textClip: 'Brightness',
+          amount: cut.color.brightness,
+          minimum: -0.5,
+          maximum: 0.5,
           onChanged: (v) => onColor(cut.color.copyWith(brightness: v)),
-          onZerar: cut.color.brightness == 0
+          onReset: cut.color.brightness == 0
               ? null
               : () => onColor(cut.color.copyWith(brightness: 0)),
         ),
-        _Deslizante(
-          rotulo: 'Contraste',
-          valor: cut.color.contrast,
-          minimo: 0.5,
-          maximo: 2,
+        _LabeledSlider(
+          textClip: 'Contrast',
+          amount: cut.color.contrast,
+          minimum: 0.5,
+          maximum: 2,
           onChanged: (v) => onColor(cut.color.copyWith(contrast: v)),
-          onZerar: cut.color.contrast == 1
+          onReset: cut.color.contrast == 1
               ? null
               : () => onColor(cut.color.copyWith(contrast: 1)),
         ),
-        _Deslizante(
-          rotulo: 'Cor',
-          valor: cut.color.saturation,
-          minimo: 0,
-          maximo: 2,
-          legenda: cut.color.saturation == 0 ? 'preto e branco' : null,
+        _LabeledSlider(
+          textClip: 'Colour',
+          amount: cut.color.saturation,
+          minimum: 0,
+          maximum: 2,
+          caption: cut.color.saturation == 0 ? 'black and white' : null,
           onChanged: (v) => onColor(cut.color.copyWith(saturation: v)),
-          onZerar: cut.color.saturation == 1
+          onReset: cut.color.saturation == 1
               ? null
               : () => onColor(cut.color.copyWith(saturation: 1)),
         ),
@@ -3594,26 +3594,26 @@ class _Efeitos extends StatelessWidget {
   }
 }
 
-class _Deslizante extends StatelessWidget {
-  const _Deslizante({
-    required this.rotulo,
-    required this.valor,
-    required this.minimo,
-    required this.maximo,
+class _LabeledSlider extends StatelessWidget {
+  const _LabeledSlider({
+    required this.textClip,
+    required this.amount,
+    required this.minimum,
+    required this.maximum,
     required this.onChanged,
-    this.legenda,
-    this.onZerar,
+    this.caption,
+    this.onReset,
   });
 
-  final String rotulo;
-  final double valor;
-  final double minimo;
-  final double maximo;
-  final String? legenda;
+  final String textClip;
+  final double amount;
+  final double minimum;
+  final double maximum;
+  final String? caption;
   final ValueChanged<double> onChanged;
 
-  /// `null` quando já está no valor neutro — não há o que desfazer.
-  final VoidCallback? onZerar;
+  /// `null` when already at the neutral value — there is nothing to undo.
+  final VoidCallback? onReset;
 
   @override
   Widget build(BuildContext context) {
@@ -3626,10 +3626,10 @@ class _Deslizante extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(rotulo, style: theme.textTheme.bodyMedium),
-              if (legenda != null)
+              Text(textClip, style: theme.textTheme.bodyMedium),
+              if (caption != null)
                 Text(
-                  legenda!,
+                  caption!,
                   maxLines: 2,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.hintColor,
@@ -3641,16 +3641,16 @@ class _Deslizante extends StatelessWidget {
         ),
         Expanded(
           child: Slider(
-            value: valor.clamp(minimo, maximo),
-            min: minimo,
-            max: maximo,
+            value: amount.clamp(minimum, maximum),
+            min: minimum,
+            max: maximum,
             onChanged: onChanged,
           ),
         ),
         IconButton(
-          tooltip: 'Voltar ao normal',
+          tooltip: 'Back to normal',
           visualDensity: VisualDensity.compact,
-          onPressed: onZerar,
+          onPressed: onReset,
           icon: const Icon(Icons.restart_alt, size: 18),
         ),
       ],
@@ -3658,21 +3658,21 @@ class _Deslizante extends StatelessWidget {
   }
 }
 
-/// A mistura de áudio da montagem inteira.
-class _Mistura extends StatelessWidget {
-  const _Mistura({
+/// The audio mix of the whole montage.
+class _Mix extends StatelessWidget {
+  const _Mix({
     required this.musicVolume,
     required this.gameVolume,
-    required this.temMusica,
-    required this.onMudou,
+    required this.hasMusic,
+    required this.onChange,
   });
 
   final double musicVolume;
   final double gameVolume;
-  final bool temMusica;
+  final bool hasMusic;
 
-  /// (volume da música, volume do jogo)
-  final void Function(double, double) onMudou;
+  /// (music volume, game volume)
+  final void Function(double, double) onChange;
 
   @override
   Widget build(BuildContext context) {
@@ -3688,35 +3688,35 @@ class _Mistura extends StatelessWidget {
               children: [
                 const Icon(Icons.graphic_eq, size: 18),
                 const SizedBox(width: 8),
-                Text('Mistura', style: theme.textTheme.titleSmall),
+                Text('Mix', style: theme.textTheme.titleSmall),
               ],
             ),
             Text(
-              temMusica
-                  ? 'Com o jogo em zero, a música toca sozinha. Acima disso o '
-                        'tiro aparece por baixo dela.'
-                  : 'Sem trilha, o vídeo fica com o áudio da partida.',
+              hasMusic
+                  ? 'With the game at zero, the music plays alone. Above that the '
+                        'gunfire comes through under it.'
+                  : 'Without a track, the video keeps the match audio.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
             ),
             const SizedBox(height: 6),
-            _Deslizante(
-              rotulo: 'Música',
-              valor: musicVolume,
-              minimo: 0,
-              maximo: 2,
-              onChanged: temMusica ? (v) => onMudou(v, gameVolume) : (_) {},
-              onZerar: musicVolume == 1 ? null : () => onMudou(1, gameVolume),
+            _LabeledSlider(
+              textClip: 'Music',
+              amount: musicVolume,
+              minimum: 0,
+              maximum: 2,
+              onChanged: hasMusic ? (v) => onChange(v, gameVolume) : (_) {},
+              onReset: musicVolume == 1 ? null : () => onChange(1, gameVolume),
             ),
-            _Deslizante(
-              rotulo: 'Jogo',
-              valor: gameVolume,
-              minimo: 0,
-              maximo: 2,
-              legenda: gameVolume == 0 && temMusica ? 'mudo' : null,
-              onChanged: temMusica ? (v) => onMudou(musicVolume, v) : (_) {},
-              onZerar: gameVolume == 0 ? null : () => onMudou(musicVolume, 0),
+            _LabeledSlider(
+              textClip: 'Game',
+              amount: gameVolume,
+              minimum: 0,
+              maximum: 2,
+              caption: gameVolume == 0 && hasMusic ? 'muted' : null,
+              onChanged: hasMusic ? (v) => onChange(musicVolume, v) : (_) {},
+              onReset: gameVolume == 0 ? null : () => onChange(musicVolume, 0),
             ),
           ],
         ),
@@ -3725,49 +3725,49 @@ class _Mistura extends StatelessWidget {
   }
 }
 
-/// O que sai quando se aperta "gerar".
+/// What comes out when you press "render".
 ///
-/// Fica separado do resto do inspetor de propósito: nada aqui muda a montagem.
-/// Trocar 16:9 por 9:16 não move um clipe sequer — muda a janela por onde se
-/// olha para o mesmo trabalho, e dá para voltar atrás sem desfazer nada.
-class _Exportacao extends StatelessWidget {
-  const _Exportacao({
+/// Kept apart from the rest of the inspector on purpose: nothing here changes
+/// the montage. Switching 16:9 for 9:16 does not move a single clip — it
+/// changes the window onto the same work, and you can go back without undoing anything.
+class _ExportPanel extends StatelessWidget {
+  const _ExportPanel({
     required this.spec,
-    required this.duracaoS,
-    required this.largura,
-    required this.altura,
-    required this.temSelecao,
-    required this.imagens,
+    required this.durationSecs,
+    required this.widthPx,
+    required this.heightPx,
+    required this.hasSelection,
+    required this.pictures,
     required this.enabled,
-    required this.onMudou,
-    required this.onExportarSelecao,
-    required this.onExportarTudo,
+    required this.onChange,
+    required this.onExportSelection,
+    required this.onExportAll,
   });
 
   final ExportSpec spec;
-  final double duracaoS;
-  final int largura;
-  final int altura;
-  final bool temSelecao;
+  final double durationSecs;
+  final int widthPx;
+  final int heightPx;
+  final bool hasSelection;
 
-  /// A biblioteca, filtrada: só imagem serve de marca d'água.
-  final List<Media> imagens;
+  /// The library, filtered: only images work as a watermark.
+  final List<Media> pictures;
   final bool enabled;
-  final ValueChanged<ExportSpec> onMudou;
-  final VoidCallback onExportarSelecao;
-  final VoidCallback onExportarTudo;
+  final ValueChanged<ExportSpec> onChange;
+  final VoidCallback onExportSelection;
+  final VoidCallback onExportAll;
 
-  /// A saída pede corte ou barras? Só então a escolha entre os dois importa.
-  bool get _mudaProporcao {
-    if (spec.width == 0 || largura == 0 || altura == 0) return false;
-    return ((spec.width / spec.height) - (largura / altura)).abs() > 0.01;
+  /// Does the output require cropping or bars? Only then does choosing between them matter.
+  bool get _changesAspect {
+    if (spec.width == 0 || widthPx == 0 || heightPx == 0) return false;
+    return ((spec.width / spec.height) - (widthPx / heightPx)).abs() > 0.01;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final trecho = trechoDe(spec, duracaoS);
-    final recortado = trecho.fim - trecho.inicio < duracaoS - 0.05;
+    final excerpt = stretchOf(spec, durationSecs);
+    final cropped = excerpt.endTime - excerpt.startTime < durationSecs - 0.05;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -3781,23 +3781,23 @@ class _Exportacao extends StatelessWidget {
                 const Icon(Icons.aspect_ratio, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Saída', style: theme.textTheme.titleSmall),
+                  child: Text('Output', style: theme.textTheme.titleSmall),
                 ),
-                if (!spec.padrao)
+                if (!spec.standard)
                   TextButton(
                     onPressed: enabled
-                        ? () => onMudou(const ExportSpec())
+                        ? () => onChange(const ExportSpec())
                         : null,
-                    child: const Text('Padrão'),
+                    child: const Text('Default'),
                   ),
               ],
             ),
             Text(
-              resumoDaExportacao(
+              exportSummary(
                 spec,
-                duracaoS: duracaoS,
-                largura: largura == 0 ? 1920 : largura,
-                altura: altura == 0 ? 1080 : altura,
+                durationSecs: durationSecs,
+                widthPx: widthPx == 0 ? 1920 : widthPx,
+                heightPx: heightPx == 0 ? 1080 : heightPx,
               ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -3805,16 +3805,16 @@ class _Exportacao extends StatelessWidget {
             ),
 
             const SizedBox(height: 8),
-            _LinhaDeOpcoes(
-              rotulo: 'Formato',
+            _OptionRow(
+              textClip: 'Format',
               children: [
-                for (final f in formatosDeSaida)
+                for (final f in outputFormats)
                   ChoiceChip(
-                    label: Text(f.nome),
-                    tooltip: f.nota,
-                    selected: f.combina(spec),
+                    label: Text(f.displayName),
+                    tooltip: f.note,
+                    selected: f.matches(spec),
                     onSelected: enabled
-                        ? (_) => onMudou(
+                        ? (_) => onChange(
                             spec.copyWith(width: f.width, height: f.height),
                           )
                         : null,
@@ -3822,80 +3822,80 @@ class _Exportacao extends StatelessWidget {
               ],
             ),
 
-            if (_mudaProporcao)
-              _LinhaDeOpcoes(
-                rotulo: 'Enquadrar',
+            if (_changesAspect)
+              _OptionRow(
+                textClip: 'Fit',
                 children: [
                   ChoiceChip(
-                    label: const Text('Preencher'),
-                    tooltip: 'corta as sobras dos lados',
+                    label: const Text('Fill'),
+                    tooltip: 'crops the excess on the sides',
                     selected: spec.fit == 'cover',
                     onSelected: enabled
-                        ? (_) => onMudou(spec.copyWith(fit: 'cover'))
+                        ? (_) => onChange(spec.copyWith(fit: 'cover'))
                         : null,
                   ),
                   ChoiceChip(
-                    label: const Text('Caber'),
-                    tooltip: 'mostra o quadro inteiro, com barras',
+                    label: const Text('Contain'),
+                    tooltip: 'shows the whole frame, with bars',
                     selected: spec.fit == 'contain',
                     onSelected: enabled
-                        ? (_) => onMudou(spec.copyWith(fit: 'contain'))
+                        ? (_) => onChange(spec.copyWith(fit: 'contain'))
                         : null,
                   ),
                 ],
               ),
 
-            _LinhaDeOpcoes(
-              rotulo: 'Quadros',
+            _OptionRow(
+              textClip: 'Frame rate',
               children: [
-                for (final f in fpsDeSaida)
+                for (final f in outputFps)
                   ChoiceChip(
                     label: Text(f == 0 ? 'Original' : f.toStringAsFixed(0)),
                     selected: spec.fps == f,
                     onSelected: enabled
-                        ? (_) => onMudou(spec.copyWith(fps: f))
+                        ? (_) => onChange(spec.copyWith(fps: f))
                         : null,
                   ),
               ],
             ),
 
-            _LinhaDeOpcoes(
-              rotulo: 'Qualidade',
+            _OptionRow(
+              textClip: 'Quality',
               children: [
-                for (final q in qualidades)
+                for (final q in qualities)
                   ChoiceChip(
-                    label: Text(q.nome),
-                    tooltip: q.nota,
-                    selected: qualidadeDe(spec).crf == q.crf,
+                    label: Text(q.displayName),
+                    tooltip: q.note,
+                    selected: qualityOf(spec).crf == q.crf,
                     onSelected: enabled
-                        ? (_) => onMudou(spec.copyWith(crf: q.crf))
+                        ? (_) => onChange(spec.copyWith(crf: q.crf))
                         : null,
                   ),
               ],
             ),
 
-            _LinhaDeOpcoes(
-              rotulo: 'Trecho',
+            _OptionRow(
+              textClip: 'Range',
               children: [
                 ChoiceChip(
-                  label: const Text('Tudo'),
-                  selected: !recortado,
-                  onSelected: enabled ? (_) => onExportarTudo() : null,
+                  label: const Text('All'),
+                  selected: !cropped,
+                  onSelected: enabled ? (_) => onExportAll() : null,
                 ),
                 ChoiceChip(
-                  label: const Text('Só a seleção'),
-                  tooltip: temSelecao
-                      ? 'exporta do primeiro ao último bloco escolhido'
-                      : 'escolha blocos na linha do tempo',
-                  selected: recortado,
-                  onSelected: enabled && temSelecao
-                      ? (_) => onExportarSelecao()
+                  label: const Text('Selection only'),
+                  tooltip: hasSelection
+                      ? 'exports from the first to the last selected block'
+                      : 'select blocks on the timeline',
+                  selected: cropped,
+                  onSelected: enabled && hasSelection
+                      ? (_) => onExportSelection()
                       : null,
                 ),
-                if (recortado)
+                if (cropped)
                   Text(
-                    '${formatDuration(trecho.inicio)} → '
-                    '${formatDuration(trecho.fim)}',
+                    '${formatDuration(excerpt.startTime)} → '
+                    '${formatDuration(excerpt.endTime)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.hintColor,
                     ),
@@ -3903,27 +3903,27 @@ class _Exportacao extends StatelessWidget {
               ],
             ),
 
-            _LinhaDeOpcoes(
-              rotulo: 'Marca',
+            _OptionRow(
+              textClip: 'Watermark',
               children: [
                 ChoiceChip(
-                  label: const Text('Nenhuma'),
+                  label: const Text('None'),
                   selected: spec.watermarkId == null,
                   onSelected: enabled
-                      ? (_) => onMudou(spec.copyWith(limparMarca: true))
+                      ? (_) => onChange(spec.copyWith(clearWatermark: true))
                       : null,
                 ),
-                for (final m in imagens)
+                for (final m in pictures)
                   ChoiceChip(
                     label: Text(m.name, overflow: TextOverflow.ellipsis),
                     selected: spec.watermarkId == m.id,
                     onSelected: enabled
-                        ? (_) => onMudou(spec.copyWith(watermarkId: m.id))
+                        ? (_) => onChange(spec.copyWith(watermarkId: m.id))
                         : null,
                   ),
-                if (imagens.isEmpty)
+                if (pictures.isEmpty)
                   Text(
-                    'importe uma imagem na biblioteca',
+                    'import an image into the library',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.hintColor,
                     ),
@@ -3932,45 +3932,45 @@ class _Exportacao extends StatelessWidget {
             ),
 
             if (spec.watermarkId != null) ...[
-              _LinhaDeOpcoes(
-                rotulo: 'Canto',
+              _OptionRow(
+                textClip: 'Corner',
                 children: [
-                  for (final canto in kCantosDaMarca)
+                  for (final corner in kWatermarkCorners)
                     ChoiceChip(
-                      label: Text(canto.nome),
+                      label: Text(corner.displayName),
                       selected:
-                          (spec.watermarkX > 0) == (canto.x > 0) &&
-                          (spec.watermarkY > 0) == (canto.y > 0),
+                          (spec.watermarkX > 0) == (corner.x > 0) &&
+                          (spec.watermarkY > 0) == (corner.y > 0),
                       onSelected: enabled
-                          ? (_) => onMudou(
+                          ? (_) => onChange(
                               spec.copyWith(
-                                watermarkX: canto.x,
-                                watermarkY: canto.y,
+                                watermarkX: corner.x,
+                                watermarkY: corner.y,
                               ),
                             )
                           : null,
                     ),
                 ],
               ),
-              _Deslizante(
-                rotulo: 'Tamanho',
-                valor: spec.watermarkScale,
-                minimo: 0.03,
-                maximo: 0.5,
-                onChanged: (v) => onMudou(spec.copyWith(watermarkScale: v)),
-                onZerar: spec.watermarkScale == 0.12
+              _LabeledSlider(
+                textClip: 'Size',
+                amount: spec.watermarkScale,
+                minimum: 0.03,
+                maximum: 0.5,
+                onChanged: (v) => onChange(spec.copyWith(watermarkScale: v)),
+                onReset: spec.watermarkScale == 0.12
                     ? null
-                    : () => onMudou(spec.copyWith(watermarkScale: 0.12)),
+                    : () => onChange(spec.copyWith(watermarkScale: 0.12)),
               ),
-              _Deslizante(
-                rotulo: 'Opacidade',
-                valor: spec.watermarkOpacity,
-                minimo: 0.05,
-                maximo: 1,
-                onChanged: (v) => onMudou(spec.copyWith(watermarkOpacity: v)),
-                onZerar: spec.watermarkOpacity == 0.65
+              _LabeledSlider(
+                textClip: 'Opacity',
+                amount: spec.watermarkOpacity,
+                minimum: 0.05,
+                maximum: 1,
+                onChanged: (v) => onChange(spec.copyWith(watermarkOpacity: v)),
+                onReset: spec.watermarkOpacity == 0.65
                     ? null
-                    : () => onMudou(spec.copyWith(watermarkOpacity: 0.65)),
+                    : () => onChange(spec.copyWith(watermarkOpacity: 0.65)),
               ),
             ],
           ],
@@ -3980,11 +3980,11 @@ class _Exportacao extends StatelessWidget {
   }
 }
 
-/// Um rótulo à esquerda e as opções à direita, quebrando quando não cabem.
-class _LinhaDeOpcoes extends StatelessWidget {
-  const _LinhaDeOpcoes({required this.rotulo, required this.children});
+/// A label on the left and the options on the right, wrapping when they do not fit.
+class _OptionRow extends StatelessWidget {
+  const _OptionRow({required this.textClip, required this.children});
 
-  final String rotulo;
+  final String textClip;
   final List<Widget> children;
 
   @override
@@ -3996,7 +3996,7 @@ class _LinhaDeOpcoes extends StatelessWidget {
         children: [
           SizedBox(
             width: 74,
-            child: Text(rotulo, style: theme.textTheme.bodyMedium),
+            child: Text(textClip, style: theme.textTheme.bodyMedium),
           ),
           Expanded(
             child: Wrap(
@@ -4014,22 +4014,22 @@ class _LinhaDeOpcoes extends StatelessWidget {
 
 /// How a text clip looks. **What** it says is edited on the monitor itself,
 /// over the video: that is where the real size, colour and position show.
-class _TextoDoClipe extends StatelessWidget {
-  const _TextoDoClipe({
+class _ClipText extends StatelessWidget {
+  const _ClipText({
     required this.cut,
-    required this.onEstilo,
+    required this.onStyle,
     required this.onTypeOnFrame,
   });
 
   final TimelineClip cut;
-  final ValueChanged<ClipTextStyle> onEstilo;
+  final ValueChanged<ClipTextStyle> onStyle;
   final VoidCallback onTypeOnFrame;
 
-  /// As cores que servem a um rótulo sobre gameplay. Uma paleta pequena vale
-  /// mais que um seletor: o que importa é o texto aparecer.
-  static const _cores = ['white', 'yellow', 'orange', 'red', 'cyan', 'black'];
+  /// The colours that suit a label over gameplay. A small palette beats a
+  /// picker: what matters is the text showing up.
+  static const _colours = ['white', 'yellow', 'orange', 'red', 'cyan', 'black'];
 
-  static const _paraTela = {
+  static const _onScreen = {
     'white': Colors.white,
     'yellow': Color(0xFFFFD54F),
     'orange': Color(0xFFFF9800),
@@ -4040,7 +4040,7 @@ class _TextoDoClipe extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final estilo = cut.textStyle;
+    final styleSpec = cut.textStyle;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4059,25 +4059,25 @@ class _TextoDoClipe extends StatelessWidget {
         const SizedBox(height: 8),
         Row(
           children: [
-            const SizedBox(width: 92, child: Text('Cor')),
+            const SizedBox(width: 92, child: Text('Colour')),
             Expanded(
               child: Wrap(
                 spacing: 6,
                 children: [
-                  for (final cor in _cores)
+                  for (final fillColour in _colours)
                     GestureDetector(
-                      onTap: () => onEstilo(estilo.copyWith(color: cor)),
+                      onTap: () => onStyle(styleSpec.copyWith(color: fillColour)),
                       child: Container(
                         width: 26,
                         height: 26,
                         decoration: BoxDecoration(
-                          color: _paraTela[cor],
+                          color: _onScreen[fillColour],
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: estilo.color == cor
+                            color: styleSpec.color == fillColour
                                 ? Theme.of(context).colorScheme.primary
                                 : Colors.white24,
-                            width: estilo.color == cor ? 3 : 1,
+                            width: styleSpec.color == fillColour ? 3 : 1,
                           ),
                         ),
                       ),
@@ -4087,29 +4087,29 @@ class _TextoDoClipe extends StatelessWidget {
             ),
           ],
         ),
-        _Deslizante(
-          rotulo: 'Tamanho',
-          valor: estilo.size,
-          minimo: 0.03,
-          maximo: 0.3,
-          legenda: '${(estilo.size * 100).round()}% da altura',
-          onChanged: (v) => onEstilo(estilo.copyWith(size: v)),
-          onZerar: estilo.size == 0.08
+        _LabeledSlider(
+          textClip: 'Size',
+          amount: styleSpec.size,
+          minimum: 0.03,
+          maximum: 0.3,
+          caption: '${(styleSpec.size * 100).round()}% of the height',
+          onChanged: (v) => onStyle(styleSpec.copyWith(size: v)),
+          onReset: styleSpec.size == 0.08
               ? null
-              : () => onEstilo(estilo.copyWith(size: 0.08)),
+              : () => onStyle(styleSpec.copyWith(size: 0.08)),
         ),
-        _Deslizante(
-          rotulo: 'Contorno',
-          valor: estilo.outline,
-          minimo: 0,
-          maximo: 0.4,
-          legenda: estilo.outline == 0
-              ? 'sem contorno — some em cena clara'
+        _LabeledSlider(
+          textClip: 'Outline',
+          amount: styleSpec.outline,
+          minimum: 0,
+          maximum: 0.4,
+          caption: styleSpec.outline == 0
+              ? 'no outline — vanishes on bright scenes'
               : null,
-          onChanged: (v) => onEstilo(estilo.copyWith(outline: v)),
-          onZerar: estilo.outline == 0.12
+          onChanged: (v) => onStyle(styleSpec.copyWith(outline: v)),
+          onReset: styleSpec.outline == 0.12
               ? null
-              : () => onEstilo(estilo.copyWith(outline: 0.12)),
+              : () => onStyle(styleSpec.copyWith(outline: 0.12)),
         ),
       ],
     );

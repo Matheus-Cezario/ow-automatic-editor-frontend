@@ -4,8 +4,8 @@ import 'screens/jobs_screen.dart';
 
 void main() => runApp(const OwEditorApp());
 
-/// Paleta escura e sóbria — o conteúdo é vídeo de jogo, então a interface
-/// fica fora do caminho.
+/// A dark, sober palette — the content is game video, so the interface stays
+/// out of the way.
 const _seed = Color(0xFFFF7A18);
 
 class OwEditorApp extends StatelessWidget {
@@ -54,8 +54,9 @@ class OwEditorApp extends StatelessWidget {
   }
 }
 
-/// Mobile-first, mas o app também roda na web: numa janela larga o conteúdo
-/// para de esticar e fica centralizado, em vez de virar uma linha gigante.
+/// Mobile-first, but the app also runs on the web: in a wide window the
+/// content stops stretching and stays centred, instead of becoming one giant
+/// line.
 class PhoneWidth extends StatelessWidget {
   const PhoneWidth({super.key, required this.child, this.maxWidth = 640});
 

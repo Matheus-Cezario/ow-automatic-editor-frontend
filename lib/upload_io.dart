@@ -1,12 +1,12 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 
-/// Envia o arquivo num multipart, em streaming.
+/// Sends the file in a multipart, streaming.
 ///
-/// Fora da web o `MultipartRequest` já lê o arquivo em pedaços e os escreve no
-/// socket conforme saem, então não há o que consertar: o corpo nunca existe
-/// inteiro na memória. Ver [upload.dart] para o motivo de a web precisar de
-/// outra coisa.
+/// Off the web `MultipartRequest` already reads the file in chunks and writes
+/// them to the socket as they come, so there is nothing to fix: the body never
+/// exists whole in memory. See [upload.dart] for why the web needs something
+/// else.
 Future<http.Response> uploadFile({
   required Uri url,
   required String field,

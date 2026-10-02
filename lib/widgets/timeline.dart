@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import 'highlight_style.dart';
 
-/// Linha do tempo da partida: cada evento detectado vira um traço na posição
-/// em que aconteceu. É o jeito mais direto de o usuário conferir se a detecção
-/// bateu com o que ele lembra da partida.
+/// The match timeline: each detected event becomes a tick at the position
+/// where it happened. It is the most direct way for the user to check whether
+/// the detection matches what they remember of the match.
 class EventTimeline extends StatelessWidget {
   const EventTimeline({
     super.key,
@@ -20,7 +20,7 @@ class EventTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     if (durationS <= 0) return const SizedBox.shrink();
 
-    // uma faixa por tipo, na ordem em que os tipos aparecem
+    // one track per kind, in the order the kinds appear
     final kinds = <String>[];
     for (final e in events) {
       if (!kinds.contains(e.kind)) kinds.add(e.kind);

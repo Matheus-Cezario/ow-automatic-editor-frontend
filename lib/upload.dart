@@ -1,20 +1,21 @@
-/// Envio de arquivo grande — uma implementação por plataforma.
+/// Uploading a large file — one implementation per platform.
 ///
-/// Existe porque **na web o `package:http` não faz streaming de requisição**.
-/// O `BrowserClient` junta o corpo inteiro num único `Uint8List` antes de
-/// chamar o `fetch` — "Responses are streamed but requests are not", diz a
-/// documentação dele. Numa gravação de partida, de dois ou três gigabytes,
-/// essa alocação falha; e falha calada: o erro estoura dentro do sink que
-/// acumula os bytes, o `runUnaryGuarded` do stream o engole, todos os pedaços
-/// seguintes são descartados e o `close()` entrega o buffer pela metade. O
-/// `fetch` sai então com um multipart bem-formado, com o `Content-Length` do
-/// que sobrou, e o servidor guarda meia gravação sem ter como desconfiar — o
-/// estrago só aparecia lá no preprocessador, como um `ffprobe saiu com 1`.
+/// It exists because **on the web `package:http` does not stream requests**.
+/// `BrowserClient` gathers the whole body into a single `Uint8List` before
+/// calling `fetch` — "Responses are streamed but requests are not", says its
+/// documentation. On a match recording of two or three gigabytes that
+/// allocation fails; and it fails silently: the error blows up inside the sink
+/// that accumulates the bytes, the stream's `runUnaryGuarded` swallows it, every
+/// following chunk is dropped and `close()` hands over half the buffer.
+/// `fetch` then goes out with a well-formed multipart, with the
+/// `Content-Length` of what was left, and the server stores half a recording
+/// with no way of suspecting — the damage only showed up later in the
+/// preprocessor, as an `ffprobe exited with 1`.
 ///
-/// Na web, portanto, quem carrega o arquivo é o navegador: entrega-se o `Blob`
-/// ao `FormData` e ele o lê do disco enquanto envia, sem passar pela memória
-/// do Dart. Fora da web o `MultipartRequest` já faz streaming de verdade e
-/// continua servindo.
+/// On the web, therefore, the browser is what loads the file: the `Blob` is
+/// handed to `FormData` and it reads it from disk while sending, without going
+/// through Dart's memory. Off the web `MultipartRequest` already streams for
+/// real and still does the job.
 library;
 
 export 'upload_io.dart' if (dart.library.js_interop) 'upload_web.dart';

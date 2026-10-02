@@ -26,7 +26,7 @@ class _JobsScreenState extends State<JobsScreen> {
   void initState() {
     super.initState();
     _refresh();
-    // enquanto houver job em andamento vale recarregar sozinho; parado, não
+    // while a job is running it is worth reloading on our own; when idle, not
     _poll = Timer.periodic(const Duration(seconds: 2), (_) {
       if (_jobs?.any((j) => j.isActive) ?? false) _refresh();
     });
@@ -38,15 +38,16 @@ class _JobsScreenState extends State<JobsScreen> {
     super.dispose();
   }
 
-  /// Quantas recargas seguidas podem falhar antes de a tela reclamar.
+  /// How many reloads in a row may fail before the screen complains.
   ///
-  /// A lista recarrega a cada 2s durante uma análise que dura minutos, e uma
-  /// chamada perdida no meio disso não é notícia — é uma conexão que caiu e
-  /// volta na próxima. Trocar a lista inteira por um aviso de erro nessa hora
-  /// faz parecer que a análise morreu, quando ela segue correndo no servidor.
-  static const _falhasToleradas = 3;
+  /// The list reloads every 2s during an analysis that lasts minutes, and a
+  /// call lost in the middle of that is not news — it is a connection that
+  /// dropped and comes back on the next one. Swapping the whole list for an
+  /// error message then makes it look like the analysis died, when it keeps
+  /// running on the server.
+  static const _toleratedFailures = 3;
 
-  int _falhasSeguidas = 0;
+  int _consecutiveFailures = 0;
 
   Future<void> _refresh() async {
     try {
@@ -55,12 +56,12 @@ class _JobsScreenState extends State<JobsScreen> {
         setState(() {
           _jobs = jobs;
           _error = null;
-          _falhasSeguidas = 0;
+          _consecutiveFailures = 0;
         });
       }
     } catch (e) {
-      _falhasSeguidas++;
-      if (mounted && _falhasSeguidas >= _falhasToleradas) {
+      _consecutiveFailures++;
+      if (mounted && _consecutiveFailures >= _toleratedFailures) {
         setState(() => _error = e.toString());
       }
     }
@@ -82,14 +83,14 @@ class _JobsScreenState extends State<JobsScreen> {
           IconButton(
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
-            tooltip: 'Atualizar',
+            tooltip: 'Refresh',
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _newJob,
         icon: const Icon(Icons.add),
-        label: const Text('Nova partida'),
+        label: const Text('New match'),
       ),
       body: PhoneWidth(child: _body()),
     );
@@ -166,7 +167,7 @@ class _JobCard extends StatelessWidget {
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'zip' && job.zipUrl != null) {
-                        baixar(context, job.zipUrl!);
+                        downloadFile(context, job.zipUrl!);
                       } else if (v == 'del') {
                         onDelete();
                       }
@@ -175,9 +176,9 @@ class _JobCard extends StatelessWidget {
                       if (job.zipUrl != null)
                         const PopupMenuItem(
                           value: 'zip',
-                          child: Text('Baixar tudo (.zip)'),
+                          child: Text('Download all (.zip)'),
                         ),
-                      const PopupMenuItem(value: 'del', child: Text('Excluir')),
+                      const PopupMenuItem(value: 'del', child: Text('Delete')),
                     ],
                   ),
                 ],
@@ -198,10 +199,10 @@ class _JobCard extends StatelessWidget {
                     minHeight: 6,
                   ),
                 ),
-                if (formatRestante(job.restante) case final falta?) ...[
+                if (formatRemaining(job.remaining) case final missing?) ...[
                   const SizedBox(height: 6),
                   Text(
-                    '${(job.progress * 100).toStringAsFixed(0)}% · falta $falta',
+                    '${(job.progress * 100).toStringAsFixed(0)}% · $missing left',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.hintColor,
                     ),
@@ -225,8 +226,8 @@ class _JobCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       job.nClips > 0
-                          ? '${job.nClips} vídeo(s) gerados'
-                          : 'pronta para editar',
+                          ? '${job.nClips} video(s) generated'
+                          : 'ready to edit',
                       style: theme.textTheme.bodySmall,
                     ),
                     const SizedBox(width: 14),
@@ -253,12 +254,12 @@ class _StatusChip extends StatelessWidget {
   final Job job;
 
   static const _labels = {
-    'pending': 'na fila',
-    'preprocessing': 'preparando',
-    'detecting': 'analisando',
-    'editing': 'montando',
-    'done': 'pronto',
-    'failed': 'falhou',
+    'pending': 'queued',
+    'preprocessing': 'preparing',
+    'detecting': 'analysing',
+    'editing': 'assembling',
+    'done': 'done',
+    'failed': 'failed',
   };
 
   @override
@@ -301,11 +302,11 @@ class _EmptyState extends StatelessWidget {
           children: [
             Icon(Icons.videocam_off, size: 56, color: theme.hintColor),
             const SizedBox(height: 16),
-            Text('Nenhuma partida ainda', style: theme.textTheme.titleMedium),
+            Text('No matches yet', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
-              'Envie a gravação de uma partida e o sistema separa as rajadas '
-              'de eliminação, as fugas e monta o resto no ritmo da sua música.',
+              'Upload a match recording and the system finds the key moments — '
+              'kills, sleeps, stuns — ready to edit to the beat of your music.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
@@ -336,7 +337,7 @@ class _ErrorState extends StatelessWidget {
             Icon(Icons.cloud_off, size: 48, color: theme.colorScheme.error),
             const SizedBox(height: 14),
             Text(
-              'Não consegui falar com a API',
+              'Could not reach the API',
               style: theme.textTheme.titleMedium,
             ),
             const SizedBox(height: 6),
@@ -349,7 +350,7 @@ class _ErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              kApiBase.isEmpty ? '(mesma origem)' : kApiBase,
+              kApiBase.isEmpty ? '(same origin)' : kApiBase,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
                 fontFamily: 'monospace',
@@ -359,7 +360,7 @@ class _ErrorState extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Tentar de novo'),
+              label: const Text('Try again'),
             ),
           ],
         ),

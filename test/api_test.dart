@@ -3,33 +3,34 @@ import 'package:ow_editor/api.dart';
 
 void main() {
   group('absoluteUrl', () {
-    test('URL já absoluta passa intacta', () {
-      const url = 'http://servidor:8000/api/clips/abc/cortes.zip';
+    test('an already absolute URL passes untouched', () {
+      const url = 'http://server:8000/api/clips/abc/cuts.zip';
       expect(absoluteUrl(url), url);
-      expect(absoluteUrl('https://x.exemplo/y'), 'https://x.exemplo/y');
+      expect(absoluteUrl('https://x.example/y'), 'https://x.example/y');
     });
 
-    test('caminho relativo ganha esquema', () {
-      // Foi exatamente isto que quebrou o download: compilado com API_BASE
-      // vazio, a URL vinha como "/api/..." — sem esquema, e o url_launcher
-      // recusa. `fetch` e a tag <video> resolvem sozinhos, o launcher não.
-      final resolvida = absoluteUrl('/api/jobs/abc/cortes.zip');
-      expect(Uri.parse(resolvida).hasScheme, isTrue);
-      expect(resolvida, endsWith('/api/jobs/abc/cortes.zip'));
+    test('a relative path gets a scheme', () {
+      // This is exactly what broke the download: built with an empty
+      // API_BASE, the URL came as "/api/..." — with no scheme, and url_launcher
+      // refuses it. `fetch` and the <video> tag resolve it on their own, the
+      // launcher does not.
+      final resolved = absoluteUrl('/api/jobs/abc/cuts.zip');
+      expect(Uri.parse(resolved).hasScheme, isTrue);
+      expect(resolved, endsWith('/api/jobs/abc/cuts.zip'));
     });
 
-    test('relativo sem barra inicial também resolve', () {
+    test('relative without a leading slash also resolves', () {
       expect(Uri.parse(absoluteUrl('api/health')).hasScheme, isTrue);
     });
   });
 
   group('JobParams', () {
-    test('só carrega os parâmetros da análise', () {
+    test('only carries the analysis parameters', () {
       final json = const JobParams().toJson();
-      // nada de música: ela entra pela biblioteca, no editor
+      // no music: it comes in through the library, in the editor
       expect(json.containsKey('music_start_s'), isFalse);
       expect(json.containsKey('montage_loop'), isFalse);
-      // e nada de agrupar momentos: isso deixou de ser trabalho da análise
+      // and no grouping of moments: that is no longer the analysis' job
       expect(json.containsKey('multikill_min'), isFalse);
       expect(json['ult_negate_window_s'], 6);
     });
@@ -43,19 +44,19 @@ void main() {
       ...extra,
     };
 
-    test('ready significa pronto para editar, não terminado', () {
+    test('ready means ready to edit, not finished', () {
       final job = Job.fromJson(base({'n_clips': 0}));
       expect(job.isReady, isTrue);
       expect(job.isAnalyzing, isFalse);
       expect(job.isActive, isFalse);
     });
 
-    test('um pedido em andamento mantém o app consultando', () {
+    test('a request in progress keeps the app polling', () {
       final job = Job.fromJson(base({'has_active_render': true}));
       expect(job.isActive, isTrue);
     });
 
-    test('durante a análise ainda não há o que escolher', () {
+    test('during the analysis there is nothing to choose yet', () {
       final job = Job.fromJson(base({'status': 'detecting'}));
       expect(job.isAnalyzing, isTrue);
       expect(job.isReady, isFalse);
@@ -63,7 +64,7 @@ void main() {
   });
 
   group('Clip', () {
-    test('sem trilha o clipe declara o áudio original', () {
+    test('without a track the clip declares the original audio', () {
       final c = Clip.fromJson({
         'id': 'c1',
         'kind': 'custom',
@@ -88,7 +89,7 @@ void main() {
       final back = TimelineClip.fromJson(c.toJson());
 
       expect(back.transition, c.transition);
-      expect(back.simples, isFalse, reason: 'a transition needs the graph');
+      expect(back.simple, isFalse, reason: 'a transition needs the graph');
     });
 
     test('is never sent longer than the clip', () {
