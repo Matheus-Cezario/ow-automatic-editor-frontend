@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../stage_text.dart';
 import '../main.dart' show PhoneWidth;
 import '../widgets/download.dart';
 import '../widgets/highlight_style.dart';
@@ -185,7 +186,7 @@ class _JobCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                job.stage.isEmpty ? '—' : job.stage,
+                jobStageText(job),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.hintColor,
                 ),

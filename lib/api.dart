@@ -1392,6 +1392,7 @@ class Job {
     required this.durationS,
     required this.createdAt,
     required this.nClips,
+    this.nMoments,
     this.fps = 0,
     this.width = 0,
     this.height = 0,
@@ -1425,6 +1426,7 @@ class Job {
     height: (j['height'] as num?)?.toInt() ?? 0,
     createdAt: DateTime.parse(j['created_at'] as String),
     nClips: j['n_clips'] as int? ?? 0,
+    nMoments: (j['n_moments'] as num?)?.toInt(),
     videoUrl: j['video_url'] == null
         ? null
         : absoluteUrl('$kApiBase${j['video_url']}'),
@@ -1486,6 +1488,9 @@ class Job {
 
   final DateTime createdAt;
   final int nClips;
+
+  /// How many moments the analysis found. `null` until it ends.
+  final int? nMoments;
 
   /// The original recording, served with `Range`. It is where the cuts come from.
   final String? videoUrl;
