@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../stage_text.dart';
 import '../main.dart' show PhoneWidth;
 import '../widgets/download.dart';
 import '../widgets/highlight_style.dart';
@@ -196,7 +197,7 @@ class _RenderCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        render.stage.isEmpty ? render.status : render.stage,
+                        renderStageText(render),
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: render.isFailed
                               ? theme.colorScheme.error
@@ -276,7 +277,7 @@ class _Progress extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                job.stage.isEmpty ? job.status : job.stage,
+                jobStageText(job),
                 style: theme.textTheme.titleMedium,
               ),
             ),
