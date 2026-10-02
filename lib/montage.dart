@@ -16,6 +16,30 @@ import 'api.dart';
 /// repositions it later if they want — this is only the initial guess.
 const double kMomentAnchor = 0.7;
 
+/// How long the hover preview of a moment plays before looping.
+const double kMomentPreviewS = 3.0;
+
+/// The stretch of the recording the hover preview of a moment plays.
+///
+/// The play sits at [kMomentAnchor] of it, like in a freshly placed cut, so
+/// the preview shows the run-up and the impact the same way the block would.
+/// Near the edges of the recording the window slides instead of shrinking;
+/// [recordingS] of 0 means the length is unknown, and only the start is held.
+({double startS, double endS}) momentPreview(
+  double t, {
+  double recordingS = 0,
+  double lengthS = kMomentPreviewS,
+}) {
+  var start = math.max(0.0, t - lengthS * kMomentAnchor);
+  if (recordingS > 0) {
+    start = math.max(0.0, math.min(start, recordingS - lengthS));
+  }
+  final end = recordingS > 0
+      ? math.min(start + lengthS, recordingS)
+      : start + lengthS;
+  return (startS: start, endS: end);
+}
+
 /// Initial duration of a freshly placed block, when there is no beat to
 /// suggest anything else.
 const double kDefaultCutS = 1.2;

@@ -673,4 +673,30 @@ void main() {
       expect(transitionAt(cuts, 1.75), isNull);
     });
   });
+
+  group('moment preview', () {
+    test('plays 3 s with the play at 70%, like a fresh cut', () {
+      final w = momentPreview(100);
+      expect(w.startS, closeTo(97.9, 1e-9));
+      expect(w.endS, closeTo(100.9, 1e-9));
+    });
+
+    test('near the start it slides instead of shrinking', () {
+      final w = momentPreview(1, recordingS: 60);
+      expect(w.startS, 0);
+      expect(w.endS, 3);
+    });
+
+    test('near the end it slides back, and never passes the recording', () {
+      final w = momentPreview(59.8, recordingS: 60);
+      expect(w.startS, 57);
+      expect(w.endS, 60);
+    });
+
+    test('a recording shorter than the window plays whole', () {
+      final w = momentPreview(1, recordingS: 2);
+      expect(w.startS, 0);
+      expect(w.endS, 2);
+    });
+  });
 }

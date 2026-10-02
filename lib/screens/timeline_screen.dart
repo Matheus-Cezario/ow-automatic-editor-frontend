@@ -13,6 +13,7 @@ import '../montage_state.dart';
 import '../recipe.dart';
 import '../labels.dart';
 import '../widgets/highlight_style.dart';
+import '../widgets/moment_preview.dart';
 import '../widgets/music_timeline.dart';
 import '../widgets/preview_player.dart';
 
@@ -1706,6 +1707,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _moments({required bool docked}) => _Moments(
     jobId: widget.job.id,
+    videoUrl: widget.job.monitorUrl,
+    recordingS: widget.job.durationS,
     moments: _matchMoments,
     usedKeys: {for (final c in _state.clips) momentKey(c.kind, c.sourceT)},
     enabled: !_sending,
@@ -2809,6 +2812,8 @@ class _Transitions extends StatelessWidget {
 class _Moments extends StatelessWidget {
   const _Moments({
     required this.jobId,
+    required this.videoUrl,
+    required this.recordingS,
     required this.moments,
     required this.usedKeys,
     required this.enabled,
@@ -2817,6 +2822,11 @@ class _Moments extends StatelessWidget {
   });
 
   final String jobId;
+
+  /// What the hover preview plays; `null` when the match has no recording to
+  /// play from, and then there is no preview.
+  final String? videoUrl;
+  final double recordingS;
   final List<DetectionEvent> moments;
 
   /// The moments already on the ruler, by [momentKey].
@@ -2869,6 +2879,8 @@ class _Moments extends StatelessWidget {
           // equal keys in the same list bring the screen down
           key: ValueKey('moment-${momentKey(e.kind, e.t)}'),
           jobId: jobId,
+          videoUrl: videoUrl,
+          recordingS: recordingS,
           event: e,
           used: usedKeys.contains(momentKey(e.kind, e.t)),
           enabled: enabled,
@@ -2933,6 +2945,8 @@ class _MomentTile extends StatelessWidget {
   const _MomentTile({
     super.key,
     required this.jobId,
+    required this.videoUrl,
+    required this.recordingS,
     required this.event,
     required this.used,
     required this.enabled,
@@ -2940,6 +2954,8 @@ class _MomentTile extends StatelessWidget {
   });
 
   final String jobId;
+  final String? videoUrl;
+  final double recordingS;
   final DetectionEvent event;
   final bool used;
   final bool enabled;
@@ -2978,7 +2994,14 @@ class _MomentTile extends StatelessWidget {
         opacity: 0.4,
         child: _card(context, theme, style),
       ),
-      child: _card(context, theme, style),
+      child: videoUrl == null
+          ? _card(context, theme, style)
+          : MomentHoverPreview(
+              videoUrl: videoUrl!,
+              t: event.t,
+              recordingS: recordingS,
+              child: _card(context, theme, style),
+            ),
     );
   }
 
