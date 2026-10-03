@@ -1,38 +1,39 @@
-import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
 
 import '../api.dart';
+import '../monitor/frame.dart';
+import '../monitor/monitor_picture.dart';
 import '../montage.dart';
 import 'highlight_style.dart';
 
 /// The montage's monitor: shows what the video will be, before asking for it.
 ///
-/// It renders nothing. It opens the **original recording** and seeks inside it
-/// to the instant that corresponds to the playhead — if it is over a block
-/// that starts at minute 3 of the match, it is at minute 3 that the recording
-/// is positioned. Where there is no block, a black screen: the same the server
-/// will render there.
+/// It renders nothing on the server. Every picture layer is stacked here the
+/// way the server will stack it — each clip on its own `<video>` or `<img>`,
+/// seeked to its point in the source, with its zoom, colour, scale, place,
+/// opacity, fades and transitions (see [frameAt]). A dissolve really shows
+/// both clips; a clip on an upper layer really covers only its own area.
 ///
-/// Really rendering on every adjustment would cost a full trip through ffmpeg
-/// per drag. Seeking inside the file that already exists is instant, and it is
-/// what any editor does while you edit.
+/// Rendering for real on every adjustment would cost a full trip through
+/// ffmpeg per drag. Seeking inside files that already exist is instant, and
+/// it is what any editor does while you edit.
 ///
-/// > What this preview does **not** guarantee is frame sync with the music
-/// > during playback: they are two independent media elements, and the splice
-/// > between blocks is done by seeking. Within a block the picture runs on its
-/// > own, and a 1 s block may end a few frames early. The exact cut is the
-/// > final file's, which the server assembles with ffmpeg.
-class PreviewPlayer extends StatefulWidget {
+/// > What this preview does **not** guarantee is frame-exact sync during
+/// > playback: each clip runs on its own media element, corrected when it
+/// > drifts. The exact cut is the final file's, which the server assembles
+/// > with ffmpeg.
+class PreviewPlayer extends StatelessWidget {
   const PreviewPlayer({
     super.key,
     required this.videoUrl,
+    required this.layers,
     required this.cuts,
     required this.atS,
     required this.playing,
+    this.library = const {},
+    this.export = const ExportSpec(),
+    this.aspectRatio = 16 / 9,
     this.texts = const [],
     this.selectionIds = const {},
     this.onSelectText,
@@ -45,8 +46,24 @@ class PreviewPlayer extends StatefulWidget {
     this.onGestureEnd,
   });
 
-  final String videoUrl;
+  /// What a clip of the match shows: the proxy, or the recording itself.
+  final String? videoUrl;
+
+  /// Every layer, bottom to top — the monitor composes them all.
+  final List<Layer> layers;
+
+  /// The picture clips the screen considers visible: they decide the
+  /// transition badge.
   final List<TimelineClip> cuts;
+
+  /// Library items by id: what a media clip shows.
+  final Map<String, Media> library;
+
+  /// The fit, the watermark — what the export changes in the picture.
+  final ExportSpec export;
+
+  /// The frame's shape: the export's when one was asked for.
+  final double aspectRatio;
 
   /// Where the playhead is, in **assembled video** time.
   final double atS;
@@ -84,244 +101,35 @@ class PreviewPlayer extends StatefulWidget {
   /// release. It serves the same purpose as the ruler's drag label.
   final ValueChanged<String?>? onDragging;
 
-  @override
-  State<PreviewPlayer> createState() => _PreviewPlayerState();
-}
+  /// How far ahead the next clips are loaded, so a cut does not wait for them.
+  static const lookaheadS = 0.6;
 
-class _PreviewPlayerState extends State<PreviewPlayer> {
-  VideoPlayerController? _c;
-  String? _error;
-  bool _reopening = false;
-
-  /// How many times the player has died and been brought back by itself.
-  ///
-  /// A half-gigabyte recording delivered via `Range`, with dozens of seeks per
-  /// second while dragging, sometimes brings the browser's video element down.
-  /// Before this it stayed black until the page was reloaded — and reloading
-  /// cost the whole montage.
-  int _crashes = 0;
-  static const _maxCrashes = 4;
-
-  /// One seek at a time. `didUpdateWidget` fires on every frame of a drag, and
-  /// overlapping seeks are exactly what makes the element choke.
-  bool _busy = false;
-
-  DateTime _lastSeek = DateTime.fromMillisecondsSinceEpoch(0);
-  int? _currentBlock;
-
-  @override
-  void initState() {
-    super.initState();
-    _open();
-  }
-
-  @override
-  void dispose() {
-    _c?.removeListener(_watch);
-    _c?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _open({Duration? resumeAt}) async {
-    final c = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
-    try {
-      await c.initialize();
-      await c.setVolume(0); // the montage's music rules the sound
-      if (resumeAt != null) await c.seekTo(resumeAt);
-    } catch (e) {
-      await c.dispose();
-      if (mounted) setState(() => _error = '$e');
-      return;
-    }
-    if (!mounted) {
-      await c.dispose();
-      return;
-    }
-    c.addListener(_watch);
-    setState(() {
-      _c = c;
-      _error = null;
-      _reopening = false;
-    });
-    _follow(force: true);
-  }
-
-  /// Notices the player dying and brings it back at the same point.
-  void _watch() {
-    final c = _c;
-    if (c == null || _reopening || !c.value.hasError) return;
-    _reopening = true;
-    final location = c.value.position;
-    _crashes++;
-    if (_crashes > _maxCrashes) {
-      setState(() {
-        _error = 'the player stopped responding; tap to try again';
-        _reopening = false;
-      });
-      return;
-    }
-    unawaited(_revive(location));
-  }
-
-  Future<void> _revive(Duration location) async {
-    final dead = _c;
-    setState(() => _c = null);
-    dead?.removeListener(_watch);
-    await dead?.dispose();
-    if (!mounted) return;
-    await _open(resumeAt: location);
-  }
-
-  Future<void> _retry() async {
-    _crashes = 0;
-    setState(() {
-      _error = null;
-      _reopening = true;
-    });
-    await _revive(Duration.zero);
-  }
-
-  @override
-  void didUpdateWidget(PreviewPlayer old) {
-    super.didUpdateWidget(old);
-    if (old.videoUrl != widget.videoUrl) {
-      _crashes = 0;
-      unawaited(_revive(Duration.zero));
-      return;
-    }
-    _follow(force: widget.playing != old.playing);
-  }
-
-  /// Puts the recording at the instant the playhead asks for.
-  Future<void> _follow({bool force = false}) async {
-    final c = _c;
-    if (c == null || !c.value.isInitialized || c.value.hasError) return;
-    if (_busy) return;
-
-    final origin = sourceAt(widget.cuts, widget.atS);
-    final block = blockAt(widget.cuts, widget.atS);
-
-    // a gap (or past the end): nothing to show, and nothing to play
-    if (origin == null) {
-      _currentBlock = null;
-      if (c.value.isPlaying) {
-        _busy = true;
-        try {
-          await c.pause();
-        } finally {
-          _busy = false;
-        }
-      }
-      if (mounted) setState(() {});
-      return;
-    }
-
-    // asking for an instant past the end of the file is the kind of thing that
-    // brings the video element down, and a cut may have been stretched there
-    final limit = c.value.duration.inMilliseconds / 1000.0;
-    final target = limit > 0 ? origin.clamp(0.0, limit - 0.05) : origin;
-
-    final changedBlock = block != _currentBlock;
-    _currentBlock = block;
-
-    // While playing, the picture runs by itself inside the block; it only seeks
-    // when entering a new block or when it drifts too far from what it should
-    // show.
-    final nowS = c.value.position.inMilliseconds / 1000.0;
-    final drifted = (nowS - target).abs() > 0.34;
-    final recent =
-        DateTime.now().difference(_lastSeek) <
-        const Duration(milliseconds: 120);
-
-    _busy = true;
-    try {
-      if (force || changedBlock || drifted) {
-        if (!(recent && !force && !changedBlock)) {
-          _lastSeek = DateTime.now();
-          await c.seekTo(Duration(milliseconds: (target * 1000).round()));
-        }
-      }
-      if (widget.playing && !c.value.isPlaying) {
-        await c.play();
-      } else if (!widget.playing && c.value.isPlaying) {
-        await c.pause();
-      }
-    } catch (_) {
-      // a failing seek must not bring the screen down: the watcher takes care
-      // of reopening the player if it really died
-    } finally {
-      _busy = false;
-    }
-    if (mounted) setState(() {});
-  }
-
-  /// The incoming clip's picture, as the transition brings it in.
-  ///
-  /// The monitor has **one** video: it cannot show the previous clip under the
-  /// new one. Dissolve becomes the new clip emerging from black, and slide the
-  /// new clip arriving from the side — enough to see its timing and direction.
-  /// The real mix is the one in the rendered video.
-  Widget _withTransition(Widget picture) {
-    final tr = transitionAt(widget.cuts, widget.atS);
-    if (tr == null || tr.leaving) return picture;
-    final remaining = 1 - tr.p;
-    return switch (tr.kind) {
-      'dissolve' => Opacity(opacity: tr.p, child: picture),
-      'slide_left' => _slide(picture, Offset(remaining, 0)),
-      'slide_right' => _slide(picture, Offset(-remaining, 0)),
-      'slide_up' => _slide(picture, Offset(0, remaining)),
-      'slide_down' => _slide(picture, Offset(0, -remaining)),
-      _ => picture,
-    };
-  }
-
-  Widget _slide(Widget picture, Offset fraction) => ClipRect(
-    child: FractionalTranslation(translation: fraction, child: picture),
+  Frame _frame(double t) => frameAt(
+    layers,
+    t,
+    matchUrl: videoUrl,
+    library: library,
+    export: export,
   );
-
-  /// The colour over the picture during a dip, or `null` outside one.
-  Color? _veil() {
-    final tr = transitionAt(widget.cuts, widget.atS);
-    if (tr == null) return null;
-    final colour = switch (tr.kind) {
-      'fade_black' => Colors.black,
-      'fade_white' => Colors.white,
-      _ => null,
-    };
-    if (colour == null) return null;
-    // leaving, the colour rises over the last half; entering, it fades over
-    // the first half
-    final opacity = tr.leaving ? tr.p : math.max(0.0, 1 - tr.p * 2);
-    if (opacity <= 0) return null;
-    return colour.withValues(alpha: opacity);
-  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final c = _c;
-    final onBlack = sourceAt(widget.cuts, widget.atS) == null;
-    final alive = c != null && c.value.isInitialized && !c.value.hasError;
+    final frame = _frame(atS);
 
     return AspectRatio(
-      aspectRatio: alive ? c.value.aspectRatio : 16 / 9,
+      aspectRatio: aspectRatio,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // In a gap the previous frame must not stay on show: the video will
-            // really be black there, and showing the old picture would lie
-            // about what will come out.
-            if (alive && !onBlack) _withTransition(VideoPlayer(c)),
-            if (_veil() case final veil?)
-              IgnorePointer(
-                child: ColoredBox(
-                  key: const Key('transition-veil'),
-                  color: veil,
-                ),
-              ),
-            if (transitionAt(widget.cuts, widget.atS) case final tr?)
+            MonitorPicture(
+              frame: frame,
+              playing: playing,
+              upcoming: _frame(atS + lookaheadS),
+            ),
+            if (transitionAt(cuts, atS) case final tr?)
               Positioned(
                 left: 8,
                 top: 8,
@@ -351,7 +159,7 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
             // The black-screen notice takes no taps: it sits in the middle of
             // the frame, which is exactly where text usually is, and a notice
             // stealing the line's drag would be the worst place possible.
-            if (onBlack && _error == null)
+            if (frame.isBlack)
               IgnorePointer(
                 child: Center(
                   child: Column(
@@ -363,7 +171,7 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        widget.cuts.isEmpty
+                        cuts.isEmpty
                             ? 'no cuts yet'
                             : 'black screen — only the music here',
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -381,65 +189,27 @@ class _PreviewPlayerState extends State<PreviewPlayer> {
             // fraction of the frame's height and the position is an offset
             // from the centre by half of it. What is seen here is what will
             // come out.
-            for (final t in widget.texts)
-              if (widget.atS >= t.atS - 1e-6 && widget.atS < t.untilS - 1e-6)
+            for (final t in texts)
+              if (atS >= t.atS - 1e-6 && atS < t.untilS - 1e-6)
                 _TextOnFrame(
                   key: ValueKey('text-on-frame-${t.id}'),
                   clip: t,
-                  pickedOne: widget.selectionIds.contains(t.id),
-                  onChoose: () => widget.onSelectText?.call(t.id),
-                  onMove: widget.onMoveText == null
+                  pickedOne: selectionIds.contains(t.id),
+                  onChoose: () => onSelectText?.call(t.id),
+                  onMove: onMoveText == null
                       ? null
-                      : (x, y) => widget.onMoveText!(t.id, x, y),
-                  onDragging: widget.onDragging,
-                  editing: widget.editingId == t.id,
-                  onEditing: widget.onEditing == null
+                      : (x, y) => onMoveText!(t.id, x, y),
+                  onDragging: onDragging,
+                  editing: editingId == t.id,
+                  onEditing: onEditing == null
                       ? null
-                      : (on) => widget.onEditing!(on ? t.id : null),
-                  onTextChanged: widget.onTextChanged == null
+                      : (on) => onEditing!(on ? t.id : null),
+                  onTextChanged: onTextChanged == null
                       ? null
-                      : (v) => widget.onTextChanged!(t.id, v),
-                  onGestureStart: widget.onGestureStart,
-                  onGestureEnd: widget.onGestureEnd,
+                      : (v) => onTextChanged!(t.id, v),
+                  onGestureStart: onGestureStart,
+                  onGestureEnd: onGestureEnd,
                 ),
-
-            if (_error != null)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.error,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      // the montage is not lost because of the player: editing
-                      // can go on through the waveform and the beats
-                      TextButton.icon(
-                        onPressed: _retry,
-                        icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text('Try again'),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else if (c == null || _reopening)
-              // likewise: while the video opens, the text is still draggable
-              const IgnorePointer(
-                child: Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              ),
           ],
         ),
       ),

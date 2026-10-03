@@ -2605,6 +2605,56 @@ void main() {
     });
   });
 
+  group('composited monitor', () {
+    Finder piece(String id) => find.byKey(ValueKey('monitor-piece-$id'));
+
+    testWidgets('under a dissolve both clips are on the monitor', (
+      tester,
+    ) async {
+      // the old monitor had one video: a dissolve was the new clip coming out
+      // of black, with the clip before already gone
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await cursorAt(tester, 0);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final [a, b] = cutList(tester);
+      await tester.tap(block(tester, 1));
+      await tester.pump();
+      await tab(tester, 'Transitions');
+      await tester.tap(find.byKey(const ValueKey('transition-dissolve')));
+      await tester.pump();
+
+      await cursorAt(tester, b.atS + 0.1);
+      expect(piece(a.id), findsOneWidget);
+      expect(piece(b.id), findsOneWidget);
+
+      await cursorAt(tester, b.atS + b.durationS - 0.1);
+      expect(piece(a.id), findsNothing);
+      expect(piece(b.id), findsOneWidget);
+    });
+
+    testWidgets('an upper layer adds to the picture instead of replacing it', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+      await cursorAt(tester, 0);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final ids = [for (final c in cutList(tester)) c.id];
+
+      await cursorAt(tester, 0.3);
+      for (final id in ids) {
+        expect(piece(id), findsOneWidget);
+      }
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

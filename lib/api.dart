@@ -480,6 +480,7 @@ class Media {
     this.fps = 0,
     this.thumbUrl,
     this.proxyUrl,
+    this.fileUrl,
     this.error,
     this.bpm = 0,
     this.beats = const [],
@@ -502,6 +503,9 @@ class Media {
     proxyUrl: j['proxy_url'] == null
         ? null
         : absoluteUrl('$kApiBase${j['proxy_url']}'),
+    fileUrl: j['file_url'] == null
+        ? null
+        : absoluteUrl('$kApiBase${j['file_url']}'),
     error: j['error'] as String?,
     bpm: (j['bpm'] as num?)?.toDouble() ?? 0,
     beats: ((j['beats'] as List?) ?? const [])
@@ -527,6 +531,10 @@ class Media {
   final double fps;
   final String? thumbUrl;
   final String? proxyUrl;
+
+  /// The uploaded file itself. An image has no proxy: this is what the
+  /// monitor shows of it.
+  final String? fileUrl;
   final String? error;
 
   /// Audio only: what the timeline needs to draw the song and snap cuts to

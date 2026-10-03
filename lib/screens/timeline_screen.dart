@@ -15,6 +15,7 @@ import '../labels.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/moment_preview.dart';
 import '../widgets/music_timeline.dart';
+import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
 
 /// Building the video by hand: listening to the song and placing each moment
@@ -1827,8 +1828,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
               borderRadius: BorderRadius.circular(12),
               child: PreviewPlayer(
                 // the proxy when there is one; for old matches, the recording
-                videoUrl: widget.job.monitorUrl!,
+                videoUrl: widget.job.monitorUrl,
+                layers: _state.layers,
                 cuts: _state.visibleClips,
+                library: {for (final m in _library) m.id: m},
+                export: _state.export,
+                aspectRatio: frameAspect(
+                  _state.export,
+                  width: widget.job.width,
+                  height: widget.job.height,
+                ),
                 atS: _cursor,
                 playing: _playing,
                 // the text is drawn over the picture, and dragging it there is
