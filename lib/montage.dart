@@ -158,6 +158,36 @@ TimelineClip cutForMoment(
   );
 }
 
+/// A stretch of the recording the user marked by hand, in source seconds:
+/// where it starts, where it ends and, optionally, where its play is — the
+/// instant that ducking and "Ramp into the play" work around.
+class SourceSpan {
+  const SourceSpan({required this.inS, required this.outS, this.playS});
+
+  final double inS;
+  final double outS;
+  final double? playS;
+
+  double get lengthS => outS - inS;
+
+  bool get isValid => lengthS >= kMinCutS;
+}
+
+/// The clip a marked stretch becomes: a cut of the recording like any moment
+/// clip, only chosen by hand — kind `custom`, and a play only when one was
+/// marked inside it.
+TimelineClip spanClip(SourceSpan span, {required double atS}) {
+  final play = span.playS;
+  final hasPlay = play != null && play > span.inS && play < span.outS;
+  return TimelineClip(
+    kind: 'custom',
+    atS: math.max(0, atS),
+    startS: span.inS,
+    durationS: span.lengthS,
+    sourceT: hasPlay ? play : 0,
+  );
+}
+
 /// The clip born when the user brings a library item to the ruler.
 ///
 /// Unlike a match moment, there is no instant to frame here: the file starts

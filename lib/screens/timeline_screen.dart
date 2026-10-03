@@ -21,6 +21,7 @@ import '../widgets/motion_panel.dart';
 import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
+import '../widgets/source_viewer.dart';
 
 /// Building the video by hand: listening to the song and placing each moment
 /// wherever you want.
@@ -912,6 +913,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _useMedia(media, atS: atS, layerIndex: layerIndex);
       return;
     }
+    final span = o.span;
+    if (span != null) {
+      _addSpan(span, atS: atS, layerIndex: layerIndex);
+      return;
+    }
     final event = o.event!;
     if (layerIndex >= 0 &&
         layerIndex < _state.layers.length &&
@@ -932,6 +938,35 @@ class _TimelineScreenState extends State<TimelineScreen> {
           beats: _beats,
           sourceDurationS: widget.job.durationS,
         ),
+        beats: _beats,
+        snap: _magnet,
+        insert: _insert,
+      ),
+    );
+  }
+
+  /// Puts a stretch marked on the recording on the timeline — at the playhead,
+  /// or where it was dropped.
+  void _addSpan(SourceSpan span, {double? atS, int? layerIndex}) {
+    if (!span.isValid) {
+      _notify('Mark an in and an out point on the recording first.');
+      return;
+    }
+    if (layerIndex != null &&
+        layerIndex >= 0 &&
+        layerIndex < _state.layers.length &&
+        _state.layers[layerIndex].isAudio) {
+      _notify('This is a sound layer: a cut of the recording does not go in it.');
+      return;
+    }
+    var base = _state;
+    if (layerIndex != null && layerIndex >= 0 && layerIndex < base.layers.length) {
+      base = base.copyWith(activeLayer: layerIndex);
+    }
+    _edit(
+      addClip(
+        base,
+        spanClip(span, atS: atS ?? _cursor),
         beats: _beats,
         snap: _magnet,
         insert: _insert,
@@ -1917,14 +1952,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// The sidebar: what the system found and what the user brought, side by
   /// side — both answer the same question, "what do I put in now?".
   Widget _sidebar() => DefaultTabController(
-    length: 3,
+    length: 4,
     child: Column(
       children: [
         const TabBar(
-          // three tabs in 300px: full labels would not fit side by side
-          labelPadding: EdgeInsets.symmetric(horizontal: 4),
+          // four tabs in 300px: short labels, tight padding — a scrolling
+          // bar hid the last tabs off the edge
+          labelPadding: EdgeInsets.symmetric(horizontal: 2),
           tabs: [
             Tab(text: 'Moments'),
+            Tab(text: 'Source'),
             Tab(text: 'Library'),
             Tab(text: 'Transitions'),
           ],
@@ -1933,6 +1970,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: TabBarView(
             children: [
               _moments(docked: false),
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(12),
+                child: _recordingPanel(),
+              ),
               _libraryPanel(docked: false),
               _transitions(docked: false),
             ],
@@ -1940,6 +1981,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       ],
     ),
+  );
+
+  /// The whole recording, to cut by hand what the analysis did not find.
+  Widget _recordingPanel() => SourceViewer(
+    videoUrl: widget.job.monitorUrl,
+    durationS: widget.job.durationS,
+    fps: widget.job.fps,
+    events: widget.job.events,
+    enabled: !_sending,
+    onAdd: (span) => _addSpan(span),
   );
 
   Widget _transitions({required bool docked}) {
@@ -2343,6 +2394,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _moments(docked: true),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _recordingPanel(),
         ),
         const SizedBox(height: 18),
         Padding(

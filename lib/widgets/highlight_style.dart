@@ -43,6 +43,8 @@ class EventStyle {
     'ability_kill': EventStyle('Ability kill', Color(0xFF7E57C2)),
     'sleep': EventStyle('Sleep dart', Color(0xFF29B6F6)),
     'stun': EventStyle('Accretion stun', Color(0xFF8D6E63)),
+    // a stretch the user marked by hand on the recording
+    'custom': EventStyle('Cut', Color(0xFF90A4AE)),
   };
 
   static EventStyle of(String kind) =>

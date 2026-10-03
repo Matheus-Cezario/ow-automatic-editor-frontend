@@ -16,17 +16,25 @@ import 'highlight_style.dart';
 /// to do with each; it says **where** it landed and the screen sorts out the
 /// rest.
 class RulerDrop {
-  const RulerDrop.moment(DetectionEvent this.event) : media = null;
-  const RulerDrop.mediaItem(Media this.media) : event = null;
+  const RulerDrop.moment(DetectionEvent this.event) : media = null, span = null;
+  const RulerDrop.mediaItem(Media this.media) : event = null, span = null;
+
+  /// A stretch marked by hand on the recording.
+  const RulerDrop.span(SourceSpan this.span) : event = null, media = null;
 
   final DetectionEvent? event;
   final Media? media;
+  final SourceSpan? span;
 
   /// How long the block will last — it is what the drag ghost draws, so the
   /// size under the finger is the size on the ruler.
-  double get durationSecs => media?.suggestedDuration ?? kDefaultCutS;
+  double get durationSecs =>
+      span?.lengthS ?? media?.suggestedDuration ?? kDefaultCutS;
 
-  String get blockLabel => media?.name ?? EventStyle.of(event!.kind).label;
+  String get blockLabel =>
+      span != null
+          ? 'Cut'
+          : media?.name ?? EventStyle.of(event!.kind).label;
 
   bool get isSound => media?.isAudio ?? false;
 }
