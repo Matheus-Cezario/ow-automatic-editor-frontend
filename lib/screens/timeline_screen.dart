@@ -16,6 +16,7 @@ import '../labels.dart';
 import '../widgets/exact_preview.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/moment_preview.dart';
+import '../widgets/motion_panel.dart';
 import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
@@ -301,6 +302,41 @@ class _TimelineScreenState extends State<TimelineScreen> {
   );
 
   void _deleteSelection() => _edit(removeClips(_state, _state.selectionIds));
+
+  // ── motion: position, scale, opacity, volume, static or keyframed ────────
+
+  /// The playhead in seconds from the clip's start.
+  double _localIn(String id) => _cursor - (_state.clipItem(id)?.atS ?? 0);
+
+  /// The Motion panel of the selected clip, or `null` when it has nothing to
+  /// animate (a text clip).
+  Widget? _motionPanel(String id) {
+    final clip = _state.clipItem(id);
+    if (clip == null) return null;
+    final props = motionPropsFor(
+      clip,
+      onSoundLayer: _isAudioClip(id),
+      media: _blockMedia(id),
+    );
+    if (props.isEmpty) return null;
+    return MotionPanel(
+      clip: clip,
+      props: props,
+      localS: _localIn(id),
+      onSet: (p, v) =>
+          _edit(setMotion(_state, id, p, v, localS: _localIn(id))),
+      onAnimate: (p, on) => _edit(
+        animateMotion(_state, id, p, on: on, localS: _localIn(id)),
+      ),
+      onRemoveKey: (p) =>
+          _edit(removeMotionKey(_state, id, p, localS: _localIn(id))),
+      onEase: (p, e) =>
+          _edit(easeMotionKey(_state, id, p, e, localS: _localIn(id))),
+      onSeek: _goTo,
+      onGestureStart: _history.startGesture,
+      onGestureEnd: _history.endGesture,
+    );
+  }
 
   // ── text ──────────────────────────────────────────────────────────────────
 
@@ -2178,6 +2214,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onDelete: _deleteSelection,
             onSplit: _splitAtCursor,
             onDuplicate: _duplicate,
+            motion: _motionPanel(selectionIds.first),
           ),
         ),
       ] else if (selectionIds.length > 1) ...[
@@ -2714,9 +2751,13 @@ class _SelectedBlock extends StatelessWidget {
     required this.onReverse,
     required this.onStyle,
     required this.onTypeOnFrame,
+    this.motion,
   });
 
   final TimelineClip cut;
+
+  /// Position, scale, opacity and volume — `null` when the clip has none.
+  final Widget? motion;
 
   /// The file the block came from, when it came from the library. A music
   /// block talks about the sound, not the picture — which it does not have.
@@ -2859,6 +2900,7 @@ class _SelectedBlock extends StatelessWidget {
                 onStyle: onStyle,
                 onTypeOnFrame: onTypeOnFrame,
               ),
+            ?motion,
             // a music block draws nothing: zoom, colour and freeze would have
             // nothing to act on
             if (!sound)
@@ -3733,12 +3775,25 @@ class _Effects extends StatelessWidget {
                           (cut.zoom[1].scale - until).abs() < 0.01,
                       onSelected: (_) => onZoom(punch(until: until)),
                     ),
-                  if (cut.zoom.isNotEmpty)
+                  if (cut.zoom.isNotEmpty) ...[
+                    // slow in and out of the punch: the camera move, not the cut
+                    FilterChip(
+                      key: const Key('zoom-smooth'),
+                      label: const Text('smooth'),
+                      selected: cut.zoom.first.ease == Ease.easeInOut,
+                      onSelected: (on) => onZoom([
+                        cut.zoom.first.copyWith(
+                          ease: on ? Ease.easeInOut : Ease.linear,
+                        ),
+                        ...cut.zoom.skip(1),
+                      ]),
+                    ),
                     ActionChip(
                       avatar: const Icon(Icons.close, size: 14),
                       label: const Text('remove'),
                       onPressed: () => onZoom(const []),
                     ),
+                  ],
                 ],
               ),
             ),

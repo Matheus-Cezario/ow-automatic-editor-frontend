@@ -503,3 +503,56 @@ double blackDuration(List<TimelineClip> cuts) {
   }
   return math.max(0, total - withPicture);
 }
+
+// ── keyframes ───────────────────────────────────────────────────────────────
+//
+// The same curve the server builds as an ffmpeg expression (`_curve` in
+// `owcore/compose.py`): before the first point and after the last the value is
+// the endpoint's; between two points it follows the ease of the one it leaves.
+// Keyframe times are fractions of the clip **as placed** — `durationS`, never
+// the longer picture a dissolve draws.
+
+/// A property's value [localS] seconds into [clip]: its keyframes when it has
+/// any, its static value otherwise.
+double valueAt(TimelineClip clip, KeyProp prop, double localS) {
+  final keys = clip.keysFor(prop);
+  if (keys.isEmpty) return staticValue(clip, prop);
+  return curveAt(
+    [for (final k in keys) (k.t * clip.durationS, k.value, k.ease)],
+    localS,
+  );
+}
+
+/// The value a property has when it is not animated.
+double staticValue(TimelineClip clip, KeyProp prop) => switch (prop) {
+  KeyProp.x => clip.transform.x,
+  KeyProp.y => clip.transform.y,
+  KeyProp.scale => clip.transform.scale,
+  KeyProp.opacity => clip.transform.opacity,
+  KeyProp.volume => clip.audio.volume,
+};
+
+/// A curve through (seconds, value, ease) points, in time order.
+double curveAt(List<(double, double, Ease)> points, double at) {
+  if (at < points.first.$1) return points.first.$2;
+  for (var i = 0; i + 1 < points.length; i++) {
+    final (t0, v0, ease) = points[i];
+    final (t1, v1, _) = points[i + 1];
+    if (at < t1) {
+      final u = ((at - t0) / math.max(1e-6, t1 - t0)).clamp(0.0, 1.0);
+      return v0 + (v1 - v0) * ease.apply(u);
+    }
+  }
+  return points.last.$2;
+}
+
+/// Two keyframes closer than this are the same one: a frame at 30 fps.
+const kKeyToleranceS = 1 / 30;
+
+/// The keyframe of [prop] at [localS], if the playhead is on one.
+ClipKey? keyAt(TimelineClip clip, KeyProp prop, double localS) {
+  for (final k in clip.keysFor(prop)) {
+    if ((k.t * clip.durationS - localS).abs() <= kKeyToleranceS) return k;
+  }
+  return null;
+}
