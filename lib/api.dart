@@ -899,6 +899,46 @@ class ExportSpec {
   };
 }
 
+/// A stretch of a montage rendered by the server, small and fast, through the
+/// same graph as the final video — what the monitor can only approximate.
+class ExactPreview {
+  const ExactPreview({
+    required this.id,
+    required this.status,
+    this.progress = 0,
+    this.error,
+    this.fromS = 0,
+    this.toS = 0,
+    this.videoUrl,
+  });
+
+  factory ExactPreview.fromJson(Map<String, dynamic> j) => ExactPreview(
+    id: j['id'] as String,
+    status: j['status'] as String? ?? 'pending',
+    progress: (j['progress'] as num?)?.toDouble() ?? 0,
+    error: j['error'] as String?,
+    fromS: (j['from_s'] as num?)?.toDouble() ?? 0,
+    toS: (j['to_s'] as num?)?.toDouble() ?? 0,
+    videoUrl: j['video_url'] == null
+        ? null
+        : absoluteUrl('$kApiBase${j['video_url']}'),
+  );
+
+  final String id;
+  final String status;
+  final double progress;
+  final String? error;
+
+  /// Where the stretch sits in the montage.
+  final double fromS;
+  final double toS;
+  final String? videoUrl;
+
+  bool get isDone => status == 'done' && videoUrl != null;
+  bool get isFailed => status == 'failed';
+  bool get isWorking => !isDone && !isFailed;
+}
+
 /// A hand-made video: the layers and blocks that form it.
 class Montage {
   const Montage({
@@ -1952,6 +1992,34 @@ class ApiClient {
     );
     _check(r);
     return (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
+  }
+
+  /// Asks the server for an exact preview of [montage] over [fromS]..[toS]:
+  /// the final video's graph, on a small frame. Only the latest one of the
+  /// match is kept.
+  Future<ExactPreview> createPreview({
+    required String jobId,
+    required Montage montage,
+    required double fromS,
+    required double toS,
+  }) async {
+    final r = await http.post(
+      Uri.parse('$baseUrl/api/jobs/$jobId/previews'),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({
+        'timeline': montage.toJson(),
+        'from_s': fromS,
+        'to_s': toS,
+      }),
+    );
+    _check(r);
+    return ExactPreview.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  Future<ExactPreview> getPreview(String id) async {
+    final r = await http.get(Uri.parse('$baseUrl/api/previews/$id'));
+    _check(r);
+    return ExactPreview.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
   }
 
   void _check(http.Response r) {

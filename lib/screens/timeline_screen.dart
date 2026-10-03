@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
@@ -12,6 +13,7 @@ import '../export_options.dart';
 import '../montage_state.dart';
 import '../recipe.dart';
 import '../labels.dart';
+import '../widgets/exact_preview.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/moment_preview.dart';
 import '../widgets/music_timeline.dart';
@@ -66,6 +68,16 @@ const _usefulMoments = {
 
 class _TimelineScreenState extends State<TimelineScreen> {
   final _api = ApiClient();
+
+  /// The exact preview asked of the server: on its way, done, or failed.
+  ExactPreview? _exact;
+
+  /// Is the finished preview playing over the monitor?
+  bool _exactOpen = false;
+
+  /// The montage as it was sent, to tell when the preview no longer shows it.
+  String? _exactPayload;
+  Timer? _exactPoll;
   final _scroll = ScrollController();
   final _title = TextEditingController(text: 'My montage');
 
@@ -192,6 +204,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _focus.dispose();
     _debounce?.cancel();
     _clock?.cancel();
+    _exactPoll?.cancel();
     _audio?.dispose();
     _scroll.dispose();
     _title.dispose();
@@ -903,6 +916,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   void _play() {
     if (_state.isBlank) return;
+    // playing is asking for the live monitor back
+    if (_exactOpen) setState(() => _exactOpen = false);
     // at the end, play restarts: stopping on the last frame and doing nothing
     // would leave the button without effect
     final endTime = videoDuration(_state.clips);
@@ -918,6 +933,97 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _audio?.pause();
     if (mounted) setState(() => _clock = null);
   }
+
+  // ── exact preview ─────────────────────────────────────────────────────────
+  //
+  // The monitor composes in the browser: instant, but its own approximation.
+  // This asks the server for the real thing — the final video's graph on a
+  // small frame — over the stretch being worked on.
+
+  Future<void> _requestExact() async {
+    if (_state.isBlank) return;
+    _pause();
+    _exactPoll?.cancel();
+    final window = exactPreviewWindow(videoDuration(_state.clips), _cursor);
+    final montage = _state.toPayload();
+    setState(() {
+      _exact = const ExactPreview(id: '', status: 'pending');
+      _exactOpen = false;
+      _exactPayload = jsonEncode(montage.toJson());
+    });
+    try {
+      final asked = await _api.createPreview(
+        jobId: widget.job.id,
+        montage: montage,
+        fromS: window.from,
+        toS: window.to,
+      );
+      if (!mounted) return;
+      setState(() => _exact = asked);
+      _exactPoll = Timer.periodic(
+        const Duration(milliseconds: 700),
+        (_) => _checkExact(asked.id),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _exact = ExactPreview(id: '', status: 'failed', error: '$e'),
+      );
+    }
+  }
+
+  Future<void> _checkExact(String id) async {
+    try {
+      final now = await _api.getPreview(id);
+      if (!mounted || _exact?.id != id) return;
+      setState(() {
+        _exact = now;
+        if (now.isDone) {
+          _exactOpen = true;
+          _pause();
+        }
+      });
+      if (!now.isWorking) _exactPoll?.cancel();
+    } catch (_) {
+      // one failed poll is noise; the next tick asks again
+    }
+  }
+
+  /// The monitor, with the exact preview over it when there is one to show.
+  Widget _withExact(Widget monitor) {
+    final exact = _exact;
+    return Stack(
+      children: [
+        monitor,
+        if (exact != null && exact.isDone && _exactOpen)
+          Positioned.fill(
+            child: ExactPreviewOverlay(
+              key: ValueKey('exact-${exact.id}'),
+              url: exact.videoUrl!,
+              fromS: exact.fromS,
+              toS: exact.toS,
+              outdated: _exactOutdated,
+              onClose: () => setState(() => _exactOpen = false),
+            ),
+          )
+        else if (exact != null && !exact.isDone)
+          Positioned(
+            left: 8,
+            bottom: 8,
+            child: ExactPreviewStatus(
+              progress: exact.progress,
+              error: exact.isFailed ? (exact.error ?? 'unknown error') : null,
+              onDismiss: () => setState(() => _exact = null),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Has the montage changed since the preview was asked for?
+  bool get _exactOutdated =>
+      _exactPayload != null &&
+      _exactPayload != jsonEncode(_state.toPayload().toJson());
 
   /// One clock step.
   ///
@@ -1826,7 +1932,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: Center(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: PreviewPlayer(
+              child: _withExact(PreviewPlayer(
                 // the proxy when there is one; for old matches, the recording
                 videoUrl: widget.job.monitorUrl,
                 layers: _state.layers,
@@ -1855,7 +1961,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     _edit(changeText(_state, id, textValue: v)),
                 onGestureStart: _history.startGesture,
                 onGestureEnd: _history.endGesture,
-              ),
+              )),
             ),
           ),
         ),
@@ -1892,6 +1998,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(width: 6),
+            IconButton(
+              key: const Key('exact-preview-button'),
+              tooltip: 'Exact preview — render this stretch on the server',
+              onPressed: _state.isBlank || (_exact?.isWorking ?? false)
+                  ? null
+                  : _requestExact,
+              icon: const Icon(Icons.high_quality_outlined),
             ),
             // On a narrow screen these controls do not fit next to the
             // clock. `reverse` keeps them against the right edge when they
