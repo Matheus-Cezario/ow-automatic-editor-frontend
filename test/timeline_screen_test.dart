@@ -2655,6 +2655,33 @@ void main() {
     });
   });
 
+  group('exact preview', () {
+    testWidgets('needs something to render', (tester) async {
+      await open(tester);
+      final button = tester.widget<IconButton>(
+        find.byKey(const Key('exact-preview-button')),
+      );
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('a refused request says so on the monitor', (tester) async {
+      // in tests every request answers 400: the failure path is the one
+      // that can be walked here
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('exact-preview-button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.textContaining('Exact preview failed'), findsOneWidget);
+      await tester.tap(find.byTooltip('Dismiss'));
+      await tester.pump();
+      expect(find.byKey(const Key('exact-preview-status')), findsNothing);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
