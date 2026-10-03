@@ -256,6 +256,19 @@ TimelineClip move(
   required bool snap,
 }) {
   final present = cuts[index];
+  final destination = snapMove(present, atS, beats: beats, snap: snap);
+  if (!fits(cuts, destination, present.durationS, ignore: index)) return present;
+  return present.copyWith(atS: destination);
+}
+
+/// Where [present] lands when dragged to [atS]: the magnet's pick, ignoring
+/// neighbours — fitting is [move]'s business.
+double snapMove(
+  TimelineClip present,
+  double atS, {
+  required List<double> beats,
+  required bool snap,
+}) {
   var destination = math.max(0.0, atS);
   if (snap) {
     // It snaps by the start, but if it is the end that is close to a beat, the
@@ -293,8 +306,7 @@ TimelineClip move(
     }
     destination = math.max(0, destination);
   }
-  if (!fits(cuts, destination, present.durationS, ignore: index)) return present;
-  return present.copyWith(atS: destination);
+  return destination;
 }
 
 /// Stretches or shortens a block by its **right edge**.

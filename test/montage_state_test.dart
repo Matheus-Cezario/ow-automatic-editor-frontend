@@ -628,6 +628,94 @@ void main() {
     });
   });
 
+  group('dropping a dragged clip', () {
+    MontageState drop(
+      MontageState s,
+      TimelineClip c, {
+      required double atS,
+      int? layer,
+    }) => dropClip(
+      s,
+      c.id,
+      fromS: c.atS,
+      atS: atS,
+      destination: layer ?? s.locate(c.id)!.$1,
+      beats: const [],
+      snap: false,
+    );
+
+    List<double> starts(MontageState s, int layer) => [
+      for (final c in [...s.layers[layer].clips]
+        ..sort((a, b) => a.atS.compareTo(b.atS)))
+        c.atS,
+    ];
+
+    test('a free spot takes it as it is', () {
+      final s = stateWith([cut(0, 2), cut(5, 2)]);
+      final a = s.layers[0].clips[0];
+      final after = drop(s, a, atS: 8);
+      expect(after.layers[0].clips.firstWhere((c) => c.id == a.id).atS, 8);
+    });
+
+    test('dropped on the next clip, the two swap and the gap stays', () {
+      final s = stateWith([cut(0, 2), cut(3, 2), cut(6, 2)]);
+      final [a, b, c] = s.layers[0].clips;
+      final after = drop(s, a, atS: 3);
+      final at = {for (final x in after.layers[0].clips) x.id: x.atS};
+      expect(at[b.id], 0);
+      expect(at[a.id], 3);
+      expect(at[c.id], 6, reason: 'outside the span nothing moves');
+    });
+
+    test('dragged over two clips, both slide back', () {
+      final s = stateWith([cut(0, 2), cut(2, 2), cut(4, 2)]);
+      final [a, b, c] = s.layers[0].clips;
+      final after = drop(s, a, atS: 4);
+      final at = {for (final x in after.layers[0].clips) x.id: x.atS};
+      expect([at[b.id], at[c.id], at[a.id]], [0, 2, 4]);
+    });
+
+    test('dragged to the left, the clips jumped over slide right', () {
+      final s = stateWith([cut(0, 2), cut(2, 2), cut(4, 3)]);
+      final [a, b, c] = s.layers[0].clips;
+      final after = drop(s, c, atS: 0);
+      final at = {for (final x in after.layers[0].clips) x.id: x.atS};
+      expect([at[c.id], at[a.id], at[b.id]], [0, 3, 5]);
+      expect(starts(after, 0).last + 2, 7, reason: 'same end as before');
+    });
+
+    test('a near miss on a neighbour changes nothing', () {
+      // the centre does not reach the neighbour: that is not a swap
+      final s = stateWith([cut(0, 2), cut(3, 2)]);
+      expect(drop(s, s.layers[0].clips[0], atS: 1.5), same(s));
+    });
+
+    test('on another layer, the two trade places', () {
+      final s = layeredState([cut(0, 2)], [cut(4, 3)]);
+      final a = s.layers[0].clips.single;
+      final b = s.layers[1].clips.single;
+      final after = drop(s, a, atS: 4, layer: 1);
+      expect(after.layers[1].clips.single.id, a.id);
+      expect(after.layers[1].clips.single.atS, 4);
+      expect(after.layers[0].clips.single.id, b.id);
+      expect(after.layers[0].clips.single.atS, 0);
+    });
+
+    test('a swap the lengths do not allow is refused', () {
+      // the other clip is longer and would cover the neighbour left behind
+      final s = layeredState([cut(0, 2), cut(2, 2)], [cut(5, 3)]);
+      expect(drop(s, s.layers[0].clips[0], atS: 5, layer: 1), same(s));
+    });
+
+    test('a free spot on another layer takes it at the new instant', () {
+      final s = layeredState([cut(0, 2)], [cut(0, 2)]);
+      final a = s.layers[0].clips.single;
+      final after = drop(s, a, atS: 6, layer: 1);
+      expect(after.layers[0].clips, isEmpty);
+      expect(starts(after, 1), [0, 6]);
+    });
+  });
+
   group('music on the timeline', () {
     Track music({
       String id = 'm1',
@@ -781,6 +869,58 @@ void main() {
 
       expect(moveToLayer(s, block, 0), same(s));
       expect(moveToLayer(s, video, 1), same(s));
+    });
+
+    test('a moment added while the sound layer is active lands on a picture '
+        'layer', () {
+      // putting music makes the sound layer the active one; the next moment
+      // clicked used to go right into it
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      expect(s.layers[s.activeLayer].isAudio, isTrue);
+
+      final after = addClip(s, cut(0, 2), beats: const [], snap: false);
+      expect(after.layers.last.clips, hasLength(1), reason: 'only the music');
+      expect(after.layers.first.clips, hasLength(2));
+    });
+
+    test('with no picture layer at all, adding a clip opens one', () {
+      final s = MontageState(layers: const [Layer(kind: 'audio')]);
+      final after = addClip(s, cut(0, 2), beats: const [], snap: false);
+      expect(after.layers, hasLength(2));
+      expect(after.layers.last.isAudio, isFalse);
+      expect(after.layers.last.clips, hasLength(1));
+    });
+
+    test('pasting goes to a layer of the clip kind', () {
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      final video = s.layers.first.clips.single;
+      final song = s.layers.last.clips.single;
+
+      // the sound layer is active: the picture must not land there
+      final pictures = paste(s, [video], 10);
+      expect(pictures.layers.first.clips, hasLength(2));
+      expect(pictures.layers.last.clips, hasLength(1));
+
+      // and music does not land on a picture layer, whichever is active
+      final sounds = paste(
+        s.copyWith(activeLayer: 0),
+        [song],
+        100,
+        audio: true,
+      );
+      expect(sounds.layers.first.clips, hasLength(1));
+      expect(sounds.layers.last.clips, hasLength(2));
+    });
+
+    test('duplicating a mixed selection keeps each clip on its kind', () {
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      final ids = {for (final c in s.clips) c.id};
+
+      final after = duplicate(s, ids);
+      expect(after.layers.first.clips, hasLength(2));
+      expect(after.layers.last.clips, hasLength(2));
+      expect(after.selectionIds, hasLength(2), reason: 'both copies chosen');
+      expect(after.selectionIds.intersection(ids), isEmpty);
     });
 
     test('the music block moves and trims like any other', () {

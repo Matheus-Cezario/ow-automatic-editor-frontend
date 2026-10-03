@@ -61,9 +61,14 @@ class MusicTimeline extends StatefulWidget {
     required this.onGestureStart,
     required this.onGestureEnd,
     required this.onChangeLayer,
+    required this.onDropClip,
     required this.onActiveLayer,
     required this.onAdjustLayer,
     required this.onReorderLayers,
+    this.onRenameLayer,
+    this.onRemoveLayer,
+    this.onDuplicateClip,
+    this.onDeleteClip,
     this.onDragLabel,
     this.onDrop,
     this.beatTimes = const [],
@@ -98,8 +103,17 @@ class MusicTimeline extends StatefulWidget {
   final void Function(String id, double atS) onTrim;
   final void Function(String id, double durationS) onStretch;
 
-  /// (id, target layer) — the vertical drag.
+  /// (id, target layer) — the clip menu's "move to layer".
   final void Function(String id, int layerIndex) onChangeLayer;
+
+  /// (id, where the drag started, where it was let go, target layer) — the
+  /// end of a move, which may change layer or swap with another clip.
+  final void Function(String id, double fromS, double atS, int layerIndex)
+  onDropClip;
+
+  /// The clip menu's own operations; without them, the entry is left out.
+  final ValueChanged<String>? onDuplicateClip;
+  final ValueChanged<String>? onDeleteClip;
 
   final ValueChanged<int> onActiveLayer;
 
@@ -108,6 +122,11 @@ class MusicTimeline extends StatefulWidget {
   final void Function(int from, int to) onReorderLayers;
   final void Function(int layerIndex, {bool? muted, bool? hidden, bool? locked})
   onAdjustLayer;
+
+  /// The right-click menu's own operations; without them, the entry is left
+  /// out of the menu.
+  final void Function(int layerIndex, String name)? onRenameLayer;
+  final ValueChanged<int>? onRemoveLayer;
 
   /// Opens and closes the gesture in the history: a whole drag becomes a
   /// single undo step, instead of one per frame.
@@ -259,6 +278,159 @@ class _MusicTimelineState extends State<MusicTimeline> {
     _direction = 0;
   }
 
+  /// Every visible clip with its layer, the selected ones last.
+  List<(int, TimelineClip)> _drawOrder() {
+    final rest = <(int, TimelineClip)>[];
+    final chosen = <(int, TimelineClip)>[];
+    for (var i = 0; i < widget.layers.length; i++) {
+      if (widget.layers[i].hidden) continue;
+      for (final c in widget.layers[i].clips) {
+        (widget.selectionIds.contains(c.id) ? chosen : rest).add((i, c));
+      }
+    }
+    return [...rest, ...chosen];
+  }
+
+  /// Where a right click opens a menu: right under the pointer.
+  RelativeRect _at(Offset global) {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    return RelativeRect.fromRect(
+      global & const Size(1, 1),
+      Offset.zero & overlay.size,
+    );
+  }
+
+  /// The right-click menu of a clip.
+  Future<void> _clipMenu(String id, int layerIndex, Offset global) async {
+    if (!widget.selectionIds.contains(id)) widget.onSelect(id);
+    final layers = widget.layers;
+    final locked = layers[layerIndex].locked;
+    bool sameKind(int i) =>
+        i >= 0 &&
+        i < layers.length &&
+        layers[i].isAudio == layers[layerIndex].isAudio;
+    final choice = await showMenu<String>(
+      context: context,
+      position: _at(global),
+      items: [
+        PopupMenuItem(
+          value: 'up',
+          // a picture above the top layer opens a new one
+          enabled:
+              !locked &&
+              (sameKind(layerIndex + 1) ||
+                  (layerIndex + 1 == layers.length &&
+                      !layers[layerIndex].isAudio)),
+          child: const Text('Move to layer above'),
+        ),
+        PopupMenuItem(
+          value: 'down',
+          enabled: !locked && sameKind(layerIndex - 1),
+          child: const Text('Move to layer below'),
+        ),
+        if (widget.onDuplicateClip != null || widget.onDeleteClip != null)
+          const PopupMenuDivider(),
+        if (widget.onDuplicateClip != null)
+          const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
+        if (widget.onDeleteClip != null)
+          PopupMenuItem(
+            key: const Key('clip-menu-delete'),
+            value: 'delete',
+            enabled: !locked,
+            child: const Text('Delete'),
+          ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'up':
+        widget.onChangeLayer(id, layerIndex + 1);
+      case 'down':
+        widget.onChangeLayer(id, layerIndex - 1);
+      case 'duplicate':
+        widget.onDuplicateClip!(id);
+      case 'delete':
+        widget.onDeleteClip!(id);
+    }
+  }
+
+  /// The right-click menu of a layer — on its header or on its empty track.
+  ///
+  /// The header buttons stay: the menu is where the rest lives, and where
+  /// whoever looks for "delete" with the right button finds it.
+  Future<void> _layerMenu(int i, Offset global) async {
+    if (i < 0 || i >= widget.layers.length) return;
+    widget.onActiveLayer(i);
+    final layer = widget.layers[i];
+    final top = widget.layers.length - 1;
+    final choice = await showMenu<String>(
+      context: context,
+      position: _at(global),
+      items: [
+        if (widget.onRenameLayer != null)
+          const PopupMenuItem(value: 'rename', child: Text('Rename…')),
+        PopupMenuItem(
+          value: 'up',
+          enabled: i < top,
+          child: const Text('Move layer up'),
+        ),
+        PopupMenuItem(
+          value: 'down',
+          enabled: i > 0,
+          child: const Text('Move layer down'),
+        ),
+        const PopupMenuDivider(),
+        if (!layer.isAudio)
+          PopupMenuItem(
+            value: 'hide',
+            child: Text(layer.hidden ? 'Show' : 'Hide'),
+          ),
+        PopupMenuItem(
+          value: 'mute',
+          child: Text(layer.muted ? 'Unmute' : 'Mute'),
+        ),
+        PopupMenuItem(
+          value: 'lock',
+          child: Text(layer.locked ? 'Unlock' : 'Lock'),
+        ),
+        if (widget.onRemoveLayer != null) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            key: const Key('layer-menu-delete'),
+            value: 'delete',
+            // the montage always keeps one layer to receive the next clip
+            enabled: widget.layers.length > 1,
+            child: const Text('Delete layer'),
+          ),
+        ],
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'rename':
+        final name = await _askName(layer.name);
+        if (name != null && name.isNotEmpty) widget.onRenameLayer!(i, name);
+      case 'up':
+        widget.onReorderLayers(i, i + 1);
+      case 'down':
+        widget.onReorderLayers(i, i - 1);
+      case 'hide':
+        widget.onAdjustLayer(i, hidden: !layer.hidden);
+      case 'mute':
+        widget.onAdjustLayer(i, muted: !layer.muted);
+      case 'lock':
+        widget.onAdjustLayer(i, locked: !layer.locked);
+      case 'delete':
+        widget.onRemoveLayer!(i);
+    }
+  }
+
+  Future<String?> _askName(String current) => showDialog<String>(
+    context: context,
+    builder: (_) => _RenameDialog(current: current),
+  );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -279,6 +451,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
               onActive: widget.onActiveLayer,
               onAdjust: widget.onAdjustLayer,
               onReorder: widget.onReorderLayers,
+              onMenu: _layerMenu,
             ),
           ),
           const VerticalDivider(width: 1),
@@ -317,6 +490,10 @@ class _MusicTimelineState extends State<MusicTimeline> {
                             widget.onSeek(d.localPosition.dx / px);
                             widget.onSelect(null);
                           },
+                          onSecondaryTapUp: (d) => _layerMenu(
+                            _layerAt(d.localPosition.dy),
+                            d.globalPosition,
+                          ),
                           child: CustomPaint(
                             painter: _RulerPainter(
                               beats: widget.beatTimes,
@@ -336,49 +513,52 @@ class _MusicTimelineState extends State<MusicTimeline> {
                         ),
                       ),
 
-                      for (
-                        var layerIndex = 0;
-                        layerIndex < widget.layers.length;
-                        layerIndex++
-                      )
-                        if (!widget.layers[layerIndex].hidden)
-                          for (final clip in widget.layers[layerIndex].clips)
-                            _Block(
-                              key: ValueKey('block-${clip.id}'),
-                              cut: clip,
-                              music: widget.tracks[clip.mediaId],
-                              selected: widget.selectionIds.contains(clip.id),
-                              isLocked: widget.layers[layerIndex].locked,
-                              markAtCursor: _playAtCursor(clip),
-                              pxPerSecond: px,
-                              left: clip.atS * px,
-                              top:
-                                  MusicTimeline.waveHeight +
-                                  MusicTimeline.layerRow(
-                                        layerIndex,
-                                        widget.layers.length,
-                                      ) *
-                                      MusicTimeline.blockHeight,
-                              height: MusicTimeline.blockHeight,
-                              onSelect: ({bool toggle = false}) =>
-                                  widget.onSelect(clip.id, toggle: toggle),
-                              onMove: (at) => widget.onMove(clip.id, at),
-                              onTrim: (at) => widget.onTrim(clip.id, at),
-                              onStretch: (d) => widget.onStretch(clip.id, d),
-                              onDragLabel: widget.onDragLabel,
-                              wave: widget.matchWaveform,
-                              matchDuration: widget.matchDuration,
-                              onDragStart: widget.onGestureStart,
-                              onDragMove: _maybeScroll,
-                              onDragEnd: () {
-                                _stopScrolling();
-                                widget.onGestureEnd();
-                              },
-                              // up on screen is up in the stack: the steps
-                              // come in tracks, and tracks grow downwards
-                              onChangeLayer: (steps) => widget
-                                  .onChangeLayer(clip.id, layerIndex - steps),
-                            ),
+                      // the chosen clips are drawn last: the one being
+                      // dragged passes over its neighbours, not under them
+                      for (final (layerIndex, clip) in _drawOrder())
+                        _Block(
+                          key: ValueKey('block-${clip.id}'),
+                          cut: clip,
+                          music: widget.tracks[clip.mediaId],
+                          selected: widget.selectionIds.contains(clip.id),
+                          isLocked: widget.layers[layerIndex].locked,
+                          markAtCursor: _playAtCursor(clip),
+                          pxPerSecond: px,
+                          left: clip.atS * px,
+                          top:
+                              MusicTimeline.waveHeight +
+                              MusicTimeline.layerRow(
+                                    layerIndex,
+                                    widget.layers.length,
+                                  ) *
+                                  MusicTimeline.blockHeight,
+                          height: MusicTimeline.blockHeight,
+                          onSelect: ({bool toggle = false}) =>
+                              widget.onSelect(clip.id, toggle: toggle),
+                          onMove: (at) => widget.onMove(clip.id, at),
+                          onTrim: (at) => widget.onTrim(clip.id, at),
+                          onStretch: (d) => widget.onStretch(clip.id, d),
+                          onDragLabel: widget.onDragLabel,
+                          wave: widget.matchWaveform,
+                          matchDuration: widget.matchDuration,
+                          onDragStart: widget.onGestureStart,
+                          onDragMove: _maybeScroll,
+                          onDragEnd: () {
+                            _stopScrolling();
+                            widget.onGestureEnd();
+                          },
+                          // up on screen is up in the stack: the steps
+                          // come in tracks, and tracks grow downwards
+                          onLetGo: (fromS, atS, steps) => widget
+                              .onDropClip(
+                                clip.id,
+                                fromS,
+                                atS,
+                                layerIndex - steps,
+                              ),
+                          onMenu: (global) =>
+                              _clipMenu(clip.id, layerIndex, global),
+                        ),
 
                       // where what is being dragged will land
                       if (_crosshair != null)
@@ -386,7 +566,11 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           left: _crosshair!.$1 * px,
                           top:
                               MusicTimeline.waveHeight +
-                              _crosshair!.$2 * MusicTimeline.blockHeight,
+                              MusicTimeline.layerRow(
+                                    _crosshair!.$2,
+                                    widget.layers.length,
+                                  ) *
+                                  MusicTimeline.blockHeight,
                           height: MusicTimeline.blockHeight,
                           width: math.max(2, _crosshairWidth * px),
                           child: IgnorePointer(
@@ -425,6 +609,47 @@ class _MusicTimelineState extends State<MusicTimeline> {
   }
 }
 
+/// Asks for a layer's new name. Stateful so the field's controller lives as
+/// long as the dialog does — including its closing animation.
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.current});
+
+  final String current;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final _field = TextEditingController(text: widget.current);
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  void _done() => Navigator.pop(context, _field.text.trim());
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Rename layer'),
+    content: TextField(
+      key: const Key('layer-name'),
+      controller: _field,
+      autofocus: true,
+      onSubmitted: (_) => _done(),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _done, child: const Text('Rename')),
+    ],
+  );
+}
+
 /// The column of headers, outside the scroll.
 ///
 /// It stays outside because it is the reference: when the ruler moves,
@@ -436,10 +661,14 @@ class _Headers extends StatefulWidget {
     required this.onActive,
     required this.onAdjust,
     required this.onReorder,
+    required this.onMenu,
   });
 
   final List<Layer> layers;
   final int active;
+
+  /// (layer, where the right click happened).
+  final void Function(int layerIndex, Offset global) onMenu;
   final ValueChanged<int> onActive;
   final void Function(int layerIndex, {bool? muted, bool? hidden, bool? locked})
   onAdjust;
@@ -519,29 +748,33 @@ class _HeadersState extends State<_Headers> {
                       color: theme.colorScheme.primary.withValues(alpha: 0.08),
                     ),
                   ),
-                  builder: (handle) => Container(
-                    key: ValueKey('header-$i'),
-                    height: MusicTimeline.blockHeight,
-                    decoration: _target == i
-                        ? BoxDecoration(
-                            border: Border.all(
-                              color: theme.colorScheme.primary,
+                  builder: (handle) => GestureDetector(
+                    onSecondaryTapUp: (d) =>
+                        widget.onMenu(i, d.globalPosition),
+                    child: Container(
+                      key: ValueKey('header-$i'),
+                      height: MusicTimeline.blockHeight,
+                      decoration: _target == i
+                          ? BoxDecoration(
+                              border: Border.all(
+                                color: theme.colorScheme.primary,
+                              ),
+                            )
+                          : null,
+                      child: _LayerHeader(
+                        layer: layers[i],
+                        index: i,
+                        active: i == widget.active,
+                        handle: handle,
+                        onActive: () => widget.onActive(i),
+                        onAdjust: ({bool? muted, bool? hidden, bool? locked}) =>
+                            widget.onAdjust(
+                              i,
+                              muted: muted,
+                              hidden: hidden,
+                              locked: locked,
                             ),
-                          )
-                        : null,
-                    child: _LayerHeader(
-                      layer: layers[i],
-                      index: i,
-                      active: i == widget.active,
-                      handle: handle,
-                      onActive: () => widget.onActive(i),
-                      onAdjust: ({bool? muted, bool? hidden, bool? locked}) =>
-                          widget.onAdjust(
-                            i,
-                            muted: muted,
-                            hidden: hidden,
-                            locked: locked,
-                          ),
+                      ),
                     ),
                   ),
                 ),
@@ -764,7 +997,8 @@ class _Block extends StatefulWidget {
     required this.onDragStart,
     required this.onDragMove,
     required this.onDragEnd,
-    required this.onChangeLayer,
+    required this.onLetGo,
+    required this.onMenu,
   });
 
   final TimelineClip cut;
@@ -796,8 +1030,12 @@ class _Block extends StatefulWidget {
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
 
-  /// How many tracks up (negative) or down (positive).
-  final ValueChanged<int> onChangeLayer;
+  /// (where the drag started, where it was let go, how many tracks up —
+  /// negative — or down).
+  final void Function(double fromS, double atS, int steps) onLetGo;
+
+  /// A right click, with where it happened.
+  final ValueChanged<Offset> onMenu;
 
   /// Resize handle. 26px because the target is a finger, not a mouse — below
   /// that the person misses and moves the block when they meant to stretch it.
@@ -846,9 +1084,67 @@ class _BlockState extends State<_Block> {
   }
 
   String _label(_Gesture gesture) => switch (gesture) {
-    _Gesture.move => 'starts at ${formatClock(widget.cut.atS)} of the video',
+    _Gesture.move => [
+      'starts at ${formatClock(widget.cut.atS)} of the video',
+      if (_steps < 0) '${-_steps} layer(s) up',
+      if (_steps > 0) '$_steps layer(s) down',
+    ].join(' · '),
     _ => '${widget.cut.durationS.toStringAsFixed(2)}s',
   };
+
+  /// Where the finger was when the move was accepted.
+  Offset _anchor = Offset.zero;
+
+  /// Is a move under way? While it is, the clip is drawn where the finger is
+  /// even when the montage could not follow — that is how it passes over a
+  /// neighbour to swap with it.
+  bool _moving = false;
+
+  void _grab(DragStartDetails d) {
+    _anchor = d.globalPosition;
+    _rose = 0;
+    _moving = true;
+    _begin(_Gesture.move);
+  }
+
+  /// Both axes from the anchor — the recogniser's own delta only carries the
+  /// axis it was built for.
+  void _follow(DragUpdateDetails d) {
+    final offset = d.globalPosition - _anchor;
+    setState(() => _rose = offset.dy);
+    _moved = offset.dx / widget.pxPerSecond;
+    widget.onMove(_startedAt + _moved);
+    widget.onDragMove(d.globalPosition);
+    widget.onDragLabel?.call(_label(_Gesture.move));
+  }
+
+  /// How many tracks the finger is away from the clip's own — negative is up.
+  int get _steps => (_rose / widget.height).round();
+
+  /// Lets go of a move. Where it lands — another track, a swap — is decided
+  /// **inside** the same gesture, so one undo takes back the whole drag.
+  void _drop() {
+    if (_moving) {
+      final steps = _steps;
+      setState(() {
+        _rose = 0;
+        _moving = false;
+      });
+      widget.onLetGo(_startedAt, _startedAt + _moved, steps);
+    }
+    _release();
+  }
+
+  /// Where to draw the clip: the montage's position, unless a move is under
+  /// way and the montage could not follow the finger — then, the finger's.
+  /// The magnet's pull stays visible: a snap is within its tolerance.
+  double get _left {
+    if (!_moving) return widget.left;
+    final wanted = math.max(0.0, _startedAt + _moved);
+    return (widget.cut.atS - wanted).abs() <= kSnapToleranceS + 1e-6
+        ? widget.left
+        : wanted * widget.pxPerSecond;
+  }
 
   void _release() {
     widget.onDragLabel?.call(null);
@@ -915,8 +1211,10 @@ class _BlockState extends State<_Block> {
     final textFits = widthPx > 56;
 
     return Positioned(
-      left: widget.left,
-      top: widget.top,
+      left: _left,
+      // the clip follows the finger between tracks, so where it will land is
+      // visible before letting go
+      top: widget.top + _rose,
       width: widthPx,
       height: widget.height,
       child: MouseRegion(
@@ -924,32 +1222,21 @@ class _BlockState extends State<_Block> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: _play,
-          // dragging up or down takes the clip to another track. It is a
-          // gesture separate from the horizontal one, so they do not compete.
-          onVerticalDragStart: widget.isLocked
-              ? null
-              : (_) {
-                  _rose = 0;
-                  if (!widget.selected) widget.onSelect();
-                },
-          onVerticalDragUpdate: widget.isLocked
-              ? null
-              : (d) => _rose += d.delta.dy,
-          onVerticalDragEnd: widget.isLocked
-              ? null
-              : (_) {
-                  final steps = (_rose / widget.height).round();
-                  if (steps != 0) widget.onChangeLayer(steps);
-                  widget.onDragLabel?.call(null);
-                },
-          onHorizontalDragStart: widget.isLocked
-              ? null
-              : (_) => _begin(_Gesture.move),
-          onHorizontalDragUpdate: widget.isLocked
-              ? null
-              : (d) => _advance(_Gesture.move, d),
-          onHorizontalDragEnd: widget.isLocked ? null : (_) => _release(),
-          onHorizontalDragCancel: widget.isLocked ? null : _release,
+          onSecondaryTapUp: (d) => widget.onMenu(d.globalPosition),
+          // Whichever axis the drag starts on, it follows the finger on both:
+          // sideways moves the clip in time, up or down takes it to another
+          // track. Following only the starting axis meant a drag that began
+          // sideways could never change layer. Two recognisers and not one pan
+          // because the ruler scrolls sideways too, and on touch a pan loses
+          // that race.
+          onHorizontalDragStart: widget.isLocked ? null : _grab,
+          onHorizontalDragUpdate: widget.isLocked ? null : _follow,
+          onHorizontalDragEnd: widget.isLocked ? null : (_) => _drop(),
+          onHorizontalDragCancel: widget.isLocked ? null : _drop,
+          onVerticalDragStart: widget.isLocked ? null : _grab,
+          onVerticalDragUpdate: widget.isLocked ? null : _follow,
+          onVerticalDragEnd: widget.isLocked ? null : (_) => _drop(),
+          onVerticalDragCancel: widget.isLocked ? null : _drop,
           child: Container(
             margin: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(

@@ -254,14 +254,37 @@ List<Layer>? _trackBecomesBlock(Montage draft) {
 // clips at the same instant on different layers is exactly what layers are
 // for.
 
-/// Puts a new clip on the active layer, pushing it to the first free slot.
+/// The layer of the requested kind closest to the active one — the active
+/// one itself when it already is of that kind.
+///
+/// Pictures and sound never share a layer: the server refuses the mix, and on
+/// the ruler it would be a music block covering a cut. With no layer of that
+/// kind at all, one is opened on top.
+(MontageState, int) layerOfKind(MontageState s, {required bool audio}) {
+  final active = s.activeLayer.clamp(0, s.layers.length - 1);
+  int? best;
+  for (var i = 0; i < s.layers.length; i++) {
+    if (s.layers[i].isAudio != audio) continue;
+    // a tie goes to the layer below: it is the one already covered by the
+    // active one, so the new clip does not jump over anything
+    if (best == null || (i - active).abs() < (best - active).abs()) best = i;
+  }
+  if (best != null) return (s, best);
+  final opened = audio ? addMusicLayer(s) : addLayer(s);
+  return (opened, opened.layers.length - 1);
+}
+
+/// Puts a new picture clip on the active layer — or on the nearest picture
+/// layer when the active one is a sound layer — pushing it to the first free
+/// slot.
 MontageState addClip(
   MontageState s,
   TimelineClip clip, {
   required List<double> beats,
   required bool snap,
 }) {
-  final layerIndex = s.activeLayer.clamp(0, s.layers.length - 1);
+  final int layerIndex;
+  (s, layerIndex) = layerOfKind(s, audio: false);
   final slot = nextSlot(s.layers[layerIndex].clips, clip.atS, clip.durationS);
   final updated = clip.copyWith(
     id: newCutId(),
@@ -667,23 +690,43 @@ MontageState split(MontageState s, String id, double atS) {
 }
 
 /// Duplicates the chosen clips, putting the copies after the montage's end.
+///
+/// Pictures and music are pasted apart, each on a layer of its own kind.
 MontageState duplicate(MontageState s, Set<String> ids) {
-  final originals = [
-    for (final c in s.clips)
-      if (ids.contains(c.id)) c,
-  ]..sort((a, b) => a.atS.compareTo(b.atS));
-  if (originals.isEmpty) return s;
-  return paste(s, originals, videoDuration(s.clips));
+  final pictures = <TimelineClip>[];
+  final sounds = <TimelineClip>[];
+  for (final l in s.layers) {
+    for (final c in l.clips) {
+      if (ids.contains(c.id)) (l.isAudio ? sounds : pictures).add(c);
+    }
+  }
+  final end = videoDuration(s.clips);
+  var out = s;
+  final copies = <String>{};
+  for (final (group, audio) in [(pictures, false), (sounds, true)]) {
+    if (group.isEmpty) continue;
+    out = paste(out, group, end, audio: audio);
+    copies.addAll(out.selectionIds);
+  }
+  return copies.isEmpty ? s : out.copyWith(selectionIds: copies);
 }
 
-/// Puts a copy of [area] from [atS] on, on the active layer.
+/// Puts a copy of [area] from [atS] on, on the active layer — or on the
+/// nearest layer of the same kind: [audio] clips only live on sound layers,
+/// and pictures never do.
 ///
 /// If it does not fit there, the whole group goes after the layer's last
 /// clip: that is more predictable than scattering the copies across the
 /// gaps.
-MontageState paste(MontageState s, List<TimelineClip> area, double atS) {
+MontageState paste(
+  MontageState s,
+  List<TimelineClip> area,
+  double atS, {
+  bool audio = false,
+}) {
   if (area.isEmpty) return s;
-  final layerIndex = s.activeLayer.clamp(0, s.layers.length - 1);
+  final int layerIndex;
+  (s, layerIndex) = layerOfKind(s, audio: audio);
   final targetClips = s.layers[layerIndex].clips;
   final base = area.map((c) => c.atS).reduce(math.min);
 
@@ -779,6 +822,106 @@ MontageState moveToLayer(MontageState s, String id, int destination) {
     clips: [...list[destination].clips, clip],
   );
   return s.copyWith(layers: list, activeLayer: destination);
+}
+
+/// Where a dragged clip lands when it is let go: at [atS] on layer
+/// [destination], having left [fromS] — where the drag started.
+///
+/// A free spot takes it as it is. A spot where the clip's **centre** falls on
+/// another clip swaps the two:
+///
+/// * on the same layer it is a reorder — the clips jumped over slide towards
+///   where the dragged one was, keeping the gaps between them, and the dragged
+///   one takes the far end. Nothing outside the span they covered moves;
+/// * on another layer the two trade places: the dragged clip takes the
+///   other's start, and the other goes to [fromS] on the dragged one's layer.
+///
+/// Anything else — a near miss on a neighbour, a swap the lengths do not
+/// allow, sound and pictures — returns [s] untouched.
+MontageState dropClip(
+  MontageState s,
+  String id, {
+  required double fromS,
+  required double atS,
+  required int destination,
+  required List<double> beats,
+  required bool snap,
+}) {
+  final location = s.locate(id);
+  if (location == null || destination < 0 || destination >= s.layers.length) {
+    return s;
+  }
+  final (origin, i) = location;
+  if (s.layers[origin].isAudio != s.layers[destination].isAudio) return s;
+
+  // the live drag may have left the clip anywhere on the way: decide from
+  // where it started
+  final dragged = s.layers[origin].clips[i].copyWith(atS: fromS);
+  final originRest = [...s.layers[origin].clips]..removeAt(i);
+  final others = origin == destination
+      ? originRest
+      : s.layers[destination].clips;
+
+  MontageState settle(List<TimelineClip> originClips, List<TimelineClip> dest) {
+    final list = [...s.layers];
+    list[origin] = list[origin].copyWith(clips: originClips);
+    list[destination] = list[destination].copyWith(clips: dest);
+    return s.copyWith(layers: list, activeLayer: destination);
+  }
+
+  // ── a free spot ──
+  final landing = snapMove(dragged, atS, beats: beats, snap: snap);
+  if (fits(others, landing, dragged.durationS)) {
+    final placed = dragged.copyWith(atS: landing);
+    return origin == destination
+        ? settle([...originRest, placed], [...originRest, placed])
+        : settle(originRest, [...others, placed]);
+  }
+
+  // ── a swap: the clip under the dragged one's centre ──
+  final centre = math.max(0.0, atS) + dragged.durationS / 2;
+  final hits = [
+    for (final c in others)
+      if (c.atS <= centre && centre < c.untilS) c,
+  ];
+  if (hits.isEmpty) return s;
+  final target = hits.first;
+
+  if (origin == destination) {
+    final right = target.atS > fromS;
+    final jumped = [
+      for (final c in others)
+        if (right
+            ? c.atS > fromS && c.atS <= target.atS
+            : c.atS < fromS && c.atS >= target.atS)
+          c,
+    ]..sort((a, b) => a.atS.compareTo(b.atS));
+    final shift = right
+        ? -(jumped.first.atS - fromS)
+        : fromS + dragged.durationS - jumped.last.untilS;
+    final placed = dragged.copyWith(
+      atS: right ? target.untilS - dragged.durationS : target.atS,
+    );
+    final clips = [
+      for (final c in others)
+        jumped.contains(c) ? c.copyWith(atS: c.atS + shift) : c,
+      placed,
+    ];
+    return settle(clips, clips);
+  }
+
+  final destRest = [
+    for (final c in others)
+      if (c.id != target.id) c,
+  ];
+  if (!fits(destRest, target.atS, dragged.durationS) ||
+      !fits(originRest, fromS, target.durationS)) {
+    return s;
+  }
+  return settle(
+    [...originRest, target.copyWith(atS: fromS)],
+    [...destRest, dragged.copyWith(atS: target.atS)],
+  );
 }
 
 /// Opens an audio-only layer.

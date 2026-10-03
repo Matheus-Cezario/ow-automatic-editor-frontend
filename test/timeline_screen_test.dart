@@ -2000,6 +2000,102 @@ void main() {
       expect(layerList[1].clips.single.id, id);
     });
 
+    List<Layer> layersOf(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).layers;
+
+    testWidgets('a drag that starts sideways can still change layer', (
+      tester,
+    ) async {
+      // the horizontal recogniser used to win the gesture and ignore the
+      // vertical part: dragging a clip diagonally only ever moved it in time
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+
+      final id = cutList(tester).first.id;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(ValueKey('block-$id'))),
+      );
+      for (var i = 0; i < 20; i++) {
+        await gesture.moveBy(const Offset(6, 0));
+        await tester.pump();
+      }
+      for (var i = 0; i < 24; i++) {
+        await gesture.moveBy(const Offset(0, -3));
+        await tester.pump();
+      }
+      await gesture.up();
+      await settle(tester);
+
+      final layerList = layersOf(tester);
+      expect(layerList[0].clips, isEmpty);
+      expect(layerList[1].clips.single.id, id);
+      expect(layerList[1].clips.single.atS, greaterThan(1.0));
+    });
+
+    testWidgets('dragging a clip over its neighbour swaps the two', (
+      tester,
+    ) async {
+      // the neighbour used to stop the drag: the clip could not get past it
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await cursorAt(tester, 0);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final [a, b] = cutList(tester);
+      expect(b.atS, closeTo(a.untilS, 1e-9), reason: 'back to back');
+
+      // the centre of the dragged clip lands on the centre of the other
+      await dragSlowly(
+        tester,
+        find.byKey(ValueKey('block-${a.id}')),
+        (b.atS + b.durationS / 2 - a.durationS / 2 - a.atS) * px + eatenBySlop,
+      );
+      await settle(tester);
+
+      final at = {for (final c in cutList(tester)) c.id: c.atS};
+      expect(at[b.id], closeTo(0, 1e-9));
+      expect(at[a.id], closeTo(b.durationS, 1e-9));
+    });
+
+    testWidgets('dragging above the top layer opens a new one', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      expect(layersOf(tester), hasLength(1));
+
+      final id = cutList(tester).first.id;
+      await tester.drag(
+        find.byKey(ValueKey('block-$id')),
+        const Offset(0, -MusicTimeline.blockHeight),
+      );
+      await settle(tester);
+
+      final layerList = layersOf(tester);
+      expect(layerList, hasLength(2));
+      expect(layerList[0].clips, isEmpty);
+      expect(layerList[1].clips.single.id, id);
+    });
+
+    testWidgets('a moment clicked after adding music goes to a picture layer', (
+      tester,
+    ) async {
+      await open(tester, withMusic: true);
+      await tester.tap(find.byKey(const Key('new-music-layer')));
+      await settle(tester);
+
+      await tester.tap(moment(30.0));
+      await tester.pump();
+
+      final layerList = layersOf(tester);
+      expect(layerList.last.isAudio, isTrue);
+      expect(layerList.last.clips, isEmpty);
+      expect(layerList.first.clips, hasLength(1));
+    });
+
     testWidgets('for the sound layer, it explains instead of just refusing', (
       tester,
     ) async {
@@ -2023,6 +2119,93 @@ void main() {
           .widget<MusicTimeline>(find.byType(MusicTimeline))
           .layers;
       expect(layerList[0].clips.single.id, id, reason: 'it stayed where it was');
+    });
+  });
+
+  group('layer right-click menu', () {
+    List<Layer> layersOf(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).layers;
+
+    Future<void> rightClick(WidgetTester tester, Finder target) async {
+      await tester.tap(target, buttons: kSecondaryButton);
+      await settle(tester);
+    }
+
+    testWidgets('delete removes the layer and what is on it', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      expect(layersOf(tester)[1].clips, hasLength(1));
+
+      await rightClick(tester, find.byKey(const ValueKey('header-1')));
+      await tester.tap(find.text('Delete layer'));
+      await settle(tester);
+
+      expect(layersOf(tester), hasLength(1));
+      expect(cutList(tester), isEmpty);
+    });
+
+    testWidgets('right-clicking a clip offers to delete it', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+
+      await rightClick(tester, block(tester, 0));
+      expect(find.text('Move to layer above'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('clip-menu-delete')));
+      await settle(tester);
+
+      expect(cutList(tester), isEmpty);
+    });
+
+    testWidgets('the last layer cannot be deleted', (tester) async {
+      await open(tester);
+      await rightClick(tester, find.byKey(const ValueKey('header-0')));
+
+      final item = tester.widget<PopupMenuItem<String>>(
+        find.byKey(const Key('layer-menu-delete')),
+      );
+      expect(item.enabled, isFalse);
+    });
+
+    testWidgets('rename asks for the name', (tester) async {
+      await open(tester);
+      await rightClick(tester, find.byKey(const ValueKey('header-0')));
+      await tester.tap(find.text('Rename…'));
+      await settle(tester);
+
+      await tester.enterText(find.byKey(const Key('layer-name')), 'Kills');
+      await tester.tap(find.widgetWithText(FilledButton, 'Rename'));
+      await settle(tester);
+
+      expect(layersOf(tester).single.name, 'Kills');
+    });
+
+    testWidgets('right-clicking the empty track opens the same menu', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+
+      // the lower track (layer 0) is the second row, from the top
+      final ruler = tester.getTopLeft(find.byType(MusicTimeline));
+      await tester.tapAt(
+        ruler +
+            const Offset(
+              MusicTimeline.headerWidth + 400,
+              MusicTimeline.waveHeight + MusicTimeline.blockHeight * 1.5,
+            ),
+        buttons: kSecondaryButton,
+      );
+      await settle(tester);
+      await tester.tap(find.text('Move layer up'));
+      await settle(tester);
+
+      // the new layer was on top; now the first one is
+      expect(layersOf(tester).first.name, 'Layer 2');
     });
   });
 
