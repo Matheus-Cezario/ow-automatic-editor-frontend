@@ -305,6 +305,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   // ── motion: position, scale, opacity, volume, static or keyframed ────────
 
+  void _rampIntoMoment(String id) {
+    final ramped = rampIntoMoment(_state, id);
+    if (ramped == null) {
+      _notify('The clip is too short to slow down around its play.');
+      return;
+    }
+    _edit(ramped);
+    _notify('Ramped: full speed in, slow motion through the play, full speed out.');
+  }
+
   /// The playhead in seconds from the clip's start.
   double _localIn(String id) => _cursor - (_state.clipItem(id)?.atS ?? 0);
 
@@ -2215,6 +2225,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onSplit: _splitAtCursor,
             onDuplicate: _duplicate,
             motion: _motionPanel(selectionIds.first),
+            onRamp: () => _rampIntoMoment(selectionIds.first),
           ),
         ),
       ] else if (selectionIds.length > 1) ...[
@@ -2752,12 +2763,16 @@ class _SelectedBlock extends StatelessWidget {
     required this.onStyle,
     required this.onTypeOnFrame,
     this.motion,
+    this.onRamp,
   });
 
   final TimelineClip cut;
 
   /// Position, scale, opacity and volume — `null` when the clip has none.
   final Widget? motion;
+
+  /// The slow-motion ramp around the play.
+  final VoidCallback? onRamp;
 
   /// The file the block came from, when it came from the library. A music
   /// block talks about the sound, not the picture — which it does not have.
@@ -2912,6 +2927,7 @@ class _SelectedBlock extends StatelessWidget {
                 onZoom: onZoom,
                 onFreeze: onFreeze,
                 onReverse: onReverse,
+                onRamp: momentInVideo(cut) == null ? null : onRamp,
               ),
           ],
         ),
@@ -3710,6 +3726,7 @@ class _Effects extends StatelessWidget {
     required this.onZoom,
     required this.onFreeze,
     required this.onReverse,
+    this.onRamp,
   });
 
   final TimelineClip cut;
@@ -3720,10 +3737,14 @@ class _Effects extends StatelessWidget {
   final ValueChanged<bool> onFreeze;
   final ValueChanged<bool> onReverse;
 
+  /// Full speed into the play, slow motion through it — `null` when the clip
+  /// has no play to ramp around.
+  final VoidCallback? onRamp;
+
   /// How many effects are in use — so the title says something is there
   /// without having to open it.
   int get _active =>
-      (cut.speed != 1 ? 1 : 0) +
+      (cut.speed != 1 || cut.isRamped ? 1 : 0) +
       (cut.color.isNeutral ? 0 : 1) +
       (cut.fade.isNeutral ? 0 : 1) +
       (cut.zoom.isEmpty ? 0 : 1) +
@@ -3814,19 +3835,44 @@ class _Effects extends StatelessWidget {
           onChanged: onReverse,
           title: const Text('Reverse'),
         ),
-        _LabeledSlider(
-          textClip: 'Speed',
-          amount: cut.speed,
-          minimum: 0.25,
-          maximum: 4,
-          // the duration in the video does not change: what changes is how much of the recording goes in
-          caption: cut.speed == 1
-              ? 'normal'
-              : '${cut.speed.toStringAsFixed(2)}×  ·  eats '
-                    '${cut.sourceConsumedS.toStringAsFixed(1)}s of recording',
-          onChanged: onSpeed,
-          onReset: cut.speed == 1 ? null : () => onSpeed(1),
-        ),
+        if (cut.isRamped)
+          // a ramp lives in Motion, as keyframes; one number here would lie
+          ListTile(
+            key: const Key('speed-ramped'),
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            leading: const Icon(Icons.speed, size: 18),
+            title: const Text('Speed: ramped'),
+            subtitle: Text(
+              'edit it in Motion · eats '
+              '${cut.sourceConsumedS.toStringAsFixed(1)}s of recording · '
+              'no game sound',
+            ),
+          )
+        else
+          _LabeledSlider(
+            textClip: 'Speed',
+            amount: cut.speed,
+            minimum: 0.25,
+            maximum: 4,
+            // the duration in the video does not change: what changes is how much of the recording goes in
+            caption: cut.speed == 1
+                ? 'normal'
+                : '${cut.speed.toStringAsFixed(2)}×  ·  eats '
+                      '${cut.sourceConsumedS.toStringAsFixed(1)}s of recording',
+            onChanged: onSpeed,
+            onReset: cut.speed == 1 ? null : () => onSpeed(1),
+          ),
+        if (onRamp != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('ramp-into-play'),
+              onPressed: onRamp,
+              icon: const Icon(Icons.slow_motion_video, size: 18),
+              label: const Text('Ramp into the play'),
+            ),
+          ),
         _LabeledSlider(
           textClip: 'Fade in',
           amount: cut.fade.inS,

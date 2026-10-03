@@ -412,8 +412,12 @@ double? _previousBefore(List<TimelineClip> cuts, int index, double at) {
 /// leaves, and then there is nothing to mark.
 double? momentMark(TimelineClip cut) {
   if (cut.durationS <= 0) return null;
-  final f = (cut.sourceT - cut.startS) / cut.durationS;
-  return f < 0 || f > 1 ? null : f;
+  final into = cut.sourceT - cut.startS;
+  if (into < 0) return null;
+  // the play shows when that much source has gone by: sooner at 2x, later
+  // under a slow ramp
+  final f = cut.localForSourceOffset(into) / cut.durationS;
+  return f > 1 ? null : f;
 }
 
 /// Where the moment the block came from falls in the **video**, in seconds.
@@ -421,8 +425,10 @@ double? momentMark(TimelineClip cut) {
 /// `null` when the moment ended up outside the block — you can trim until it
 /// leaves — or when the block came from no moment at all (music, text, media).
 double? momentInVideo(TimelineClip cut) {
-  if (cut.sourceT <= 0 || momentMark(cut) == null) return null;
-  return cut.atS + (cut.sourceT - cut.startS);
+  if (cut.sourceT <= 0) return null;
+  final f = momentMark(cut);
+  if (f == null) return null;
+  return cut.atS + f * cut.durationS;
 }
 
 /// The block under the playhead at [atS], or `null` if it is a gap there.
@@ -530,21 +536,12 @@ double staticValue(TimelineClip clip, KeyProp prop) => switch (prop) {
   KeyProp.scale => clip.transform.scale,
   KeyProp.opacity => clip.transform.opacity,
   KeyProp.volume => clip.audio.volume,
+  KeyProp.speed => clip.speed,
 };
 
 /// A curve through (seconds, value, ease) points, in time order.
-double curveAt(List<(double, double, Ease)> points, double at) {
-  if (at < points.first.$1) return points.first.$2;
-  for (var i = 0; i + 1 < points.length; i++) {
-    final (t0, v0, ease) = points[i];
-    final (t1, v1, _) = points[i + 1];
-    if (at < t1) {
-      final u = ((at - t0) / math.max(1e-6, t1 - t0)).clamp(0.0, 1.0);
-      return v0 + (v1 - v0) * ease.apply(u);
-    }
-  }
-  return points.last.$2;
-}
+double curveAt(List<(double, double, Ease)> points, double at) =>
+    curveValue(points, at);
 
 /// Two keyframes closer than this are the same one: a frame at 30 fps.
 const kKeyToleranceS = 1 / 30;

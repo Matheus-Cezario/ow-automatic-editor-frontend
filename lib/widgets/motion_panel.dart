@@ -240,7 +240,7 @@ class MotionPanel extends StatelessWidget {
 
   static String _format(KeyProp p, double v) => switch (p) {
     KeyProp.opacity || KeyProp.volume => '${(v * 100).round()}%',
-    KeyProp.scale => '${v.toStringAsFixed(2)}×',
+    KeyProp.scale || KeyProp.speed => '${v.toStringAsFixed(2)}×',
     KeyProp.x || KeyProp.y => v.toStringAsFixed(2),
   };
 }
@@ -258,6 +258,13 @@ List<KeyProp> motionPropsFor(
   if (clip.isText) return const [];
   if (media?.isImage ?? false) {
     return const [KeyProp.x, KeyProp.y, KeyProp.scale, KeyProp.opacity];
+  }
+  // a frozen or reversed clip cannot ramp: the server refuses both together
+  if (clip.freeze || clip.reverse) {
+    return [
+      for (final p in KeyProp.values)
+        if (p != KeyProp.speed) p,
+    ];
   }
   return KeyProp.values;
 }

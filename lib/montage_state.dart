@@ -118,7 +118,9 @@ class MontageState {
           // the piece after starts further into the source, in proportion to
           // the speed — otherwise the picture would jump back when it shows
           // again. A frozen frame does not move: same frame on both sides
-          startS: v.freeze ? v.startS : v.startS + (c.untilS - v.atS) * v.speed,
+          startS: v.freeze
+              ? v.startS
+              : v.startS + v.sourceOffsetAt(c.untilS - v.atS),
         ),
     ];
   }
@@ -601,6 +603,7 @@ TimelineClip _withStatic(TimelineClip c, KeyProp prop, double v) =>
         transform: c.transform.copyWith(opacity: v),
       ),
       KeyProp.volume => c.copyWith(audio: c.audio.copyWith(volume: v)),
+      KeyProp.speed => c.copyWith(speed: v),
     };
 
 MontageState adjustEffect(
@@ -635,6 +638,9 @@ MontageState adjustEffect(
   final willFreeze = freeze ?? c.freeze;
   final willReverse = reverse ?? c.reverse;
 
+  // nor a ramp frozen or reversed: turning either on drops the ramp
+  final dropsRamp = (freeze ?? false) || (reverse ?? false);
+
   return s.withClip(
     layerIndex,
     i,
@@ -645,8 +651,85 @@ MontageState adjustEffect(
       zoom: zoom,
       freeze: freeze ?? (willReverse ? false : willFreeze),
       reverse: reverse ?? (willFreeze ? false : willReverse),
+      keys: dropsRamp
+          ? [
+              for (final k in c.keys)
+                if (k.prop != KeyProp.speed) k,
+            ]
+          : null,
     ),
   );
+}
+
+/// The classic of game montages: full speed into the play, slow motion
+/// through it, full speed out.
+///
+/// Slowing down pushes the play later in the clip, so the ramp is placed in
+/// **source** time: it starts where, once slowed, the play lands [leadS]
+/// after the slow motion settles, and it ends [settleS] after the play. The
+/// in-out ease is symmetric, so over its [easeS] the source advances at the
+/// average of the two speeds.
+///
+/// Slow motion makes the stretch longer: the clip grows so the recording
+/// after the ramp still plays to where it used to end — as far as the next
+/// clip on the layer allows. `null` when the clip has no play, the play is
+/// too close to its start, or the neighbour leaves no room.
+MontageState? rampIntoMoment(
+  MontageState s,
+  String id, {
+  double slow = 0.35,
+  double easeS = 0.3,
+  double leadS = 0.5,
+  double settleS = 0.4,
+}) {
+  final location = s.locate(id);
+  if (location == null) return null;
+  final (layerIndex, i) = location;
+  final original = s.layers[layerIndex].clips[i];
+  if (original.freeze || original.reverse || momentMark(original) == null) {
+    return null;
+  }
+  final c = original.copyWith(
+    keys: [
+      for (final k in original.keys)
+        if (k.prop != KeyProp.speed) k,
+    ],
+    speed: 1,
+  );
+  final into = c.sourceT - c.startS; // source seconds until the play
+  final easedSource = easeS * (1 + slow) / 2;
+
+  // where full speed ends: what is left of the run-up, at slow speed, takes
+  // exactly leadS
+  final a = into - easedSource - leadS * slow;
+  if (a < 0) return null; // the play is too close to the start
+  final playAt = a + easeS + leadS;
+  final end = playAt + settleS;
+  final rampOut = end + easeS;
+
+  // what the ramp eats of the source, and what is left of the clip after it
+  // at full speed
+  final eaten = a + 2 * easedSource + (end - a - easeS) * slow;
+  var length = rampOut + math.max(0.0, c.sourceConsumedS - eaten);
+  final others = s.layers[layerIndex].clips;
+  while (!fits(others, c.atS, length, ignore: i)) {
+    length -= 0.05;
+    if (length < rampOut) return null; // the next clip leaves no room
+  }
+  final d = length;
+
+  final ramped = c.copyWith(
+    durationS: d,
+    keys: [
+      ...c.keys,
+      if (a > kKeyToleranceS) ClipKey(prop: KeyProp.speed, t: 0, value: 1),
+      ClipKey(prop: KeyProp.speed, t: a / d, value: 1, ease: Ease.easeInOut),
+      ClipKey(prop: KeyProp.speed, t: (a + easeS) / d, value: slow),
+      ClipKey(prop: KeyProp.speed, t: end / d, value: slow, ease: Ease.easeInOut),
+      ClipKey(prop: KeyProp.speed, t: (end + easeS) / d, value: 1),
+    ],
+  );
+  return s.withClip(layerIndex, i, ramped);
 }
 
 /// Changes what a text clip says, or how it looks.
@@ -806,12 +889,15 @@ MontageState split(MontageState s, String id, double atS) {
   final right = c.untilS - atS;
   if (leftEdge < kMinCutS || right < kMinCutS) return s;
 
-  final a = c.copyWith(durationS: leftEdge);
+  final a = c.copyWith(durationS: leftEdge, keys: _keysWithin(c, 0, leftEdge));
   final b = c.copyWith(
     id: newCutId(),
     atS: atS,
     durationS: right,
-    startS: c.startS + leftEdge,
+    keys: _keysWithin(c, leftEdge, c.durationS),
+    // where the left half stopped in the source — the integral of the speed,
+    // so a sped-up or ramped clip does not jump back at the splice
+    startS: c.freeze ? c.startS : c.startS + c.sourceOffsetAt(leftEdge),
     // the entrance belongs to the original clip; the right half carries on
     // where the other stopped, and a transition there would come out of
     // nowhere mid-scene
@@ -823,6 +909,31 @@ MontageState split(MontageState s, String id, double atS) {
   return s
       .withLayer(layerIndex, s.layers[layerIndex].copyWith(clips: list))
       .copyWith(selectionIds: {b.id});
+}
+
+/// [c]'s keyframes for the piece between [fromS] and [toS] of it, as
+/// fractions of that piece — with a key at each cut edge holding the value
+/// the animation had there, so both halves keep moving as the whole did.
+List<ClipKey> _keysWithin(TimelineClip c, double fromS, double toS) {
+  final span = toS - fromS;
+  final out = <ClipKey>[];
+  for (final prop in KeyProp.values) {
+    final ks = c.keysFor(prop);
+    if (ks.isEmpty) continue;
+    ClipKey edge(double at) =>
+        ClipKey(prop: prop, t: (at - fromS) / span, value: valueAt(c, prop, at));
+    out.add(edge(fromS));
+    for (final k in ks) {
+      final at = k.t * c.durationS;
+      if (at > fromS + kKeyToleranceS && at < toS - kKeyToleranceS) {
+        out.add(
+          ClipKey(prop: prop, t: (at - fromS) / span, value: k.value, ease: k.ease),
+        );
+      }
+    }
+    out.add(edge(toS));
+  }
+  return out;
 }
 
 /// Duplicates the chosen clips, putting the copies after the montage's end.

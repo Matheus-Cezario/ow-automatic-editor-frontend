@@ -2783,6 +2783,33 @@ void main() {
     });
   });
 
+  group('speed ramps', () {
+    testWidgets('one button ramps the clip around its play', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final before = firstCut(tester).durationS;
+
+      await tester.ensureVisible(find.text('Effects'));
+      await tester.tap(find.text('Effects'));
+      await settle(tester);
+      await tester.ensureVisible(find.byKey(const Key('ramp-into-play')));
+      await tester.tap(find.byKey(const Key('ramp-into-play')));
+      await tester.pump();
+
+      final c = firstCut(tester);
+      expect(c.isRamped, isTrue);
+      expect(c.durationS, greaterThan(before), reason: 'slow motion is longer');
+      // the single speed slider gives way to the ramp, edited in Motion
+      expect(find.byKey(const Key('speed-ramped')), findsOneWidget);
+      await tester.ensureVisible(find.text('Motion'));
+      await tester.tap(find.text('Motion'));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('motion-speed')), findsOneWidget);
+      expect(find.text('1 animated'), findsOneWidget);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
