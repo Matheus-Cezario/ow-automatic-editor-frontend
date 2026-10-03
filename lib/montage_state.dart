@@ -290,6 +290,49 @@ List<Layer>? _trackBecomesBlock(Montage draft) {
   return (opened, opened.layers.length - 1);
 }
 
+// ── the magnet ─────────────────────────────────────────────────────────────
+
+/// Everything the magnet pulls a clip toward: the beats, the edges of every
+/// other clip — on any layer, so cuts line up across the stack — and the
+/// playhead.
+///
+/// The clips in [moving] are left out: a clip must not snap to where it
+/// already is, or it would never leave.
+List<double> magnetPoints(
+  MontageState s, {
+  required Set<String> moving,
+  required List<double> beats,
+  double? playheadS,
+}) => [
+  ...beats,
+  for (final l in s.layers)
+    if (!l.hidden)
+      for (final c in l.clips)
+        if (!moving.contains(c.id)) ...[c.atS, c.untilS],
+  ?playheadS,
+];
+
+/// The edge or playhead a clip ended up stuck to, for the guide line —
+/// `null` when it rests on none (a beat already has its own line).
+double? stuckTo(
+  MontageState s,
+  String id, {
+  double? playheadS,
+}) {
+  final c = s.clipItem(id);
+  if (c == null) return null;
+  final points = magnetPoints(
+    s,
+    moving: {id},
+    beats: const [],
+    playheadS: playheadS,
+  );
+  for (final p in points) {
+    if ((p - c.atS).abs() < 1e-6 || (p - c.untilS).abs() < 1e-6) return p;
+  }
+  return null;
+}
+
 /// Puts a new picture clip on the active layer — or on the nearest picture
 /// layer when the active one is a sound layer — pushing it to the first free
 /// slot.

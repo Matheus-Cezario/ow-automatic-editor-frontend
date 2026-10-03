@@ -80,6 +80,7 @@ class MusicTimeline extends StatefulWidget {
     this.onDeleteClip,
     this.onRippleDeleteClip,
     this.onSelectMany,
+    this.snapGuideS,
     this.onDragLabel,
     this.onDrop,
     this.beatTimes = const [],
@@ -128,6 +129,10 @@ class MusicTimeline extends StatefulWidget {
 
   /// Deletes the clip and pulls the following ones on its layer back.
   final ValueChanged<String>? onRippleDeleteClip;
+
+  /// Where the magnet stuck the clip being dragged — another clip's edge or
+  /// the playhead — drawn as a guide line across every track.
+  final double? snapGuideS;
 
   /// The rubber band's result: the clips it touched, added to the selection
   /// when Shift was held.
@@ -699,6 +704,21 @@ class _MusicTimelineState extends State<MusicTimeline> {
                                   color: theme.colorScheme.primary,
                                 ),
                               ),
+                            ),
+                          ),
+                        ),
+
+                      // the magnet's guide: the edge the dragged clip stuck to
+                      if (widget.snapGuideS case final g?)
+                        Positioned(
+                          key: const Key('snap-guide'),
+                          left: g * px - 1,
+                          top: MusicTimeline.waveHeight,
+                          bottom: MusicTimeline.rulerHeight,
+                          width: 2,
+                          child: IgnorePointer(
+                            child: ColoredBox(
+                              color: theme.colorScheme.tertiary,
                             ),
                           ),
                         ),

@@ -3023,6 +3023,39 @@ void main() {
     });
   });
 
+  group('magnet on clip edges', () {
+    testWidgets('a clip dragged near another\'s end sticks to it, with a guide', (
+      tester,
+    ) async {
+      await open(tester); // no song: no beats, only edges and the playhead
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final a = firstCut(tester);
+      await cursorAt(tester, 5);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final b = cutList(tester).firstWhere((c) => c.id != a.id);
+      await cursorAt(tester, 9); // the playhead out of the way
+
+      // drag b left until its start is just past a's end
+      final target = (a.untilS + 0.06 - b.atS) * px - eatenBySlop;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(ValueKey('block-${b.id}'))),
+      );
+      for (var moved = 0.0; moved < target.abs(); moved += 3) {
+        await gesture.moveBy(const Offset(-3, 0));
+        await tester.pump();
+      }
+      expect(find.byKey(const Key('snap-guide')), findsOneWidget);
+      await gesture.up();
+      await tester.pump();
+
+      final moved = cutList(tester).firstWhere((c) => c.id == b.id);
+      expect(moved.atS, closeTo(a.untilS, 1e-9));
+      expect(find.byKey(const Key('snap-guide')), findsNothing);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

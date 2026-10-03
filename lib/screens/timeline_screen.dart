@@ -140,6 +140,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// Insert mode: a clip dropped on others pushes them right instead of going
   /// to the first free spot.
   bool _insert = false;
+
+  /// The magnet's guide line: the edge or playhead the dragged clip is stuck
+  /// to, in video seconds; `null` when it is stuck to none.
+  double? _snapGuide;
   double _cursor = 0;
 
   /// What the finger is doing right now, so the screen can say in numbers
@@ -294,22 +298,45 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  void _move(String id, double atS) =>
-      _edit(moveBlock(_state, id, atS, beats: _beats, snap: _magnet));
-
-  void _trim(String id, double atS) =>
-      _edit(trimBlock(_state, id, atS, beats: _beats, snap: _magnet));
-
-  void _stretch(String id, double durationValue) => _edit(
-    stretchBlock(
-      _state,
-      id,
-      durationValue,
-      beats: _beats,
-      snap: _magnet,
-      sourceDurationS: widget.job.durationS,
-    ),
+  /// What the magnet pulls the clip [id] toward: beats, the other clips'
+  /// edges and the playhead.
+  List<double> _magnetFor(String id) => magnetPoints(
+    _state,
+    moving: {id},
+    beats: _beats,
+    playheadS: _cursor,
   );
+
+  /// After a snapping gesture, the guide line at the edge or playhead the
+  /// clip stuck to — while the gesture lasts.
+  void _guideFor(String id) {
+    final at = _magnet ? stuckTo(_state, id, playheadS: _cursor) : null;
+    if (at != _snapGuide) setState(() => _snapGuide = at);
+  }
+
+  void _move(String id, double atS) {
+    _edit(moveBlock(_state, id, atS, beats: _magnetFor(id), snap: _magnet));
+    _guideFor(id);
+  }
+
+  void _trim(String id, double atS) {
+    _edit(trimBlock(_state, id, atS, beats: _magnetFor(id), snap: _magnet));
+    _guideFor(id);
+  }
+
+  void _stretch(String id, double durationValue) {
+    _edit(
+      stretchBlock(
+        _state,
+        id,
+        durationValue,
+        beats: _magnetFor(id),
+        snap: _magnet,
+        sourceDurationS: widget.job.durationS,
+      ),
+    );
+    _guideFor(id);
+  }
 
   void _shift(String id, double delta) => _edit(
     shiftContent(_state, id, delta, sourceDurationS: widget.job.durationS),
@@ -873,7 +900,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       fromS: fromS,
       atS: atS,
       destination: destination,
-      beats: _beats,
+      beats: _magnetFor(id),
       snap: _magnet,
     );
     if (identical(updated, base)) {
@@ -1822,7 +1849,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 icon: const Icon(Icons.redo),
               ),
               IconButton(
-                tooltip: _magnet ? 'magnet on: snaps to the beat' : 'magnet off',
+                tooltip: _magnet
+                    ? 'magnet on: snaps to the beat, clip edges and the playhead'
+                    : 'magnet off',
                 onPressed: () => setState(() => _magnet = !_magnet),
                 icon: Icon(_magnet ? Icons.grid_on : Icons.grid_off),
               ),
@@ -2260,7 +2289,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onStretch: _stretch,
         onDragLabel: (textValue) => setState(() => _dragLabel = textValue),
         onGestureStart: _history.startGesture,
-        onGestureEnd: _history.endGesture,
+        onGestureEnd: () {
+          _history.endGesture();
+          // the guide only lives while the clip is held
+          if (_snapGuide != null) setState(() => _snapGuide = null);
+        },
+        snapGuideS: _snapGuide,
         onChangeLayer: _changeLayer,
         onDropClip: _dropClip,
         onDuplicateClip: (id) => _edit(duplicate(_state, {id})),
