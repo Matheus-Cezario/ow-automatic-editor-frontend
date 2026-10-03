@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 
 import 'screens/jobs_screen.dart';
 
-void main() {
-  // the editor has its own right-click menus (the layers'); the browser's
-  // would open on top of them
-  if (kIsWeb) BrowserContextMenu.disableContextMenu();
+Future<void> main() async {
+  // The editor has its own right-click menus (layers, clips); the browser's
+  // opened first, on top of them. Turning it off is a message to the engine:
+  // sent before the binding existed and not awaited, it was lost.
+  WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) await BrowserContextMenu.disableContextMenu();
   runApp(const OwEditorApp());
 }
 

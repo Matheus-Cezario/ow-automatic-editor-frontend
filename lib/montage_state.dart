@@ -279,15 +279,34 @@ List<Layer>? _trackBecomesBlock(Montage draft) {
 /// Puts a new picture clip on the active layer — or on the nearest picture
 /// layer when the active one is a sound layer — pushing it to the first free
 /// slot.
+///
+/// With [insert] on, a clip that would land on others makes room instead:
+/// it goes to the nearest edge of the clip it fell on, and every clip from
+/// there on is pushed right just enough for it — the editor's insert mode.
 MontageState addClip(
   MontageState s,
   TimelineClip clip, {
   required List<double> beats,
   required bool snap,
+  bool insert = false,
 }) {
   final int layerIndex;
   (s, layerIndex) = layerOfKind(s, audio: false);
-  final slot = nextSlot(s.layers[layerIndex].clips, clip.atS, clip.durationS);
+  final existing = s.layers[layerIndex].clips;
+
+  if (insert) {
+    final wanted = snap ? math.max(0.0, snapToBeat(clip.atS, beats)) : clip.atS;
+    final (at, room) = makeRoom(existing, wanted, clip.durationS);
+    final updated = clip.copyWith(id: newCutId(), atS: at);
+    return s
+        .withLayer(
+          layerIndex,
+          s.layers[layerIndex].copyWith(clips: [...room, updated]),
+        )
+        .copyWith(selectionIds: {updated.id});
+  }
+
+  final slot = nextSlot(existing, clip.atS, clip.durationS);
   final updated = clip.copyWith(
     id: newCutId(),
     atS: snap ? math.max(0, snapToBeat(slot, beats)) : slot,
@@ -295,9 +314,117 @@ MontageState addClip(
   return s
       .withLayer(
         layerIndex,
-        s.layers[layerIndex].copyWith(clips: [...s.layers[layerIndex].clips, updated]),
+        s.layers[layerIndex].copyWith(clips: [...existing, updated]),
       )
       .copyWith(selectionIds: {updated.id});
+}
+
+/// Where a clip of [durationS] goes at [wanted] in insert mode, and the
+/// layer's clips moved to make room for it.
+///
+/// Falling inside a clip, it goes to that clip's nearer edge — splitting the
+/// clip would change two things when one was asked. From there on, every
+/// clip moves right by just what is missing; the gaps between them stay.
+(double, List<TimelineClip>) makeRoom(
+  List<TimelineClip> clips,
+  double wanted,
+  double durationS,
+) {
+  var at = math.max(0.0, wanted);
+  for (final c in clips) {
+    if (at > c.atS + 1e-6 && at < c.untilS - 1e-6) {
+      at = at - c.atS < c.untilS - at ? c.atS : c.untilS;
+      break;
+    }
+  }
+  if (fits(clips, at, durationS)) return (at, clips);
+  final after = [
+    for (final c in clips)
+      if (c.atS >= at - 1e-6) c.atS,
+  ];
+  final push = after.isEmpty ? 0.0 : at + durationS - after.reduce(math.min);
+  return (
+    at,
+    [
+      for (final c in clips)
+        if (c.atS >= at - 1e-6 && push > 0) c.copyWith(atS: c.atS + push) else c,
+    ],
+  );
+}
+
+/// Removes the chosen clips and closes the gaps they leave: on each layer,
+/// the clips after a removed one move left by its length.
+MontageState rippleDelete(MontageState s, Set<String> ids) {
+  if (ids.isEmpty) return s;
+  return s.copyWith(
+    layers: [
+      for (final l in s.layers)
+        if (l.locked)
+          l
+        else
+          l.copyWith(
+            clips: [
+              for (final c in l.clips)
+                if (!ids.contains(c.id))
+                  c.copyWith(
+                    atS: c.atS -
+                        [
+                          for (final r in l.clips)
+                            if (ids.contains(r.id) && r.atS < c.atS) r.durationS,
+                        ].fold(0.0, (a, b) => a + b),
+                  ),
+            ],
+          ),
+    ],
+    selectionIds: const {},
+  );
+}
+
+/// Which clips a cut at [atS] goes through.
+///
+/// Every unlocked layer with [everyLayer]; otherwise the chosen clips under
+/// the playhead, else the one on the active layer, else the top one — the
+/// clip the person is looking at, never just the first in the list.
+List<String> splitTargets(
+  MontageState s,
+  double atS, {
+  bool everyLayer = false,
+}) {
+  bool under(TimelineClip c) => atS > c.atS + 1e-6 && atS < c.untilS - 1e-6;
+  final open = [
+    for (var i = 0; i < s.layers.length; i++)
+      if (!s.layers[i].locked && !s.layers[i].hidden) i,
+  ];
+  if (everyLayer) {
+    return [
+      for (final i in open)
+        for (final c in s.layers[i].clips)
+          if (under(c)) c.id,
+    ];
+  }
+  final chosen = [
+    for (final i in open)
+      for (final c in s.layers[i].clips)
+        if (under(c) && s.selectionIds.contains(c.id)) c.id,
+  ];
+  if (chosen.isNotEmpty) return chosen;
+  if (open.contains(s.activeLayer)) {
+    for (final c in s.layers[s.activeLayer].clips) {
+      if (under(c)) return [c.id];
+    }
+  }
+  for (final i in open.reversed) {
+    if (s.layers[i].isAudio) continue;
+    for (final c in s.layers[i].clips) {
+      if (under(c)) return [c.id];
+    }
+  }
+  for (final i in open.reversed) {
+    for (final c in s.layers[i].clips) {
+      if (under(c)) return [c.id];
+    }
+  }
+  return const [];
 }
 
 MontageState moveBlock(
