@@ -488,7 +488,19 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           behavior: HitTestBehavior.opaque,
                           onTapDown: (d) {
                             widget.onSeek(d.localPosition.dx / px);
-                            widget.onSelect(null);
+                            // The beats band on top and the time ruler below
+                            // only move the playhead: the selection has to
+                            // survive it, or setting a second keyframe would
+                            // lose the clip being animated. An empty spot on
+                            // a track is what clears it.
+                            final y = d.localPosition.dy;
+                            final onTracks =
+                                y >= MusicTimeline.waveHeight &&
+                                y <
+                                    MusicTimeline.waveHeight +
+                                        widget.layers.length *
+                                            MusicTimeline.blockHeight;
+                            if (onTracks) widget.onSelect(null);
                           },
                           onSecondaryTapUp: (d) => _layerMenu(
                             _layerAt(d.localPosition.dy),
@@ -1370,6 +1382,21 @@ class _BlockState extends State<_Block> {
                       ],
                     ),
                   ),
+                // ── keyframes, on the chosen block: where its motion changes
+                if (widget.selected)
+                  for (final t in {for (final k in widget.cut.keys) k.t})
+                    Positioned(
+                      key: ValueKey('keyframe-${widget.cut.id}-$t'),
+                      left: (t * widthPx - 5).clamp(0.0, widthPx - 10),
+                      bottom: 2,
+                      child: IgnorePointer(
+                        child: Icon(
+                          Icons.diamond,
+                          size: 10,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
                 if (widget.selected && !widget.isLocked) ...[
                   _handle(_Gesture.trimLeft, fillColour, leftEdge: true),
                   _handle(_Gesture.stretchRight, fillColour, leftEdge: false),

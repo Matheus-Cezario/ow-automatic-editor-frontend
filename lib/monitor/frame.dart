@@ -13,6 +13,7 @@ library;
 import 'dart:math' as math;
 
 import '../api.dart';
+import '../montage.dart';
 
 /// Where a piece's picture comes from.
 enum PieceKind { video, image }
@@ -244,7 +245,7 @@ FramePiece? _piece(
   }
 
   // ── alpha ──
-  var opacity = clip.transform.opacity;
+  var opacity = valueAt(clip, KeyProp.opacity, local);
   final tr = clip.transition;
   if (tr != null && tr.kind == 'dissolve' && tr.durationS > 0) {
     opacity *= (local / tr.durationS).clamp(0.0, 1.0);
@@ -277,18 +278,22 @@ FramePiece? _piece(
     }
   }
 
-  // ── the lens ──
+  // ── the lens ── on the clip as placed: a dissolve's longer picture does
+  // not stretch the zoom
   var zoom = 1.0, zx = 0.0, zy = 0.0;
   if (clip.zoom.isNotEmpty) {
-    zoom = math.max(1.0, _interpolate(clip.zoom, (k) => k.scale, drawn, local));
-    zx = _interpolate(clip.zoom, (k) => k.x, drawn, local);
-    zy = _interpolate(clip.zoom, (k) => k.y, drawn, local);
+    double along(double Function(ZoomKey) field) => curveAt([
+      for (final k in clip.zoom) (k.t * clip.durationS, field(k), k.ease),
+    ], local);
+    zoom = math.max(1.0, along((k) => k.scale));
+    zx = along((k) => k.x);
+    zy = along((k) => k.y);
   }
   final window = 1 - 1 / zoom;
 
   // ── the place ──
-  var ox = clip.transform.x / 2;
-  var oy = clip.transform.y / 2;
+  var ox = valueAt(clip, KeyProp.x, local) / 2;
+  var oy = valueAt(clip, KeyProp.y, local) / 2;
   final from = tr == null ? null : _slideFrom[tr.kind];
   if (from != null && tr!.durationS > 0) {
     final remaining = 1 - (local / tr.durationS).clamp(0.0, 1.0);
@@ -307,7 +312,7 @@ FramePiece? _piece(
     zoom: zoom,
     zoomLeft: window * (0.5 + zx / 2),
     zoomTop: window * (0.5 + zy / 2),
-    scale: clip.transform.scale,
+    scale: valueAt(clip, KeyProp.scale, local),
     offsetX: ox,
     offsetY: oy,
     brightness: clip.color.brightness,
@@ -317,29 +322,6 @@ FramePiece? _piece(
     veil: veilOpacity > 0 ? veil : null,
     veilOpacity: veilOpacity,
   );
-}
-
-/// The server's `_interpolate`: straight lines between keyframes, whose `t` is
-/// a fraction of the clip, and the endpoint's value outside them.
-double _interpolate(
-  List<ZoomKey> keys,
-  double Function(ZoomKey) field,
-  double duration,
-  double at,
-) {
-  final points = [
-    for (final k in keys) (math.max(0.0, k.t * duration), field(k)),
-  ];
-  if (at < points.first.$1) return points.first.$2;
-  for (var i = 0; i + 1 < points.length; i++) {
-    final (t0, v0) = points[i];
-    final (t1, v1) = points[i + 1];
-    if (at < t1) {
-      final span = math.max(1e-6, t1 - t0);
-      return v0 + (v1 - v0) * (at - t0) / span;
-    }
-  }
-  return points.last.$2;
 }
 
 /// The frame's aspect ratio: the export size when one was asked for,

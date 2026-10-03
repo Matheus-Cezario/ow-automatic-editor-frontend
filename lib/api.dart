@@ -446,13 +446,20 @@ class ClipTextStyle {
 /// animation survives stretching or trimming the block: a zoom that closes at
 /// the end keeps closing at the end.
 class ZoomKey {
-  const ZoomKey({required this.t, this.scale = 1, this.x = 0, this.y = 0});
+  const ZoomKey({
+    required this.t,
+    this.scale = 1,
+    this.x = 0,
+    this.y = 0,
+    this.ease = Ease.linear,
+  });
 
   factory ZoomKey.fromJson(Map<String, dynamic> j) => ZoomKey(
     t: (j['t'] as num).toDouble(),
     scale: (j['scale'] as num?)?.toDouble() ?? 1,
     x: (j['x'] as num?)?.toDouble() ?? 0,
     y: (j['y'] as num?)?.toDouble() ?? 0,
+    ease: Ease.of(j['ease'] as String?),
   );
 
   final double t;
@@ -460,7 +467,114 @@ class ZoomKey {
   final double x;
   final double y;
 
-  Map<String, dynamic> toJson() => {'t': t, 'scale': scale, 'x': x, 'y': y};
+  /// How the zoom travels to the next point.
+  final Ease ease;
+
+  ZoomKey copyWith({Ease? ease}) =>
+      ZoomKey(t: t, scale: scale, x: x, y: y, ease: ease ?? this.ease);
+
+  Map<String, dynamic> toJson() => {
+    't': t,
+    'scale': scale,
+    'x': x,
+    'y': y,
+    if (ease != Ease.linear) 'ease': ease.wire,
+  };
+}
+
+/// How a value travels from one keyframe to the next — set on the keyframe the
+/// stretch **leaves**, as on the server (`owcore.models.Ease`).
+enum Ease {
+  linear('linear', 'Linear'),
+  easeIn('in', 'Ease in'),
+  easeOut('out', 'Ease out'),
+  easeInOut('in_out', 'Ease in-out');
+
+  const Ease(this.wire, this.label);
+
+  /// The name the server knows it by.
+  final String wire;
+  final String label;
+
+  static Ease of(String? wire) =>
+      values.firstWhere((e) => e.wire == wire, orElse: () => linear);
+
+  /// The shape, from progress `u` (0 to 1) to how far along the value is.
+  double apply(double u) => switch (this) {
+    linear => u,
+    easeIn => u * u,
+    easeOut => u * (2 - u),
+    easeInOut => u * u * (3 - 2 * u),
+  };
+}
+
+/// What a [ClipKey] animates.
+enum KeyProp {
+  x('x', 'Position X', -1, 1, 0),
+  y('y', 'Position Y', -1, 1, 0),
+  scale('scale', 'Scale', 0.1, 2, 1),
+  opacity('opacity', 'Opacity', 0, 1, 1),
+  volume('volume', 'Volume', 0, 2, 1);
+
+  const KeyProp(this.wire, this.label, this.min, this.max, this.neutral);
+
+  final String wire;
+  final String label;
+
+  /// The range the editor offers, and the value that means "untouched".
+  final double min;
+  final double max;
+  final double neutral;
+
+  static KeyProp? of(String? wire) {
+    for (final p in values) {
+      if (p.wire == wire) return p;
+    }
+    return null;
+  }
+}
+
+/// One keyframe of one property, inside the clip.
+///
+/// [t] is a fraction of the clip, like the zoom's: the animation follows the
+/// block when it is stretched or trimmed.
+class ClipKey {
+  const ClipKey({
+    required this.prop,
+    required this.t,
+    required this.value,
+    this.ease = Ease.linear,
+  });
+
+  static ClipKey? fromJson(Map<String, dynamic> j) {
+    final prop = KeyProp.of(j['prop'] as String?);
+    if (prop == null) return null;
+    return ClipKey(
+      prop: prop,
+      t: (j['t'] as num).toDouble(),
+      value: (j['value'] as num).toDouble(),
+      ease: Ease.of(j['ease'] as String?),
+    );
+  }
+
+  final KeyProp prop;
+  final double t;
+  final double value;
+  final Ease ease;
+
+  ClipKey copyWith({double? value, Ease? ease}) => ClipKey(
+    prop: prop,
+    t: t,
+    value: value ?? this.value,
+    ease: ease ?? this.ease,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'prop': prop.wire,
+    't': t,
+    'value': value,
+    if (ease != Ease.linear) 'ease': ease.wire,
+  };
 }
 
 /// An item of the match media library.
@@ -596,6 +710,7 @@ class TimelineClip {
     this.fade = const ClipFade(),
     this.speed = 1,
     this.zoom = const [],
+    this.keys = const [],
     this.freeze = false,
     this.reverse = false,
     this.text = '',
@@ -643,6 +758,17 @@ class TimelineClip {
   /// [ClipTransform.scale], which is the size of the clip inside the frame.
   final List<ZoomKey> zoom;
 
+  /// Keyframes of position, scale, opacity and volume. A property with at
+  /// least one is animated, and its static value stops counting.
+  final List<ClipKey> keys;
+
+  /// This property's keyframes, in time order.
+  List<ClipKey> keysFor(KeyProp prop) =>
+      [
+        for (final k in keys)
+          if (k.prop == prop) k,
+      ]..sort((a, b) => a.t.compareTo(b.t));
+
   /// Freezes instead of running. The duration is still the block's.
   final bool freeze;
   final bool reverse;
@@ -671,6 +797,7 @@ class TimelineClip {
       transition == null &&
       speed == 1 &&
       zoom.isEmpty &&
+      keys.isEmpty &&
       !freeze &&
       !reverse;
 
@@ -695,6 +822,7 @@ class TimelineClip {
     ClipFade? fade,
     double? speed,
     List<ZoomKey>? zoom,
+    List<ClipKey>? keys,
     bool? freeze,
     bool? reverse,
     String? text,
@@ -716,6 +844,7 @@ class TimelineClip {
     fade: fade ?? this.fade,
     speed: speed ?? this.speed,
     zoom: zoom ?? this.zoom,
+    keys: keys ?? this.keys,
     freeze: freeze ?? this.freeze,
     reverse: reverse ?? this.reverse,
     text: text ?? this.text,
@@ -749,6 +878,10 @@ class TimelineClip {
     zoom: ((j['zoom'] as List?) ?? [])
         .map((e) => ZoomKey.fromJson(e as Map<String, dynamic>))
         .toList(),
+    keys: [
+      for (final e in (j['keys'] as List?) ?? const [])
+        ?ClipKey.fromJson(e as Map<String, dynamic>),
+    ],
     freeze: j['freeze'] as bool? ?? false,
     reverse: j['reverse'] as bool? ?? false,
     text: j['text'] as String? ?? '',
@@ -776,6 +909,7 @@ class TimelineClip {
     if (!fade.isNeutral) 'fade': fade.toJson(),
     if (speed != 1) 'speed': speed,
     if (zoom.isNotEmpty) 'zoom': [for (final k in zoom) k.toJson()],
+    if (keys.isNotEmpty) 'keys': [for (final k in keys) k.toJson()],
     if (freeze) 'freeze': true,
     if (reverse) 'reverse': true,
     if (isText) 'text': text,

@@ -467,6 +467,142 @@ MontageState reorderLayers(MontageState s, int from, int to) {
   return s.copyWith(layers: list, activeLayer: to);
 }
 
+// ── motion: position, scale, opacity, volume — static or keyframed ─────────
+
+/// Sets [prop] of a clip to [value], [localS] seconds into it.
+///
+/// A property with keyframes is animated: the value goes into the keyframe the
+/// playhead is on, or into a new one there — the "auto-key" every editor uses,
+/// so adjusting at another instant is how a move is drawn. A property with no
+/// keyframes keeps one static value for the whole clip.
+MontageState setMotion(
+  MontageState s,
+  String id,
+  KeyProp prop,
+  double value, {
+  required double localS,
+}) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  final v = value.clamp(prop.min, prop.max).toDouble();
+
+  if (c.keysFor(prop).isEmpty) {
+    return s.withClip(layerIndex, i, _withStatic(c, prop, v));
+  }
+  final here = keyAt(c, prop, localS);
+  final keys = [
+    for (final k in c.keys)
+      if (identical(k, here)) k.copyWith(value: v) else k,
+    if (here == null)
+      ClipKey(prop: prop, t: _fraction(c, localS), value: v),
+  ];
+  return s.withClip(layerIndex, i, c.copyWith(keys: keys));
+}
+
+/// Turns [prop]'s animation on — a first keyframe at the playhead, holding the
+/// value it has now — or off, keeping as the static value the one it had at
+/// the playhead.
+MontageState animateMotion(
+  MontageState s,
+  String id,
+  KeyProp prop, {
+  required bool on,
+  required double localS,
+}) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  final animated = c.keysFor(prop).isNotEmpty;
+  if (on == animated) return s;
+
+  final now = valueAt(c, prop, localS);
+  if (on) {
+    final key = ClipKey(prop: prop, t: _fraction(c, localS), value: now);
+    return s.withClip(layerIndex, i, c.copyWith(keys: [...c.keys, key]));
+  }
+  final rest = [
+    for (final k in c.keys)
+      if (k.prop != prop) k,
+  ];
+  return s.withClip(
+    layerIndex,
+    i,
+    _withStatic(c.copyWith(keys: rest), prop, now),
+  );
+}
+
+/// Removes the keyframe of [prop] at [localS]. The last one going takes the
+/// animation with it, leaving its value as the static one.
+MontageState removeMotionKey(
+  MontageState s,
+  String id,
+  KeyProp prop, {
+  required double localS,
+}) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  final here = keyAt(c, prop, localS);
+  if (here == null) return s;
+  if (c.keysFor(prop).length == 1) {
+    return animateMotion(s, id, prop, on: false, localS: localS);
+  }
+  return s.withClip(
+    layerIndex,
+    i,
+    c.copyWith(
+      keys: [
+        for (final k in c.keys)
+          if (!identical(k, here)) k,
+      ],
+    ),
+  );
+}
+
+/// Sets how the stretch leaving the keyframe at [localS] eases.
+MontageState easeMotionKey(
+  MontageState s,
+  String id,
+  KeyProp prop,
+  Ease ease, {
+  required double localS,
+}) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  final here = keyAt(c, prop, localS);
+  if (here == null) return s;
+  return s.withClip(
+    layerIndex,
+    i,
+    c.copyWith(
+      keys: [
+        for (final k in c.keys)
+          if (identical(k, here)) k.copyWith(ease: ease) else k,
+      ],
+    ),
+  );
+}
+
+double _fraction(TimelineClip c, double localS) =>
+    (localS / c.durationS).clamp(0.0, 1.0);
+
+TimelineClip _withStatic(TimelineClip c, KeyProp prop, double v) =>
+    switch (prop) {
+      KeyProp.x => c.copyWith(transform: c.transform.copyWith(x: v)),
+      KeyProp.y => c.copyWith(transform: c.transform.copyWith(y: v)),
+      KeyProp.scale => c.copyWith(transform: c.transform.copyWith(scale: v)),
+      KeyProp.opacity => c.copyWith(
+        transform: c.transform.copyWith(opacity: v),
+      ),
+      KeyProp.volume => c.copyWith(audio: c.audio.copyWith(volume: v)),
+    };
+
 MontageState adjustEffect(
   MontageState s,
   String id, {

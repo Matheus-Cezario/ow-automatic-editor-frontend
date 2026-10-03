@@ -2396,12 +2396,15 @@ void main() {
     testWidgets('without a selection, the block under the playhead counts', (
       tester,
     ) async {
-      // tapping the ruler to place the cursor clears the selection; asking to
-      // select the block again would be the same gesture twice
+      // with nothing selected, M acts on the block under the playhead —
+      // selecting it first would be the same gesture twice
       await open(tester);
       await tester.tap(moment(30.0));
       await tester.pump();
       await cursorAt(tester, 0.9); // inside the block, which starts at 0
+      // the time strip keeps the selection (keyframing needs it); Esc clears it
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
       expect(
         find.byKey(const Key('align-moment')),
         findsNothing,
@@ -2417,12 +2420,15 @@ void main() {
     testWidgets('without a selection, the block under the playhead counts', (
       tester,
     ) async {
-      // tapping the ruler to place the cursor clears the selection; asking to
-      // select the block again would be the same gesture twice
+      // with nothing selected, M acts on the block under the playhead —
+      // selecting it first would be the same gesture twice
       await open(tester);
       await tester.tap(moment(30.0));
       await tester.pump();
       await cursorAt(tester, 0.9); // inside the block, which starts at 0
+      // the time strip keeps the selection (keyframing needs it); Esc clears it
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
       expect(
         find.byKey(const Key('align-moment')),
         findsNothing,
@@ -2679,6 +2685,101 @@ void main() {
       await tester.tap(find.byTooltip('Dismiss'));
       await tester.pump();
       expect(find.byKey(const Key('exact-preview-status')), findsNothing);
+    });
+  });
+
+  group('motion and keyframes', () {
+    Future<void> openMotion(WidgetTester tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('motion-panel')));
+      await tester.tap(find.text('Motion'));
+      await settle(tester);
+    }
+
+    Slider slider(WidgetTester tester, String prop) => tester.widget<Slider>(
+      find.byKey(ValueKey('motion-$prop-slider')),
+    );
+
+    testWidgets('a static value applies to the whole clip', (tester) async {
+      await openMotion(tester);
+      slider(tester, 'scale').onChanged!(0.5);
+      await tester.pump();
+      expect(firstCut(tester).transform.scale, 0.5);
+      expect(firstCut(tester).keys, isEmpty);
+    });
+
+    testWidgets('animating and adjusting at two instants draws a move', (
+      tester,
+    ) async {
+      await openMotion(tester);
+      final c = firstCut(tester);
+      await cursorAt(tester, c.atS + 0.1);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('motion-opacity-animate')),
+      );
+      await tester.tap(find.byKey(const ValueKey('motion-opacity-animate')));
+      await tester.pump();
+      expect(firstCut(tester).keysFor(KeyProp.opacity), hasLength(1));
+
+      await cursorAt(tester, c.atS + c.durationS - 0.1);
+      slider(tester, 'opacity').onChanged!(0.2);
+      await tester.pump();
+
+      final keys = firstCut(tester).keysFor(KeyProp.opacity);
+      expect(keys.map((k) => k.value), [1, 0.2]);
+      // the chosen block shows where its motion changes
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w.key is ValueKey &&
+              '${(w.key as ValueKey).value}'.startsWith('keyframe-'),
+        ),
+        findsNWidgets(2),
+      );
+    });
+
+    testWidgets('the time strip moves the playhead and keeps the selection', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final selection = tester
+          .widget<MusicTimeline>(find.byType(MusicTimeline))
+          .selectionIds;
+      expect(selection, isNotEmpty);
+
+      await cursorAt(tester, 0.5); // the beats band
+      expect(
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).selectionIds,
+        selection,
+      );
+
+      // an empty spot on a track still clears it
+      final ruler = tester.getTopLeft(find.byType(MusicTimeline));
+      await tester.tapAt(
+        ruler +
+            const Offset(
+              MusicTimeline.headerWidth + 400,
+              MusicTimeline.waveHeight + MusicTimeline.blockHeight / 2,
+            ),
+      );
+      await tester.pump();
+      expect(
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).selectionIds,
+        isEmpty,
+      );
+    });
+
+    testWidgets('a text clip has no Motion panel', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Write on screen'));
+      await settle(tester);
+      await tester.tap(find.text('Free text'));
+      await settle(tester);
+      expect(find.byKey(const Key('motion-panel')), findsNothing);
     });
   });
 
