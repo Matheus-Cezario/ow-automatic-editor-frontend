@@ -5,6 +5,7 @@ import '../api.dart';
 import '../monitor/frame.dart';
 import '../monitor/monitor_picture.dart';
 import '../montage.dart';
+import '../text_anim.dart';
 import 'highlight_style.dart';
 
 /// The montage's monitor: shows what the video will be, before asking for it.
@@ -44,7 +45,12 @@ class PreviewPlayer extends StatelessWidget {
     this.onTextChanged,
     this.onGestureStart,
     this.onGestureEnd,
+    this.fontFamily,
   });
+
+  /// The Flutter family a text's font id is drawn with — `null` while it is
+  /// not loaded, and then the default face stands in.
+  final String? Function(String fontId)? fontFamily;
 
   /// What a clip of the match shows: the proxy, or the recording itself.
   final String? videoUrl;
@@ -194,6 +200,8 @@ class PreviewPlayer extends StatelessWidget {
                 _TextOnFrame(
                   key: ValueKey('text-on-frame-${t.id}'),
                   clip: t,
+                  localS: atS - t.atS,
+                  fontFamily: fontFamily?.call(t.textStyle.font),
                   pickedOne: selectionIds.contains(t.id),
                   onChoose: () => onSelectText?.call(t.id),
                   onMove: onMoveText == null
@@ -228,6 +236,8 @@ class _TextOnFrame extends StatefulWidget {
   const _TextOnFrame({
     super.key,
     required this.clip,
+    this.localS = 0,
+    this.fontFamily,
     required this.pickedOne,
     required this.onChoose,
     required this.onMove,
@@ -240,6 +250,13 @@ class _TextOnFrame extends StatefulWidget {
   });
 
   final TimelineClip clip;
+
+  /// The playhead, in seconds from the text's start — what its entrance and
+  /// exit animate on.
+  final double localS;
+
+  /// The font's family, once loaded; `null` draws the default bold face.
+  final String? fontFamily;
   final bool pickedOne;
   final VoidCallback onChoose;
   final void Function(double x, double y)? onMove;
@@ -340,16 +357,28 @@ class _TextOnFrameState extends State<_TextOnFrame> {
 
     return LayoutBuilder(
       builder: (context, box) {
-        final body = styleSpec.size * box.maxHeight;
-        final outlineSize = styleSpec.outline * body;
+        // while typing, the whole text and no animation: it is being edited
+        final motion = widget.editing
+            ? TextMotion(text: widget.clip.text)
+            : textMotion(widget.clip, widget.localS);
+        final body = styleSpec.size * box.maxHeight * motion.size;
+        final outlineSize = styleSpec.outline * styleSpec.size * box.maxHeight;
         final fillColour = _colours[styleSpec.color] ?? Colors.white;
         final outlineColour = _colours[styleSpec.outlineColor] ?? Colors.black;
+        final family = widget.fontFamily;
+        // the default face is the server's DejaVu Sans **Bold**; a catalogue
+        // font carries its own weight
+        final weight = family == null ? FontWeight.bold : FontWeight.normal;
 
-        return Align(
-          // it is the same computation as `drawtext`: the line's centre lands
-          // `x` half-frames from the centre of the screen
-          alignment: Alignment(t.x, t.y),
-          child: GestureDetector(
+        return CustomSingleChildLayout(
+          // the same computation as `drawtext`: the line's centre lands `x`
+          // half-frames from the centre of the screen. `Align` put the line's
+          // *edge* on the frame's edge at ±1, and the preview drifted from
+          // the render near the sides
+          delegate: _CentreAt(t.x, t.y, motion.drop),
+          child: Opacity(
+            opacity: motion.alpha.clamp(0.0, 1.0),
+            child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             // `down`, not `start`: with the default, the offset spent beating
             // the slop is discarded and a drag delivered all at once (a fast
@@ -424,7 +453,8 @@ class _TextOnFrameState extends State<_TextOnFrame> {
                         ),
                         style: TextStyle(
                           fontSize: body,
-                          fontWeight: FontWeight.bold,
+                          fontFamily: family,
+                          fontWeight: weight,
                           height: 1.1,
                           color: fillColour,
                           // the real outline is a second text underneath, and a
@@ -454,11 +484,12 @@ class _TextOnFrameState extends State<_TextOnFrame> {
                         // legibility
                         if (outlineSize > 0)
                           Text(
-                            widget.clip.text,
+                            motion.text,
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: body,
-                              fontWeight: FontWeight.bold,
+                              fontFamily: family,
+                              fontWeight: weight,
                               height: 1.1,
                               foreground: Paint()
                                 ..style = PaintingStyle.stroke
@@ -467,11 +498,12 @@ class _TextOnFrameState extends State<_TextOnFrame> {
                             ),
                           ),
                         Text(
-                          widget.clip.text,
+                          motion.text,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: body,
-                            fontWeight: FontWeight.bold,
+                            fontFamily: family,
+                            fontWeight: weight,
                             height: 1.1,
                             color: fillColour,
                           ),
@@ -479,6 +511,7 @@ class _TextOnFrameState extends State<_TextOnFrame> {
                       ],
                     ),
             ),
+          ),
           ),
         );
       },
@@ -494,4 +527,28 @@ class _TextOnFrameState extends State<_TextOnFrame> {
     'cyan': Color(0xFF00E5FF),
     'black': Colors.black,
   };
+}
+
+/// Puts its child's centre where `drawtext` puts a line's: `x` and `y` half
+/// frames from the frame's centre, [drop] frame heights lower.
+class _CentreAt extends SingleChildLayoutDelegate {
+  const _CentreAt(this.x, this.y, this.drop);
+
+  final double x;
+  final double y;
+  final double drop;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      constraints.loosen();
+
+  @override
+  Offset getPositionForChild(Size size, Size child) => Offset(
+    size.width * (0.5 + x / 2) - child.width / 2,
+    size.height * (0.5 + y / 2 + drop) - child.height / 2,
+  );
+
+  @override
+  bool shouldRelayout(_CentreAt old) =>
+      old.x != x || old.y != y || old.drop != drop;
 }
