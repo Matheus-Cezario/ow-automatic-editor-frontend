@@ -241,7 +241,8 @@ FramePiece? _piece(
       clip.startS + consumed - local * clip.speed,
     );
   } else {
-    sourceT = clip.startS + local * clip.speed;
+    // the integral of the speed: under a ramp the source runs unevenly
+    sourceT = clip.startS + clip.sourceOffsetAt(local);
   }
 
   // ── alpha ──
@@ -306,7 +307,7 @@ FramePiece? _piece(
     kind: kind,
     url: url,
     sourceT: sourceT,
-    rate: clip.speed,
+    rate: clip.speedAt(local),
     seekEachFrame: clip.freeze || clip.reverse,
     opacity: opacity.clamp(0.0, 1.0),
     zoom: zoom,

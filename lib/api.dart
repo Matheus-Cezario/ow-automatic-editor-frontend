@@ -508,13 +508,33 @@ enum Ease {
   };
 }
 
+/// A value along (seconds, value, ease) points in time order — the endpoint's
+/// outside them, the ease of the point it leaves in between. The server's
+/// `curve_at` / `_curve`, so the monitor and the render agree.
+double curveValue(List<(double, double, Ease)> points, double at) {
+  if (at < points.first.$1) return points.first.$2;
+  for (var i = 0; i + 1 < points.length; i++) {
+    final (t0, v0, ease) = points[i];
+    final (t1, v1, _) = points[i + 1];
+    if (at < t1) {
+      final span = t1 - t0 < 1e-6 ? 1e-6 : t1 - t0;
+      final u = ((at - t0) / span).clamp(0.0, 1.0);
+      return v0 + (v1 - v0) * ease.apply(u);
+    }
+  }
+  return points.last.$2;
+}
+
 /// What a [ClipKey] animates.
 enum KeyProp {
   x('x', 'Position X', -1, 1, 0),
   y('y', 'Position Y', -1, 1, 0),
   scale('scale', 'Scale', 0.1, 2, 1),
   opacity('opacity', 'Opacity', 0, 1, 1),
-  volume('volume', 'Volume', 0, 2, 1);
+  volume('volume', 'Volume', 0, 2, 1),
+
+  /// Keyframed, a speed ramp.
+  speed('speed', 'Speed', 0.1, 4, 1);
 
   const KeyProp(this.wire, this.label, this.min, this.max, this.neutral);
 
@@ -784,7 +804,54 @@ class TimelineClip {
 
   /// How much of the recording this clip eats. At 2×, two seconds of video eat
   /// four of recording — and a frozen one eats a single frame.
-  double get sourceConsumedS => freeze ? 0.05 : durationS * speed;
+  double get sourceConsumedS => freeze ? 0.05 : sourceOffsetAt(durationS);
+
+  // ── speed, constant or ramped ──
+  //
+  // Under a ramp the source no longer runs at one rate: how much of it has
+  // gone by is the integral of the speed. The server does the same sums
+  // (`TimelineClip.source_offset` in owcore), so a cut, a split and the
+  // monitor all land on the same frame.
+
+  bool get isRamped => keys.any((k) => k.prop == KeyProp.speed);
+
+  /// The speed [localS] seconds into the clip.
+  double speedAt(double localS) {
+    final ks = keysFor(KeyProp.speed);
+    if (ks.isEmpty) return speed;
+    return curveValue([
+      for (final k in ks) (k.t * durationS, k.value, k.ease),
+    ], localS);
+  }
+
+  /// How much source has gone by [localS] seconds into the clip.
+  double sourceOffsetAt(double localS) {
+    if (!isRamped) return localS * speed;
+    if (localS <= 0) return localS * speedAt(0);
+    // Simpson over a fine grid, as the server does
+    final n = ((localS * 240).floor() ~/ 2 * 2).clamp(2, 1 << 20);
+    final h = localS / n;
+    var total = speedAt(0) + speedAt(localS);
+    for (var i = 1; i < n; i++) {
+      total += (i.isOdd ? 4 : 2) * speedAt(i * h);
+    }
+    return total * h / 3;
+  }
+
+  /// The clip instant at which [offset] seconds of source have gone by.
+  double localForSourceOffset(double offset) {
+    if (!isRamped) return offset / speed;
+    var lo = 0.0, hi = offset / 0.1 > 1 ? offset / 0.1 : 1.0;
+    for (var i = 0; i < 50; i++) {
+      final mid = (lo + hi) / 2;
+      if (sourceOffsetAt(mid) < offset) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return (lo + hi) / 2;
+  }
 
   /// The clip comes in as it came, with no layer or adjustment — what the
   /// server's cut-and-concat path can assemble.
