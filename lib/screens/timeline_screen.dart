@@ -1157,6 +1157,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
       final location = here.block.startS + (_cursor - here.block.atS);
       final nowS = c.value.position.inMilliseconds / 1000.0;
+      // the montage's music volume, and the dip at each play, so ducking is
+      // heard while editing — the player cannot go above full
+      final duck = _state.duckPlays
+          ? duckAt(playTimes(_state.layers), _cursor) * (1 - _state.duckLevel)
+          : 0.0;
+      final volume = (_state.musicVolume * (1 - duck)).clamp(0.0, 1.0);
+      if ((c.value.volume - volume).abs() > 0.01) await c.setVolume(volume);
       if ((nowS - location).abs() > 0.2) {
         await c.seekTo(Duration(milliseconds: (location * 1000).round()));
       }
@@ -2305,6 +2312,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onChange: (music, game) => _edit(
               _state.copyWith(musicVolume: music, gameVolume: game),
             ),
+            duckPlays: _state.duckPlays,
+            duckLevel: _state.duckLevel,
+            plays: playTimes(_state.layers).length,
+            onDuck: (on, level) =>
+                _edit(_state.copyWith(duckPlays: on, duckLevel: level)),
           ),
         ),
         const SizedBox(height: 10),
@@ -4072,11 +4084,21 @@ class _Mix extends StatelessWidget {
     required this.gameVolume,
     required this.hasMusic,
     required this.onChange,
+    this.duckPlays = false,
+    this.duckLevel = 0.3,
+    this.plays = 0,
+    this.onDuck,
   });
 
   final double musicVolume;
   final double gameVolume;
   final bool hasMusic;
+
+  /// Ducking at the plays, how low the music goes, how many plays there are.
+  final bool duckPlays;
+  final double duckLevel;
+  final int plays;
+  final void Function(bool on, double level)? onDuck;
 
   /// (music volume, game volume)
   final void Function(double, double) onChange;
@@ -4125,6 +4147,32 @@ class _Mix extends StatelessWidget {
               onChanged: hasMusic ? (v) => onChange(musicVolume, v) : (_) {},
               onReset: gameVolume == 0 ? null : () => onChange(musicVolume, 0),
             ),
+            if (onDuck != null) ...[
+              SwitchListTile(
+                key: const Key('duck-plays'),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: duckPlays,
+                onChanged: (on) => onDuck!(on, duckLevel),
+                title: const Text('Duck the music at each play'),
+                subtitle: Text(
+                  plays == 0
+                      ? 'no plays in the montage yet'
+                      : 'the shot comes through over the song at '
+                            '$plays play${plays == 1 ? '' : 's'}',
+                ),
+              ),
+              if (duckPlays)
+                _LabeledSlider(
+                  textClip: 'Music at a play',
+                  amount: duckLevel,
+                  minimum: 0,
+                  maximum: 0.9,
+                  caption: '${(duckLevel * 100).round()}% of its volume',
+                  onChanged: (v) => onDuck!(true, v),
+                  onReset: duckLevel == 0.3 ? null : () => onDuck!(true, 0.3),
+                ),
+            ],
           ],
         ),
       ),

@@ -2951,6 +2951,28 @@ void main() {
     });
   });
 
+  group('ducking', () {
+    testWidgets('the mix card turns ducking on and sets how low', (tester) async {
+      await open(tester, withMusic: true);
+      await tester.tap(find.text('Library'));
+      await settle(tester);
+      await tester.tap(find.text('song.mp3'));
+      await settle(tester);
+      await tester.tap(find.text('Moments'));
+      await settle(tester);
+
+      await tester.ensureVisible(find.byKey(const Key('duck-plays')));
+      await tester.tap(find.byKey(const Key('duck-plays')));
+      await tester.pump();
+
+      expect(find.text('Music at a play'), findsOneWidget);
+      final mix = tester.widget<SwitchListTile>(
+        find.byKey(const Key('duck-plays')),
+      );
+      expect(mix.value, isTrue);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

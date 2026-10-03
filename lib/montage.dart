@@ -553,3 +553,41 @@ ClipKey? keyAt(TimelineClip clip, KeyProp prop, double localS) {
   }
   return null;
 }
+
+// ── ducking ────────────────────────────────────────────────────────────────
+//
+// At each play the music dips and the game sound comes up. The shape is the
+// server's (`_duck_curve` in `owcore/compose.py`): fully down from
+// [kDuckBefore] before the play to [kDuckAfter] after it, ramping over
+// [kDuckAttack] and [kDuckRelease].
+
+const kDuckBefore = 0.15;
+const kDuckAfter = 0.5;
+const kDuckAttack = 0.15;
+const kDuckRelease = 0.4;
+
+/// When each play happens in the video: every moment clip on a visible
+/// picture layer, where its source reaches the event.
+List<double> playTimes(List<Layer> layers) => [
+  for (final l in layers)
+    if (!l.hidden && !l.isAudio)
+      for (final c in l.clips)
+        if (c.source == 'recording' && !c.freeze && !c.reverse)
+          ?momentInVideo(c),
+]..sort();
+
+/// How ducked the mix is at [t], 0 to 1: a trapezoid around each play, the
+/// highest one where they meet.
+double duckAt(List<double> plays, double t) {
+  var most = 0.0;
+  for (final p in plays) {
+    final start = p - kDuckBefore - kDuckAttack;
+    final end = p + kDuckAfter + kDuckRelease;
+    final v = math.min(
+      1.0,
+      math.min((t - start) / kDuckAttack, (end - t) / kDuckRelease),
+    );
+    if (v > most) most = v;
+  }
+  return most;
+}

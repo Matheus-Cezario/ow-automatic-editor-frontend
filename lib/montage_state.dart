@@ -33,6 +33,8 @@ class MontageState {
     this.beatBar = 1,
     this.musicVolume = 1,
     this.gameVolume = 0,
+    this.duckPlays = false,
+    this.duckLevel = 0.3,
     this.export = const ExportSpec(),
   }) : layers = List.unmodifiable(
          (layers.isEmpty ? const [Layer()] : layers).map(
@@ -67,6 +69,10 @@ class MontageState {
   /// Volume of the music and of the game sound in the final mix.
   final double musicVolume;
   final double gameVolume;
+
+  /// Ducking at the plays — see [Montage.duckPlays].
+  final bool duckPlays;
+  final double duckLevel;
 
   /// How the final video is written. It does not change the montage — it
   /// changes the window.
@@ -137,6 +143,8 @@ class MontageState {
     int? beatBar,
     double? musicVolume,
     double? gameVolume,
+    bool? duckPlays,
+    double? duckLevel,
     ExportSpec? export,
   }) => MontageState(
     layers: layers ?? this.layers,
@@ -148,6 +156,8 @@ class MontageState {
     beatBar: beatBar ?? this.beatBar,
     musicVolume: musicVolume ?? this.musicVolume,
     gameVolume: gameVolume ?? this.gameVolume,
+    duckPlays: duckPlays ?? this.duckPlays,
+    duckLevel: duckLevel ?? this.duckLevel,
     export: export ?? this.export,
   );
 
@@ -194,6 +204,8 @@ class MontageState {
     beatBar: beatBar,
     musicVolume: musicVolume,
     gameVolume: gameVolume,
+    duckPlays: duckPlays,
+    duckLevel: duckLevel,
     export: export,
   );
 }
@@ -218,6 +230,8 @@ MontageState montageFromDraft(Montage draft) => MontageState(
   beatBar: draft.beatBar,
   musicVolume: draft.musicVolume,
   gameVolume: draft.gameVolume,
+  duckPlays: draft.duckPlays,
+  duckLevel: draft.duckLevel,
   export: draft.export,
 );
 

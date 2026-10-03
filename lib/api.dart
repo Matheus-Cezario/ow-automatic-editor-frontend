@@ -1225,6 +1225,8 @@ class Montage {
     this.beatBar = 1,
     this.musicVolume = 1,
     this.gameVolume = 0,
+    this.duckPlays = false,
+    this.duckLevel = 0.3,
     this.export = const ExportSpec(),
   });
 
@@ -1257,6 +1259,11 @@ class Montage {
   /// audio stands on its own.
   final double musicVolume;
   final double gameVolume;
+
+  /// Ducking: at each play the music drops to [duckLevel] of its volume and
+  /// the game sound comes up, so the shot is heard over the song.
+  final bool duckPlays;
+  final double duckLevel;
 
   /// How the final video is written. It does not change the montage — it changes the window.
   final ExportSpec export;
@@ -1294,6 +1301,8 @@ class Montage {
       beatBar: (j['beat_bar'] as num?)?.toInt() ?? 1,
       musicVolume: (j['music_volume'] as num?)?.toDouble() ?? 1,
       gameVolume: (j['game_volume'] as num?)?.toDouble() ?? 0,
+      duckPlays: j['duck_plays'] as bool? ?? false,
+      duckLevel: (j['duck_level'] as num?)?.toDouble() ?? 0.3,
       export: ExportSpec.fromJson(
         (j['export'] as Map?)?.cast<String, dynamic>() ?? const {},
       ),
@@ -1312,6 +1321,8 @@ class Montage {
     'beat_bar': beatBar,
     'music_volume': musicVolume,
     'game_volume': gameVolume,
+    if (duckPlays) 'duck_plays': true,
+    if (duckPlays) 'duck_level': duckLevel,
     'export': export.toJson(),
   };
 }
