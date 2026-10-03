@@ -2810,6 +2810,121 @@ void main() {
     });
   });
 
+  group('cutting, selecting and closing gaps', () {
+    List<Layer> layersOf(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).layers;
+
+    /// A clip on the bottom layer and one on a new top layer, both at 0.
+    Future<void> twoLayers(WidgetTester tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+      await cursorAt(tester, 0);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+    }
+
+    testWidgets('S cuts the clip on the active layer, not the bottom one', (
+      tester,
+    ) async {
+      // the bug: the cut always went to the first clip found, on the bottom
+      await twoLayers(tester);
+      await cursorAt(tester, 0.6);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+      await tester.pump();
+
+      final layers = layersOf(tester);
+      expect(layers[1].clips, hasLength(2), reason: 'the top, active layer');
+      expect(layers[0].clips, hasLength(1));
+    });
+
+    testWidgets('Shift+S cuts every layer', (tester) async {
+      await twoLayers(tester);
+      await cursorAt(tester, 0.6);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+
+      final layers = layersOf(tester);
+      expect(layers[0].clips, hasLength(2));
+      expect(layers[1].clips, hasLength(2));
+    });
+
+    testWidgets('dragging the mouse on empty tracks selects with a rectangle', (
+      tester,
+    ) async {
+      await twoLayers(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      final ruler = tester.getTopLeft(find.byType(MusicTimeline));
+      final mouse = await tester.startGesture(
+        ruler +
+            const Offset(
+              MusicTimeline.headerWidth + 300,
+              MusicTimeline.waveHeight + 4,
+            ),
+        kind: PointerDeviceKind.mouse,
+      );
+      // up and to the left, over both clips
+      for (var i = 0; i < 20; i++) {
+        await mouse.moveBy(const Offset(-14, 7));
+        await tester.pump();
+      }
+      expect(find.byKey(const Key('selection-band')), findsOneWidget);
+      await mouse.up();
+      await tester.pump();
+
+      final selected = tester
+          .widget<MusicTimeline>(find.byType(MusicTimeline))
+          .selectionIds;
+      expect(selected, hasLength(2));
+      expect(find.byKey(const Key('selection-band')), findsNothing);
+    });
+
+    testWidgets('Shift+Delete removes and closes the gap', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final [a, b] = cutList(tester);
+      await tester.tap(block(tester, 0));
+      await tester.pump();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+
+      expect(cutList(tester).single.id, b.id);
+      expect(cutList(tester).single.atS, closeTo(a.atS, 1e-9));
+    });
+
+    testWidgets('in insert mode a new clip pushes the others right', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final first = firstCut(tester);
+
+      await tester.tap(find.byKey(const Key('insert-mode')));
+      await tester.pump();
+      await cursorAt(tester, 0);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+
+      final pushed = cutList(tester).firstWhere((c) => c.id == first.id);
+      expect(pushed.atS, greaterThan(0));
+      expect(cutList(tester).where((c) => c.atS == 0), hasLength(1));
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

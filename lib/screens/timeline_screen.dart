@@ -128,6 +128,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// to snap to the beat without needing a surgeon's precision.
   double _px = 60;
   bool _magnet = true;
+
+  /// Insert mode: a clip dropped on others pushes them right instead of going
+  /// to the first free spot.
+  bool _insert = false;
   double _cursor = 0;
 
   /// What the finger is doing right now, so the screen can say in numbers
@@ -276,6 +280,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         beats: _beats,
         snap: _magnet,
+        insert: _insert,
       ),
     );
   }
@@ -485,6 +490,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ).copyWith(mediaId: item.id),
         beats: _beats,
         snap: _magnet,
+        insert: _insert,
       ),
     );
   }
@@ -581,19 +587,29 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   /// Splits in two the block under the playhead.
-  void _splitAtCursor() {
+  /// Cuts at the playhead: the chosen clips under it, else the active
+  /// layer's, else the top one — or, with [everyLayer], every unlocked layer.
+  void _splitAtCursor({bool everyLayer = false}) {
     final at = _cursor;
-    final i = blockAt(_state.clips, at);
-    if (i == null) {
+    final ids = splitTargets(_state, at, everyLayer: everyLayer);
+    if (ids.isEmpty) {
       _notify('Put the cursor over a cut to split it.');
       return;
     }
     final beforeState = _state.clips.length;
-    _edit(split(_state, _state.clips[i].id, at));
+    var s = _state;
+    for (final id in ids) {
+      s = split(s, id, at);
+    }
+    _edit(s);
     if (_state.clips.length == beforeState) {
       _notify('Too close to the edge: an invisible piece would be left.');
     }
   }
+
+  /// Deletes the selection and closes the gaps it leaves.
+  void _rippleDeleteSelection() =>
+      _edit(rippleDelete(_state, _state.selectionIds));
 
   /// Moves one recording frame, for the adjustment a second cannot reach.
   ///
@@ -910,6 +926,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         beats: _beats,
         snap: _magnet,
+        insert: _insert,
       ),
     );
   }
@@ -1658,6 +1675,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SingleActivator(LogicalKeyboardKey.keyJ): () =>
           _goTo(_cursor - 2),
       const SingleActivator(LogicalKeyboardKey.keyS): _splitAtCursor,
+      const SingleActivator(LogicalKeyboardKey.keyS, shift: true): () =>
+          _splitAtCursor(everyLayer: true),
       const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
       // comma and period move one frame, like in any editor. The arrows keep
       // the coarse one-second step — both have their use.
@@ -1665,6 +1684,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SingleActivator(LogicalKeyboardKey.period): () => _frameStep(1),
       const SingleActivator(LogicalKeyboardKey.delete): _deleteSelection,
       const SingleActivator(LogicalKeyboardKey.backspace): _deleteSelection,
+      const SingleActivator(LogicalKeyboardKey.delete, shift: true):
+          _rippleDeleteSelection,
+      const SingleActivator(LogicalKeyboardKey.backspace, shift: true):
+          _rippleDeleteSelection,
       const SingleActivator(LogicalKeyboardKey.escape): () => _select(null),
       const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
           _goTo(_cursor - 1),
@@ -1753,6 +1776,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 onPressed: () => setState(() => _magnet = !_magnet),
                 icon: Icon(_magnet ? Icons.grid_on : Icons.grid_off),
               ),
+              IconButton(
+                key: const Key('insert-mode'),
+                tooltip: _insert
+                    ? 'insert mode: new clips push the others right'
+                    : 'overwrite-free mode: new clips go to a free spot',
+                isSelected: _insert,
+                onPressed: () => setState(() => _insert = !_insert),
+                icon: const Icon(Icons.keyboard_tab),
+                selectedIcon: const Icon(Icons.keyboard_tab, color: Colors.orange),
+              ),
               PopupMenuButton<String>(
                 key: const Key('screen-menu'),
                 onSelected: (v) {
@@ -1839,6 +1872,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut(', / .', 'step one frame'),
               _Shortcut('Shift + ← →', 'nudge the selected cuts'),
               _Shortcut('S', 'split the cut under the cursor'),
+              _Shortcut('Shift + S', 'split every layer at the cursor'),
+              _Shortcut('Shift + Delete', 'delete and close the gap'),
+              _Shortcut('drag on an empty track', 'select with a rectangle'),
               _Shortcut('M', 'align the selected block\'s play to the cursor'),
               _Shortcut('[ / ]', 'trim the start / end to the cursor'),
               _Shortcut('Delete', 'remove from the montage'),
@@ -2162,6 +2198,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onDropClip: _dropClip,
         onDuplicateClip: (id) => _edit(duplicate(_state, {id})),
         onDeleteClip: (id) => _edit(removeClips(_state, {id})),
+        onRippleDeleteClip: (id) => _edit(rippleDelete(_state, {id})),
+        onSelectMany: (ids, {bool add = false}) => _withoutHistory(
+          _state.copyWith(
+            selectionIds: add ? {..._state.selectionIds, ...ids} : ids,
+          ),
+        ),
         onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
         onReorderLayers: (from, to) =>
             _edit(reorderLayers(_state, from, to)),
@@ -2237,6 +2279,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onDelete: _deleteSelection,
             onDuplicate: _duplicate,
             onClearSelection: () => _select(null),
+            onRippleDelete: _rippleDeleteSelection,
           ),
         ),
       ],
@@ -2672,10 +2715,12 @@ class _MultiSelection extends StatelessWidget {
     required this.onDelete,
     required this.onDuplicate,
     required this.onClearSelection,
+    required this.onRippleDelete,
   });
 
   final int count;
   final VoidCallback onDelete;
+  final VoidCallback onRippleDelete;
   final VoidCallback onDuplicate;
   final VoidCallback onClearSelection;
 
@@ -2696,6 +2741,12 @@ class _MultiSelection extends StatelessWidget {
             tooltip: 'Remove from the montage (Delete)',
             onPressed: onDelete,
             icon: const Icon(Icons.delete_outline),
+          ),
+          IconButton(
+            key: const Key('ripple-delete'),
+            tooltip: 'Remove and close the gaps (Shift+Delete)',
+            onPressed: onRippleDelete,
+            icon: const Icon(Icons.format_indent_decrease),
           ),
           IconButton(
             tooltip: 'Clear the selection (Esc)',

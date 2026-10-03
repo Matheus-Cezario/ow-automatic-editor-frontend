@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -69,6 +70,8 @@ class MusicTimeline extends StatefulWidget {
     this.onRemoveLayer,
     this.onDuplicateClip,
     this.onDeleteClip,
+    this.onRippleDeleteClip,
+    this.onSelectMany,
     this.onDragLabel,
     this.onDrop,
     this.beatTimes = const [],
@@ -114,6 +117,13 @@ class MusicTimeline extends StatefulWidget {
   /// The clip menu's own operations; without them, the entry is left out.
   final ValueChanged<String>? onDuplicateClip;
   final ValueChanged<String>? onDeleteClip;
+
+  /// Deletes the clip and pulls the following ones on its layer back.
+  final ValueChanged<String>? onRippleDeleteClip;
+
+  /// The rubber band's result: the clips it touched, added to the selection
+  /// when Shift was held.
+  final void Function(Set<String> ids, {bool add})? onSelectMany;
 
   final ValueChanged<int> onActiveLayer;
 
@@ -195,6 +205,53 @@ class _MusicTimelineState extends State<MusicTimeline> {
   /// rectangle before dropping — dropping blind is what makes dragging feel
   /// worse than clicking.
   (double, int)? _crosshair;
+
+  /// The rubber band: where the drag started, the rectangle so far, and
+  /// whether Shift adds to the selection instead of replacing it.
+  Offset? _bandOrigin;
+  Rect? _band;
+  bool _bandAdds = false;
+
+  bool _onTracks(double y) =>
+      y >= MusicTimeline.waveHeight &&
+      y < MusicTimeline.waveHeight + widget.layers.length * MusicTimeline.blockHeight;
+
+  void _bandStart(Offset at) {
+    // the beats band and the time ruler move the playhead; only the tracks
+    // select
+    if (!_onTracks(at.dy)) return;
+    _bandOrigin = at;
+    _bandAdds = HardwareKeyboard.instance.isShiftPressed;
+  }
+
+  void _bandMove(Offset at) {
+    final origin = _bandOrigin;
+    if (origin == null) return;
+    setState(() => _band = Rect.fromPoints(origin, at));
+  }
+
+  void _bandEnd() {
+    final band = _band;
+    _bandOrigin = null;
+    if (band == null) return;
+    setState(() => _band = null);
+    final px = widget.pxPerSecond;
+    final n = widget.layers.length;
+    final ids = <String>{
+      for (var i = 0; i < n; i++)
+        if (!widget.layers[i].hidden)
+          for (final c in widget.layers[i].clips)
+            if (Rect.fromLTWH(
+              c.atS * px,
+              MusicTimeline.waveHeight +
+                  MusicTimeline.layerRow(i, n) * MusicTimeline.blockHeight,
+              c.durationS * px,
+              MusicTimeline.blockHeight,
+            ).overlaps(band))
+              c.id,
+    };
+    widget.onSelectMany?.call(ids, add: _bandAdds);
+  }
   double _crosshairWidth = kDefaultCutS;
 
   @override
@@ -329,7 +386,9 @@ class _MusicTimelineState extends State<MusicTimeline> {
           enabled: !locked && sameKind(layerIndex - 1),
           child: const Text('Move to layer below'),
         ),
-        if (widget.onDuplicateClip != null || widget.onDeleteClip != null)
+        if (widget.onDuplicateClip != null ||
+            widget.onDeleteClip != null ||
+            widget.onRippleDeleteClip != null)
           const PopupMenuDivider(),
         if (widget.onDuplicateClip != null)
           const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
@@ -339,6 +398,13 @@ class _MusicTimelineState extends State<MusicTimeline> {
             value: 'delete',
             enabled: !locked,
             child: const Text('Delete'),
+          ),
+        if (widget.onRippleDeleteClip != null)
+          PopupMenuItem(
+            key: const Key('clip-menu-ripple-delete'),
+            value: 'ripple',
+            enabled: !locked,
+            child: const Text('Delete and close the gap'),
           ),
       ],
     );
@@ -352,6 +418,8 @@ class _MusicTimelineState extends State<MusicTimeline> {
         widget.onDuplicateClip!(id);
       case 'delete':
         widget.onDeleteClip!(id);
+      case 'ripple':
+        widget.onRippleDeleteClip!(id);
     }
   }
 
@@ -506,20 +574,29 @@ class _MusicTimelineState extends State<MusicTimeline> {
                             _layerAt(d.localPosition.dy),
                             d.globalPosition,
                           ),
-                          child: CustomPaint(
-                            painter: _RulerPainter(
-                              beats: widget.beatTimes,
-                              durationS: _durationS,
-                              pxPerSecond: px,
-                              layerList: widget.layers.length,
-                              onColor: theme.colorScheme.primary,
-                              waveColor: theme.colorScheme.primary.withValues(
-                                alpha: 0.35,
+                          // a mouse drag over the empty tracks draws a
+                          // selection rectangle; touch keeps scrolling the ruler
+                          child: GestureDetector(
+                            supportedDevices: const {PointerDeviceKind.mouse},
+                            onPanStart: (d) => _bandStart(d.localPosition),
+                            onPanUpdate: (d) => _bandMove(d.localPosition),
+                            onPanEnd: (_) => _bandEnd(),
+                            onPanCancel: _bandEnd,
+                            child: CustomPaint(
+                              painter: _RulerPainter(
+                                beats: widget.beatTimes,
+                                durationS: _durationS,
+                                pxPerSecond: px,
+                                layerList: widget.layers.length,
+                                onColor: theme.colorScheme.primary,
+                                waveColor: theme.colorScheme.primary.withValues(
+                                  alpha: 0.35,
+                                ),
+                                beatColor: theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.18,
+                                ),
+                                textColor: theme.hintColor,
                               ),
-                              beatColor: theme.colorScheme.onSurface.withValues(
-                                alpha: 0.18,
-                              ),
-                              textColor: theme.hintColor,
                             ),
                           ),
                         ),
@@ -570,6 +647,25 @@ class _MusicTimelineState extends State<MusicTimeline> {
                               ),
                           onMenu: (global) =>
                               _clipMenu(clip.id, layerIndex, global),
+                        ),
+
+                      // the selection rectangle being drawn
+                      if (_band case final band?)
+                        Positioned.fromRect(
+                          rect: band,
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              key: const Key('selection-band'),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary.withValues(
+                                  alpha: 0.12,
+                                ),
+                                border: Border.all(
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
 
                       // where what is being dragged will land
