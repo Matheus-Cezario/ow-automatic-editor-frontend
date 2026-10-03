@@ -824,6 +824,106 @@ MontageState moveToLayer(MontageState s, String id, int destination) {
   return s.copyWith(layers: list, activeLayer: destination);
 }
 
+/// Where a dragged clip lands when it is let go: at [atS] on layer
+/// [destination], having left [fromS] — where the drag started.
+///
+/// A free spot takes it as it is. A spot where the clip's **centre** falls on
+/// another clip swaps the two:
+///
+/// * on the same layer it is a reorder — the clips jumped over slide towards
+///   where the dragged one was, keeping the gaps between them, and the dragged
+///   one takes the far end. Nothing outside the span they covered moves;
+/// * on another layer the two trade places: the dragged clip takes the
+///   other's start, and the other goes to [fromS] on the dragged one's layer.
+///
+/// Anything else — a near miss on a neighbour, a swap the lengths do not
+/// allow, sound and pictures — returns [s] untouched.
+MontageState dropClip(
+  MontageState s,
+  String id, {
+  required double fromS,
+  required double atS,
+  required int destination,
+  required List<double> beats,
+  required bool snap,
+}) {
+  final location = s.locate(id);
+  if (location == null || destination < 0 || destination >= s.layers.length) {
+    return s;
+  }
+  final (origin, i) = location;
+  if (s.layers[origin].isAudio != s.layers[destination].isAudio) return s;
+
+  // the live drag may have left the clip anywhere on the way: decide from
+  // where it started
+  final dragged = s.layers[origin].clips[i].copyWith(atS: fromS);
+  final originRest = [...s.layers[origin].clips]..removeAt(i);
+  final others = origin == destination
+      ? originRest
+      : s.layers[destination].clips;
+
+  MontageState settle(List<TimelineClip> originClips, List<TimelineClip> dest) {
+    final list = [...s.layers];
+    list[origin] = list[origin].copyWith(clips: originClips);
+    list[destination] = list[destination].copyWith(clips: dest);
+    return s.copyWith(layers: list, activeLayer: destination);
+  }
+
+  // ── a free spot ──
+  final landing = snapMove(dragged, atS, beats: beats, snap: snap);
+  if (fits(others, landing, dragged.durationS)) {
+    final placed = dragged.copyWith(atS: landing);
+    return origin == destination
+        ? settle([...originRest, placed], [...originRest, placed])
+        : settle(originRest, [...others, placed]);
+  }
+
+  // ── a swap: the clip under the dragged one's centre ──
+  final centre = math.max(0.0, atS) + dragged.durationS / 2;
+  final hits = [
+    for (final c in others)
+      if (c.atS <= centre && centre < c.untilS) c,
+  ];
+  if (hits.isEmpty) return s;
+  final target = hits.first;
+
+  if (origin == destination) {
+    final right = target.atS > fromS;
+    final jumped = [
+      for (final c in others)
+        if (right
+            ? c.atS > fromS && c.atS <= target.atS
+            : c.atS < fromS && c.atS >= target.atS)
+          c,
+    ]..sort((a, b) => a.atS.compareTo(b.atS));
+    final shift = right
+        ? -(jumped.first.atS - fromS)
+        : fromS + dragged.durationS - jumped.last.untilS;
+    final placed = dragged.copyWith(
+      atS: right ? target.untilS - dragged.durationS : target.atS,
+    );
+    final clips = [
+      for (final c in others)
+        jumped.contains(c) ? c.copyWith(atS: c.atS + shift) : c,
+      placed,
+    ];
+    return settle(clips, clips);
+  }
+
+  final destRest = [
+    for (final c in others)
+      if (c.id != target.id) c,
+  ];
+  if (!fits(destRest, target.atS, dragged.durationS) ||
+      !fits(originRest, fromS, target.durationS)) {
+    return s;
+  }
+  return settle(
+    [...originRest, target.copyWith(atS: fromS)],
+    [...destRest, dragged.copyWith(atS: target.atS)],
+  );
+}
+
 /// Opens an audio-only layer.
 ///
 /// It does not enter the visual stacking — it draws nothing. It serves what

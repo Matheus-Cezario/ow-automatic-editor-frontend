@@ -2035,6 +2035,32 @@ void main() {
       expect(layerList[1].clips.single.atS, greaterThan(1.0));
     });
 
+    testWidgets('dragging a clip over its neighbour swaps the two', (
+      tester,
+    ) async {
+      // the neighbour used to stop the drag: the clip could not get past it
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await cursorAt(tester, 0);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final [a, b] = cutList(tester);
+      expect(b.atS, closeTo(a.untilS, 1e-9), reason: 'back to back');
+
+      // the centre of the dragged clip lands on the centre of the other
+      await dragSlowly(
+        tester,
+        find.byKey(ValueKey('block-${a.id}')),
+        (b.atS + b.durationS / 2 - a.durationS / 2 - a.atS) * px + eatenBySlop,
+      );
+      await settle(tester);
+
+      final at = {for (final c in cutList(tester)) c.id: c.atS};
+      expect(at[b.id], closeTo(0, 1e-9));
+      expect(at[a.id], closeTo(b.durationS, 1e-9));
+    });
+
     testWidgets('dragging above the top layer opens a new one', (tester) async {
       await open(tester);
       await tester.tap(moment(30.0));
@@ -2118,6 +2144,19 @@ void main() {
       await settle(tester);
 
       expect(layersOf(tester), hasLength(1));
+      expect(cutList(tester), isEmpty);
+    });
+
+    testWidgets('right-clicking a clip offers to delete it', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+
+      await rightClick(tester, block(tester, 0));
+      expect(find.text('Move to layer above'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('clip-menu-delete')));
+      await settle(tester);
+
       expect(cutList(tester), isEmpty);
     });
 

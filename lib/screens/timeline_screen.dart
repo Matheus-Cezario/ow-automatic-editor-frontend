@@ -751,6 +751,58 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _edit(updated);
   }
 
+  /// Where a dragged clip lands when let go: a free spot, another layer, or a
+  /// swap with the clip under it — see [dropClip].
+  ///
+  /// The checks are [_changeLayer]'s, so a refused layer explains itself the
+  /// same way whether the clip came by menu or by drag.
+  void _dropClip(String id, double fromS, double atS, int destination) {
+    final location = _state.locate(id);
+    if (location == null) return;
+    final origin = _state.layers[location.$1];
+    var base = _state;
+    if (destination >= base.layers.length && !origin.isAudio) {
+      base = addLayer(base);
+      destination = base.layers.length - 1;
+    }
+    if (destination < 0 || destination >= base.layers.length) {
+      _notify('There is no layer there. Open a new one to move the block.');
+      return;
+    }
+    final target = base.layers[destination];
+    if (origin.isAudio != target.isAudio) {
+      _notify(
+        origin.isAudio
+            ? 'Music only goes on a sound layer.'
+            : 'This is a sound layer: pictures do not go in it.',
+      );
+      return;
+    }
+    if (destination != location.$1 && target.locked) {
+      _notify('The layer "${target.name}" is locked.');
+      return;
+    }
+    final updated = dropClip(
+      base,
+      id,
+      fromS: fromS,
+      atS: atS,
+      destination: destination,
+      beats: _beats,
+      snap: _magnet,
+    );
+    if (identical(updated, base)) {
+      // on its own layer the clip just stays where the drag left it
+      if (destination != location.$1) {
+        _notify(
+          'It does not fit there: drop it on a free spot or on a clip to swap.',
+        );
+      }
+      return;
+    }
+    _edit(updated);
+  }
+
   /// The text clips the monitor draws over the picture.
   ///
   /// A hidden layer is left out: the monitor shows what will come out, and
@@ -1937,6 +1989,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onGestureStart: _history.startGesture,
         onGestureEnd: _history.endGesture,
         onChangeLayer: _changeLayer,
+        onDropClip: _dropClip,
+        onDuplicateClip: (id) => _edit(duplicate(_state, {id})),
+        onDeleteClip: (id) => _edit(removeClips(_state, {id})),
         onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
         onReorderLayers: (from, to) =>
             _edit(reorderLayers(_state, from, to)),

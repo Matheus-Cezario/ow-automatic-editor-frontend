@@ -628,6 +628,94 @@ void main() {
     });
   });
 
+  group('dropping a dragged clip', () {
+    MontageState drop(
+      MontageState s,
+      TimelineClip c, {
+      required double atS,
+      int? layer,
+    }) => dropClip(
+      s,
+      c.id,
+      fromS: c.atS,
+      atS: atS,
+      destination: layer ?? s.locate(c.id)!.$1,
+      beats: const [],
+      snap: false,
+    );
+
+    List<double> starts(MontageState s, int layer) => [
+      for (final c in [...s.layers[layer].clips]
+        ..sort((a, b) => a.atS.compareTo(b.atS)))
+        c.atS,
+    ];
+
+    test('a free spot takes it as it is', () {
+      final s = stateWith([cut(0, 2), cut(5, 2)]);
+      final a = s.layers[0].clips[0];
+      final after = drop(s, a, atS: 8);
+      expect(after.layers[0].clips.firstWhere((c) => c.id == a.id).atS, 8);
+    });
+
+    test('dropped on the next clip, the two swap and the gap stays', () {
+      final s = stateWith([cut(0, 2), cut(3, 2), cut(6, 2)]);
+      final [a, b, c] = s.layers[0].clips;
+      final after = drop(s, a, atS: 3);
+      final at = {for (final x in after.layers[0].clips) x.id: x.atS};
+      expect(at[b.id], 0);
+      expect(at[a.id], 3);
+      expect(at[c.id], 6, reason: 'outside the span nothing moves');
+    });
+
+    test('dragged over two clips, both slide back', () {
+      final s = stateWith([cut(0, 2), cut(2, 2), cut(4, 2)]);
+      final [a, b, c] = s.layers[0].clips;
+      final after = drop(s, a, atS: 4);
+      final at = {for (final x in after.layers[0].clips) x.id: x.atS};
+      expect([at[b.id], at[c.id], at[a.id]], [0, 2, 4]);
+    });
+
+    test('dragged to the left, the clips jumped over slide right', () {
+      final s = stateWith([cut(0, 2), cut(2, 2), cut(4, 3)]);
+      final [a, b, c] = s.layers[0].clips;
+      final after = drop(s, c, atS: 0);
+      final at = {for (final x in after.layers[0].clips) x.id: x.atS};
+      expect([at[c.id], at[a.id], at[b.id]], [0, 3, 5]);
+      expect(starts(after, 0).last + 2, 7, reason: 'same end as before');
+    });
+
+    test('a near miss on a neighbour changes nothing', () {
+      // the centre does not reach the neighbour: that is not a swap
+      final s = stateWith([cut(0, 2), cut(3, 2)]);
+      expect(drop(s, s.layers[0].clips[0], atS: 1.5), same(s));
+    });
+
+    test('on another layer, the two trade places', () {
+      final s = layeredState([cut(0, 2)], [cut(4, 3)]);
+      final a = s.layers[0].clips.single;
+      final b = s.layers[1].clips.single;
+      final after = drop(s, a, atS: 4, layer: 1);
+      expect(after.layers[1].clips.single.id, a.id);
+      expect(after.layers[1].clips.single.atS, 4);
+      expect(after.layers[0].clips.single.id, b.id);
+      expect(after.layers[0].clips.single.atS, 0);
+    });
+
+    test('a swap the lengths do not allow is refused', () {
+      // the other clip is longer and would cover the neighbour left behind
+      final s = layeredState([cut(0, 2), cut(2, 2)], [cut(5, 3)]);
+      expect(drop(s, s.layers[0].clips[0], atS: 5, layer: 1), same(s));
+    });
+
+    test('a free spot on another layer takes it at the new instant', () {
+      final s = layeredState([cut(0, 2)], [cut(0, 2)]);
+      final a = s.layers[0].clips.single;
+      final after = drop(s, a, atS: 6, layer: 1);
+      expect(after.layers[0].clips, isEmpty);
+      expect(starts(after, 1), [0, 6]);
+    });
+  });
+
   group('music on the timeline', () {
     Track music({
       String id = 'm1',
