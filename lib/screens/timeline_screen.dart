@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import '../api.dart';
 import '../montage.dart';
 import '../export_options.dart';
+import '../fonts.dart';
 import '../montage_state.dart';
 import '../recipe.dart';
 import '../labels.dart';
@@ -69,6 +70,12 @@ const _usefulMoments = {
 
 class _TimelineScreenState extends State<TimelineScreen> {
   final _api = ApiClient();
+
+  /// The server's text fonts, loaded as they are needed.
+  late final FontLibrary _fonts = FontLibrary(_api)
+    ..addListener(() {
+      if (mounted) setState(() {});
+    });
 
   /// The exact preview asked of the server: on its way, done, or failed.
   ExactPreview? _exact;
@@ -168,6 +175,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_fonts.start());
     // the most recent one is the one being edited -- and the one you want back
     final present = _montages.firstOrNull;
     final draft = present?.montage ?? widget.job.draft;
@@ -2043,6 +2051,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     _edit(changeText(_state, id, textValue: v)),
                 onGestureStart: _history.startGesture,
                 onGestureEnd: _history.endGesture,
+                fontFamily: _fonts.familyFor,
               )),
             ),
           ),
@@ -2267,6 +2276,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onSplit: _splitAtCursor,
             onDuplicate: _duplicate,
             motion: _motionPanel(selectionIds.first),
+            fonts: _fonts,
             onRamp: () => _rampIntoMoment(selectionIds.first),
           ),
         ),
@@ -2815,6 +2825,7 @@ class _SelectedBlock extends StatelessWidget {
     required this.onTypeOnFrame,
     this.motion,
     this.onRamp,
+    this.fonts,
   });
 
   final TimelineClip cut;
@@ -2824,6 +2835,9 @@ class _SelectedBlock extends StatelessWidget {
 
   /// The slow-motion ramp around the play.
   final VoidCallback? onRamp;
+
+  /// The fonts a text can use.
+  final FontLibrary? fonts;
 
   /// The file the block came from, when it came from the library. A music
   /// block talks about the sound, not the picture — which it does not have.
@@ -2965,6 +2979,7 @@ class _SelectedBlock extends StatelessWidget {
                 cut: cut,
                 onStyle: onStyle,
                 onTypeOnFrame: onTypeOnFrame,
+                fonts: fonts,
               ),
             ?motion,
             // a music block draws nothing: zoom, colour and freeze would have
@@ -4411,9 +4426,11 @@ class _ClipText extends StatelessWidget {
     required this.cut,
     required this.onStyle,
     required this.onTypeOnFrame,
+    this.fonts,
   });
 
   final TimelineClip cut;
+  final FontLibrary? fonts;
   final ValueChanged<ClipTextStyle> onStyle;
   final VoidCallback onTypeOnFrame;
 
@@ -4503,6 +4520,79 @@ class _ClipText extends StatelessWidget {
               ? null
               : () => onStyle(styleSpec.copyWith(outline: 0.12)),
         ),
+        if (fonts != null && fonts!.fonts.isNotEmpty)
+          Row(
+            children: [
+              const SizedBox(width: 92, child: Text('Font')),
+              Expanded(
+                child: DropdownButton<String>(
+                  key: const Key('text-font'),
+                  isExpanded: true,
+                  value: styleSpec.font.isEmpty
+                      ? fonts!.defaultId
+                      : styleSpec.font,
+                  onChanged: (id) => onStyle(
+                    styleSpec.copyWith(
+                      font: id == fonts!.defaultId ? '' : id,
+                    ),
+                  ),
+                  items: [
+                    for (final f in fonts!.fonts)
+                      DropdownMenuItem(
+                        value: f.id,
+                        // each name in its own face, once it has loaded
+                        child: Text(
+                          f.name,
+                          style: TextStyle(
+                            fontFamily: fonts!.familyFor(f.id),
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        _OptionRow(
+          textClip: 'Comes in',
+          children: [
+            for (final a in TextAnim.values)
+              ChoiceChip(
+                key: ValueKey('text-in-${a.wire}'),
+                label: Text(a.label),
+                selected: styleSpec.animIn == a,
+                onSelected: (_) => onStyle(styleSpec.copyWith(animIn: a)),
+              ),
+          ],
+        ),
+        _OptionRow(
+          textClip: 'Goes out',
+          children: [
+            // typing is an entrance: there is no typing out
+            for (final a in TextAnim.values)
+              if (a != TextAnim.typewriter)
+                ChoiceChip(
+                  key: ValueKey('text-out-${a.wire}'),
+                  label: Text(a.label),
+                  selected: styleSpec.animOut == a,
+                  onSelected: (_) => onStyle(styleSpec.copyWith(animOut: a)),
+                ),
+          ],
+        ),
+        if (styleSpec.animIn != TextAnim.none ||
+            styleSpec.animOut != TextAnim.none)
+          _LabeledSlider(
+            textClip: 'Animation',
+            amount: styleSpec.animS,
+            minimum: 0.1,
+            maximum: 1.5,
+            caption: '${styleSpec.animS.toStringAsFixed(2)}s in and out',
+            onChanged: (v) => onStyle(styleSpec.copyWith(animS: v)),
+            onReset: styleSpec.animS == 0.35
+                ? null
+                : () => onStyle(styleSpec.copyWith(animS: 0.35)),
+          ),
       ],
     );
   }

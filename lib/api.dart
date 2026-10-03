@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
@@ -398,12 +399,33 @@ class ClipTransition {
 ///
 /// Size and outline are **fractions of the frame height**, not pixels: the
 /// same montage has to come out the same in 720p and in 4K.
+/// How a text comes in or goes out — the server's `TextAnim`.
+enum TextAnim {
+  none('none', 'None'),
+  fade('fade', 'Fade'),
+  pop('pop', 'Pop'),
+  slide('slide', 'Slide'),
+  typewriter('typewriter', 'Typewriter');
+
+  const TextAnim(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static TextAnim of(String? wire) =>
+      values.firstWhere((a) => a.wire == wire, orElse: () => none);
+}
+
 class ClipTextStyle {
   const ClipTextStyle({
     this.size = 0.08,
     this.color = 'white',
     this.outline = 0.12,
     this.outlineColor = 'black',
+    this.font = '',
+    this.animIn = TextAnim.none,
+    this.animOut = TextAnim.none,
+    this.animS = 0.35,
   });
 
   factory ClipTextStyle.fromJson(Map<String, dynamic> j) => ClipTextStyle(
@@ -411,7 +433,19 @@ class ClipTextStyle {
     color: j['color'] as String? ?? 'white',
     outline: (j['outline'] as num?)?.toDouble() ?? 0.12,
     outlineColor: j['outline_color'] as String? ?? 'black',
+    font: j['font'] as String? ?? '',
+    animIn: TextAnim.of(j['anim_in'] as String?),
+    animOut: TextAnim.of(j['anim_out'] as String?),
+    animS: (j['anim_s'] as num?)?.toDouble() ?? 0.35,
   );
+
+  /// A font id from the server's catalogue; empty is the default face.
+  final String font;
+
+  /// How it comes in and goes out, and how long each takes.
+  final TextAnim animIn;
+  final TextAnim animOut;
+  final double animS;
 
   final double size;
   final String color;
@@ -425,11 +459,19 @@ class ClipTextStyle {
     String? color,
     double? outline,
     String? outlineColor,
+    String? font,
+    TextAnim? animIn,
+    TextAnim? animOut,
+    double? animS,
   }) => ClipTextStyle(
     size: size ?? this.size,
     color: color ?? this.color,
     outline: outline ?? this.outline,
     outlineColor: outlineColor ?? this.outlineColor,
+    font: font ?? this.font,
+    animIn: animIn ?? this.animIn,
+    animOut: animOut ?? this.animOut,
+    animS: animS ?? this.animS,
   );
 
   Map<String, dynamic> toJson() => {
@@ -437,6 +479,10 @@ class ClipTextStyle {
     'color': color,
     'outline': outline,
     'outline_color': outlineColor,
+    if (font.isNotEmpty) 'font': font,
+    if (animIn != TextAnim.none) 'anim_in': animIn.wire,
+    if (animOut != TextAnim.none) 'anim_out': animOut.wire,
+    if (animIn != TextAnim.none || animOut != TextAnim.none) 'anim_s': animS,
   };
 }
 
@@ -1098,6 +1144,33 @@ class ExportSpec {
     'watermark_y': watermarkY,
     'watermark_opacity': watermarkOpacity,
   };
+}
+
+/// A font the server can draw text with.
+class FontInfo {
+  const FontInfo({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.url,
+    this.isDefault = false,
+  });
+
+  factory FontInfo.fromJson(Map<String, dynamic> j) => FontInfo(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? j['id'] as String,
+    category: j['category'] as String? ?? '',
+    url: absoluteUrl('$kApiBase${j['url']}'),
+    isDefault: j['default'] as bool? ?? false,
+  );
+
+  final String id;
+  final String name;
+
+  /// title / reading / styled / system — how the picker groups them.
+  final String category;
+  final String url;
+  final bool isDefault;
 }
 
 /// A stretch of a montage rendered by the server, small and fast, through the
@@ -2215,6 +2288,23 @@ class ApiClient {
     );
     _check(r);
     return ExactPreview.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// The fonts a text can use.
+  Future<List<FontInfo>> listFonts() async {
+    final r = await http.get(Uri.parse('$baseUrl/api/fonts'));
+    _check(r);
+    return [
+      for (final f in jsonDecode(r.body) as List)
+        FontInfo.fromJson(f as Map<String, dynamic>),
+    ];
+  }
+
+  /// A font file's bytes, to load it into the app.
+  Future<Uint8List> fontBytes(String url) async {
+    final r = await http.get(Uri.parse(url));
+    _check(r);
+    return r.bodyBytes;
   }
 
   Future<ExactPreview> getPreview(String id) async {

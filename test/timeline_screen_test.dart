@@ -2925,6 +2925,32 @@ void main() {
     });
   });
 
+  group('text animation', () {
+    testWidgets('the text panel sets how it comes in and goes out', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Write on screen'));
+      await settle(tester);
+      await tester.tap(find.text('Free text'));
+      await settle(tester);
+
+      await tester.ensureVisible(find.byKey(const ValueKey('text-in-pop')));
+      await tester.tap(find.byKey(const ValueKey('text-in-pop')));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const ValueKey('text-out-fade')));
+      await tester.tap(find.byKey(const ValueKey('text-out-fade')));
+      await tester.pump();
+
+      final text = cutList(tester).firstWhere((c) => c.isText);
+      expect(text.textStyle.animIn, TextAnim.pop);
+      expect(text.textStyle.animOut, TextAnim.fade);
+      // typing is an entrance only
+      expect(find.byKey(const ValueKey('text-out-typewriter')), findsNothing);
+      expect(find.text('Animation'), findsOneWidget, reason: 'its duration');
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
