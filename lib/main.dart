@@ -1,8 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'screens/jobs_screen.dart';
 
-void main() => runApp(const OwEditorApp());
+void main() {
+  // the editor has its own right-click menus (the layers'); the browser's
+  // would open on top of them
+  if (kIsWeb) BrowserContextMenu.disableContextMenu();
+  runApp(const OwEditorApp());
+}
 
 /// A dark, sober palette — the content is game video, so the interface stays
 /// out of the way.

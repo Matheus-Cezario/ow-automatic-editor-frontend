@@ -783,6 +783,58 @@ void main() {
       expect(moveToLayer(s, video, 1), same(s));
     });
 
+    test('a moment added while the sound layer is active lands on a picture '
+        'layer', () {
+      // putting music makes the sound layer the active one; the next moment
+      // clicked used to go right into it
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      expect(s.layers[s.activeLayer].isAudio, isTrue);
+
+      final after = addClip(s, cut(0, 2), beats: const [], snap: false);
+      expect(after.layers.last.clips, hasLength(1), reason: 'only the music');
+      expect(after.layers.first.clips, hasLength(2));
+    });
+
+    test('with no picture layer at all, adding a clip opens one', () {
+      final s = MontageState(layers: const [Layer(kind: 'audio')]);
+      final after = addClip(s, cut(0, 2), beats: const [], snap: false);
+      expect(after.layers, hasLength(2));
+      expect(after.layers.last.isAudio, isFalse);
+      expect(after.layers.last.clips, hasLength(1));
+    });
+
+    test('pasting goes to a layer of the clip kind', () {
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      final video = s.layers.first.clips.single;
+      final song = s.layers.last.clips.single;
+
+      // the sound layer is active: the picture must not land there
+      final pictures = paste(s, [video], 10);
+      expect(pictures.layers.first.clips, hasLength(2));
+      expect(pictures.layers.last.clips, hasLength(1));
+
+      // and music does not land on a picture layer, whichever is active
+      final sounds = paste(
+        s.copyWith(activeLayer: 0),
+        [song],
+        100,
+        audio: true,
+      );
+      expect(sounds.layers.first.clips, hasLength(1));
+      expect(sounds.layers.last.clips, hasLength(2));
+    });
+
+    test('duplicating a mixed selection keeps each clip on its kind', () {
+      final s = putMusic(stateWith([cut(0, 2)]), music(), atS: 0);
+      final ids = {for (final c in s.clips) c.id};
+
+      final after = duplicate(s, ids);
+      expect(after.layers.first.clips, hasLength(2));
+      expect(after.layers.last.clips, hasLength(2));
+      expect(after.selectionIds, hasLength(2), reason: 'both copies chosen');
+      expect(after.selectionIds.intersection(ids), isEmpty);
+    });
+
     test('the music block moves and trims like any other', () {
       // that is the point of the phase: once placed, it is a regular clip
       final s = putMusic(

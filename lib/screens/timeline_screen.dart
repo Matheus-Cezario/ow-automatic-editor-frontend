@@ -78,6 +78,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// What was copied, waiting for a Ctrl+V.
   List<TimelineClip> _clipboard = const [];
 
+  /// Which of the copied clips came from a sound layer — a clip does not know
+  /// it is music, its layer does, and pasting must put it back on one.
+  Set<String> _clipboardAudio = const {};
+
   /// The match media library. It starts with what came from the server and
   /// grows as the user brings files.
   late List<Media> _library = [...widget.job.media];
@@ -292,7 +296,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// guess when only one exists.
   void _addText(String contents) {
     var updated = _state;
-    if (updated.layers.length == 1) updated = addLayer(updated, displayName: 'Text');
+    if (_pictureLayers(updated) == 1) updated = addLayer(updated, displayName: 'Text');
     _edit(
       addClip(
         updated,
@@ -303,6 +307,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
+  /// How many layers draw pictures — sound layers do not take text.
+  static int _pictureLayers(MontageState s) =>
+      s.layers.where((l) => !l.isAudio).length;
+
   /// Writes into the montage what the system already knows about the match.
   void _generateLabels(List<TimelineClip> added, String what) {
     if (added.isEmpty) {
@@ -310,7 +318,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       return;
     }
     var s = _state;
-    if (s.layers.length == 1) s = addLayer(s, displayName: 'Text');
+    if (_pictureLayers(s) == 1) s = addLayer(s, displayName: 'Text');
     for (final r in added) {
       s = addClip(s, r, beats: const [], snap: false);
     }
@@ -447,13 +455,31 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   void _copy() {
     if (_state.selectionIds.isEmpty) return;
-    setState(() => _clipboard = _state.selectedClips);
+    setState(() {
+      _clipboard = _state.selectedClips;
+      _clipboardAudio = {
+        for (final c in _clipboard)
+          if (_isAudioClip(c.id)) c.id,
+      };
+    });
     _notify('${_clipboard.length} cut(s) copied');
   }
 
   void _paste() {
     if (_clipboard.isEmpty) return;
-    _edit(paste(_state, _clipboard, _cursor));
+    // pictures and music land apart, each on a layer of its own kind
+    var s = _state;
+    final copies = <String>{};
+    for (final audio in [false, true]) {
+      final group = [
+        for (final c in _clipboard)
+          if (_clipboardAudio.contains(c.id) == audio) c,
+      ];
+      if (group.isEmpty) continue;
+      s = paste(s, group, _cursor, audio: audio);
+      copies.addAll(s.selectionIds);
+    }
+    _edit(s.copyWith(selectionIds: copies));
   }
 
   void _duplicate() => _edit(duplicate(_state, _state.selectionIds));
@@ -686,15 +712,24 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// Refusing silently is the worst of both worlds: the block goes back to its
   /// place and whoever dragged it cannot tell whether the gesture missed or
   /// the operation was impossible.
+  ///
+  /// Dragging a picture above the top layer opens a new one there: it is the
+  /// gesture of "put this over everything", and asking for the layer first
+  /// would be red tape.
   void _changeLayer(String id, int destination) {
-    if (destination < 0 || destination >= _state.layers.length) {
-      _notify('There is no layer there. Open a new one to move the block.');
-      return;
-    }
     final location = _state.locate(id);
     if (location == null) return;
     final origin = _state.layers[location.$1];
-    final target = _state.layers[destination];
+    var base = _state;
+    if (destination >= base.layers.length && !origin.isAudio) {
+      base = addLayer(base);
+      destination = base.layers.length - 1;
+    }
+    if (destination < 0 || destination >= base.layers.length) {
+      _notify('There is no layer there. Open a new one to move the block.');
+      return;
+    }
+    final target = base.layers[destination];
 
     if (origin.isAudio != target.isAudio) {
       _notify(
@@ -708,8 +743,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _notify('The layer "${target.name}" is locked.');
       return;
     }
-    final updated = moveToLayer(_state, id, destination);
-    if (identical(updated, _state)) {
+    final updated = moveToLayer(base, id, destination);
+    if (identical(updated, base)) {
       _notify('There is already a block at that instant on the other layer.');
       return;
     }
@@ -1608,6 +1643,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('Ctrl+A', 'select all'),
               _Shortcut('Shift + click', 'add to the selection'),
               _Shortcut('drag ↑ ↓', 'move the cut to another layer'),
+              _Shortcut('right-click a layer', 'rename, reorder or delete it'),
               _Shortcut('Esc', 'clear the selection'),
             ],
           ),
@@ -1904,6 +1940,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
         onReorderLayers: (from, to) =>
             _edit(reorderLayers(_state, from, to)),
+        onRenameLayer: (i, name) => _edit(adjustLayer(_state, i, name: name)),
+        onRemoveLayer: (i) => _edit(removeLayer(_state, i)),
         onAdjustLayer: (i, {muted, hidden, locked}) => _edit(
           adjustLayer(
             _state,

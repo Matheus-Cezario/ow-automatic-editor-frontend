@@ -254,14 +254,37 @@ List<Layer>? _trackBecomesBlock(Montage draft) {
 // clips at the same instant on different layers is exactly what layers are
 // for.
 
-/// Puts a new clip on the active layer, pushing it to the first free slot.
+/// The layer of the requested kind closest to the active one — the active
+/// one itself when it already is of that kind.
+///
+/// Pictures and sound never share a layer: the server refuses the mix, and on
+/// the ruler it would be a music block covering a cut. With no layer of that
+/// kind at all, one is opened on top.
+(MontageState, int) layerOfKind(MontageState s, {required bool audio}) {
+  final active = s.activeLayer.clamp(0, s.layers.length - 1);
+  int? best;
+  for (var i = 0; i < s.layers.length; i++) {
+    if (s.layers[i].isAudio != audio) continue;
+    // a tie goes to the layer below: it is the one already covered by the
+    // active one, so the new clip does not jump over anything
+    if (best == null || (i - active).abs() < (best - active).abs()) best = i;
+  }
+  if (best != null) return (s, best);
+  final opened = audio ? addMusicLayer(s) : addLayer(s);
+  return (opened, opened.layers.length - 1);
+}
+
+/// Puts a new picture clip on the active layer — or on the nearest picture
+/// layer when the active one is a sound layer — pushing it to the first free
+/// slot.
 MontageState addClip(
   MontageState s,
   TimelineClip clip, {
   required List<double> beats,
   required bool snap,
 }) {
-  final layerIndex = s.activeLayer.clamp(0, s.layers.length - 1);
+  final int layerIndex;
+  (s, layerIndex) = layerOfKind(s, audio: false);
   final slot = nextSlot(s.layers[layerIndex].clips, clip.atS, clip.durationS);
   final updated = clip.copyWith(
     id: newCutId(),
@@ -667,23 +690,43 @@ MontageState split(MontageState s, String id, double atS) {
 }
 
 /// Duplicates the chosen clips, putting the copies after the montage's end.
+///
+/// Pictures and music are pasted apart, each on a layer of its own kind.
 MontageState duplicate(MontageState s, Set<String> ids) {
-  final originals = [
-    for (final c in s.clips)
-      if (ids.contains(c.id)) c,
-  ]..sort((a, b) => a.atS.compareTo(b.atS));
-  if (originals.isEmpty) return s;
-  return paste(s, originals, videoDuration(s.clips));
+  final pictures = <TimelineClip>[];
+  final sounds = <TimelineClip>[];
+  for (final l in s.layers) {
+    for (final c in l.clips) {
+      if (ids.contains(c.id)) (l.isAudio ? sounds : pictures).add(c);
+    }
+  }
+  final end = videoDuration(s.clips);
+  var out = s;
+  final copies = <String>{};
+  for (final (group, audio) in [(pictures, false), (sounds, true)]) {
+    if (group.isEmpty) continue;
+    out = paste(out, group, end, audio: audio);
+    copies.addAll(out.selectionIds);
+  }
+  return copies.isEmpty ? s : out.copyWith(selectionIds: copies);
 }
 
-/// Puts a copy of [area] from [atS] on, on the active layer.
+/// Puts a copy of [area] from [atS] on, on the active layer — or on the
+/// nearest layer of the same kind: [audio] clips only live on sound layers,
+/// and pictures never do.
 ///
 /// If it does not fit there, the whole group goes after the layer's last
 /// clip: that is more predictable than scattering the copies across the
 /// gaps.
-MontageState paste(MontageState s, List<TimelineClip> area, double atS) {
+MontageState paste(
+  MontageState s,
+  List<TimelineClip> area,
+  double atS, {
+  bool audio = false,
+}) {
   if (area.isEmpty) return s;
-  final layerIndex = s.activeLayer.clamp(0, s.layers.length - 1);
+  final int layerIndex;
+  (s, layerIndex) = layerOfKind(s, audio: audio);
   final targetClips = s.layers[layerIndex].clips;
   final base = area.map((c) => c.atS).reduce(math.min);
 
