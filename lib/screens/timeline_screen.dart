@@ -1319,12 +1319,28 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
   }
 
-  Future<void> _goTo(double s) async {
+  /// Moves the playhead. A jump that lands off screen (the keyboard, the
+  /// keyframe arrows) brings the ruler to it; a tap on the ruler itself is
+  /// already in view and must not move the ruler under the finger.
+  Future<void> _goTo(double s, {bool reveal = true}) async {
     // not limited to the end of the montage: putting the playhead after the
     // last block is exactly how you place the next one
     final t = math.max(0.0, s);
     setState(() => _cursor = t);
+    if (reveal) _revealCursor(t);
     await _syncMusic();
+  }
+
+  /// Scrolls to the playhead only when it is out of the window.
+  void _revealCursor(double t) {
+    if (!_scroll.hasClients) return;
+    final x = t * _px;
+    final window = _scroll.position.viewportDimension;
+    if (x >= _scroll.offset && x <= _scroll.offset + window) return;
+    final to = (x - window / 3).clamp(0.0, _scroll.position.maxScrollExtent);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.jumpTo(to.toDouble());
+    });
   }
 
   // ── request and discard ───────────────────────────────────────────────────
@@ -1997,6 +2013,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('Shift + S', 'split every layer at the cursor'),
               _Shortcut('= / -', 'zoom the ruler in / out'),
               _Shortcut('\\', 'fit the whole montage'),
+              _Shortcut('Ctrl + scroll', 'zoom around the mouse'),
               _Shortcut('Shift + Delete', 'delete and close the gap'),
               _Shortcut('drag on an empty track', 'select with a rectangle'),
               _Shortcut('M', 'align the selected block\'s play to the cursor'),
@@ -2332,7 +2349,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         pxPerSecond: _px,
         playheadS: _cursor,
         scroll: _scroll,
-        onSeek: _goTo,
+        onSeek: (s) => _goTo(s, reveal: false),
         onSelect: _select,
         onMove: _move,
         onTrim: _trim,
@@ -2345,6 +2362,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           if (_snapGuide != null) setState(() => _snapGuide = null);
         },
         snapGuideS: _snapGuide,
+        onZoom: (factor, anchorS, anchorDx) =>
+            _setZoom(_px * factor, anchorS: anchorS, anchorDx: anchorDx),
         onChangeLayer: _changeLayer,
         onDropClip: _dropClip,
         onDuplicateClip: (id) => _edit(duplicate(_state, {id})),

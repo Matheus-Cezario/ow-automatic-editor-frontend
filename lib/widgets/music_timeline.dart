@@ -81,6 +81,7 @@ class MusicTimeline extends StatefulWidget {
     this.onRippleDeleteClip,
     this.onSelectMany,
     this.snapGuideS,
+    this.onZoom,
     this.onDragLabel,
     this.onDrop,
     this.beatTimes = const [],
@@ -133,6 +134,10 @@ class MusicTimeline extends StatefulWidget {
   /// Where the magnet stuck the clip being dragged — another clip's edge or
   /// the playhead — drawn as a guide line across every track.
   final double? snapGuideS;
+
+  /// (factor, the instant under the pointer, how far into the window it is)
+  /// — Ctrl/Cmd + scroll or a trackpad pinch over the ruler.
+  final void Function(double factor, double anchorS, double anchorDx)? onZoom;
 
   /// The rubber band's result: the clips it touched, added to the selection
   /// when Shift was held.
@@ -271,6 +276,29 @@ class _MusicTimelineState extends State<MusicTimeline> {
   void dispose() {
     _autoScroll?.cancel();
     super.dispose();
+  }
+
+  /// Ctrl/Cmd + wheel, or a pinch, zooms around the instant under the
+  /// pointer. Claimed through the resolver, so the page does not scroll too.
+  void _zoomSignal(PointerSignalEvent event) {
+    final zoom = widget.onZoom;
+    if (zoom == null) return;
+    double? factor;
+    if (event is PointerScrollEvent) {
+      final keys = HardwareKeyboard.instance;
+      if (!keys.isControlPressed && !keys.isMetaPressed) return;
+      // a notch of the wheel (~100) is about a 25% step
+      factor = math.exp(-event.scrollDelta.dy / 450);
+    } else if (event is PointerScaleEvent) {
+      factor = event.scale;
+    }
+    if (factor == null || factor == 1) return;
+    final f = factor;
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      final dx = event.localPosition.dx;
+      final at = (widget.scroll.hasClients ? widget.scroll.offset : 0) + dx;
+      zoom(f, at / widget.pxPerSecond, dx);
+    });
   }
 
   double get _durationS {
@@ -537,7 +565,9 @@ class _MusicTimelineState extends State<MusicTimeline> {
           ),
           const VerticalDivider(width: 1),
           Expanded(
-            child: SingleChildScrollView(
+            child: Listener(
+              onPointerSignal: _zoomSignal,
+              child: SingleChildScrollView(
               controller: widget.scroll,
               scrollDirection: Axis.horizontal,
               child: DragTarget<RulerDrop>(
@@ -737,6 +767,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ],

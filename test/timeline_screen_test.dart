@@ -3056,6 +3056,100 @@ void main() {
     });
   });
 
+  group('zoom', () {
+    double px(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).pxPerSecond;
+    ScrollPosition ruler(WidgetTester tester) => tester
+        .widget<MusicTimeline>(find.byType(MusicTimeline))
+        .scroll
+        .position;
+
+    testWidgets('= and - zoom, \\ fits the montage', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final start = px(tester);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.equal);
+      await tester.pump();
+      expect(px(tester), closeTo(start * 1.25, 1e-6));
+      await tester.sendKeyEvent(LogicalKeyboardKey.minus);
+      await tester.pump();
+      expect(px(tester), closeTo(start, 1e-6));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.backslash);
+      await settle(tester);
+      final window = ruler(tester).viewportDimension;
+      final length = firstCut(tester).untilS;
+      expect(length * px(tester), lessThanOrEqualTo(window));
+      expect(length * px(tester), greaterThan(window * 0.8));
+    });
+
+    testWidgets('Ctrl + scroll zooms around the instant under the mouse', (
+      tester,
+    ) async {
+      await open(tester);
+      final start = px(tester);
+      final rect = tester.getRect(find.byType(MusicTimeline));
+      final at = Offset(
+        rect.left + MusicTimeline.headerWidth + 200,
+        rect.top + MusicTimeline.waveHeight + 10,
+      );
+      final secondsUnderMouse = (ruler(tester).pixels + 200) / start;
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      final mouse = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(mouse.hover(at));
+      await tester.sendEventToBinding(mouse.scroll(const Offset(0, -200)));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+
+      expect(px(tester), greaterThan(start * 1.4));
+      // the same instant is still under the mouse
+      final now = (ruler(tester).pixels + 200) / px(tester);
+      expect(now, closeTo(secondsUnderMouse, 0.05));
+    });
+
+    testWidgets('a plain scroll does not zoom', (tester) async {
+      await open(tester);
+      final start = px(tester);
+      final rect = tester.getRect(find.byType(MusicTimeline));
+      final mouse = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(
+        mouse.hover(rect.center + const Offset(100, 0)),
+      );
+      await tester.sendEventToBinding(mouse.scroll(const Offset(0, -200)));
+      await settle(tester);
+      expect(px(tester), start);
+    });
+
+    testWidgets('a keyboard jump off screen brings the ruler along', (
+      tester,
+    ) async {
+      await open(tester);
+      expect(ruler(tester).pixels, 0);
+      for (var i = 0; i < 20; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      }
+      await settle(tester);
+      final pos = ruler(tester);
+      final x = 20 * px(tester);
+      expect(x, greaterThanOrEqualTo(pos.pixels));
+      expect(x, lessThanOrEqualTo(pos.pixels + pos.viewportDimension));
+    });
+
+    testWidgets('a tap on the ruler does not move the ruler', (tester) async {
+      await open(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.equal);
+      await settle(tester);
+      final rect = tester.getRect(find.byType(MusicTimeline));
+      // close to the right edge of the window
+      await tester.tapAt(Offset(rect.right - 10, rect.top + 20));
+      await settle(tester);
+      expect(ruler(tester).pixels, 0);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
