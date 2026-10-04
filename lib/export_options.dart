@@ -108,6 +108,34 @@ MontageState exportSelection(MontageState s) {
   );
 }
 
+/// Is there an in or an out point? Without either, the range is the whole
+/// video.
+bool hasRange(ExportSpec e) => e.fromS > 0 || e.toS != null;
+
+/// The in point at [tS]. An out point at or before it no longer makes a
+/// range, so it goes — the range then runs to the end.
+MontageState setRangeIn(MontageState s, double tS) {
+  final t = max(0.0, tS);
+  final out = s.export.toS;
+  return s.copyWith(
+    export: s.export.copyWith(
+      fromS: t,
+      clearTo: out != null && out <= t + 0.05,
+    ),
+  );
+}
+
+/// The out point at [tS]; an in point at or after it goes back to the start.
+MontageState setRangeOut(MontageState s, double tS) {
+  if (tS <= 0.05) return s;
+  return s.copyWith(
+    export: s.export.copyWith(
+      toS: tS,
+      fromS: s.export.fromS >= tS - 0.05 ? 0 : null,
+    ),
+  );
+}
+
 /// Undoes the time range: the whole video comes out again.
 MontageState exportAll(MontageState s) =>
     s.copyWith(export: s.export.copyWith(fromS: 0, clearTo: true));

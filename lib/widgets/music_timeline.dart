@@ -94,6 +94,8 @@ class MusicTimeline extends StatefulWidget {
     this.fallbackDurationS = 60,
     this.trackHeight = blockHeight,
     this.onTrackHeight,
+    this.range,
+    this.onRange,
     this.markers = const [],
     this.onMoveMarker,
     this.onRenameMarker,
@@ -106,6 +108,12 @@ class MusicTimeline extends StatefulWidget {
 
   /// Asks for another track height; without it the control is not shown.
   final ValueChanged<double>? onTrackHeight;
+
+  /// The in and out points, already resolved — `null` when the whole video
+  /// is the range. A band on the beats strip, with the rest dimmed; its two
+  /// ends are dragged.
+  final (double, double)? range;
+  final void Function(double fromS, double toS)? onRange;
 
   /// The notes on the ruler. A flag on the time ruler: a click goes there,
   /// a drag moves it, a double click names it, a right click offers the rest.
@@ -849,6 +857,72 @@ class _MusicTimelineState extends State<MusicTimeline> {
                               _clipMenu(clip.id, layerIndex, global),
                         ),
 
+                      // the in/out range: what is outside it dims, and its
+                      // band on the beats strip has an end to grab each side
+                      if (widget.range case (final from, final to)) ...[
+                        for (final (l, r) in [
+                          (0.0, from * px),
+                          (to * px, widthPx),
+                        ])
+                          if (r > l)
+                            Positioned(
+                              left: l,
+                              width: r - l,
+                              top: 0,
+                              bottom: 0,
+                              child: IgnorePointer(
+                                child: ColoredBox(
+                                  color: theme.colorScheme.scrim.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        Positioned(
+                          key: const Key('range-band'),
+                          left: from * px,
+                          width: math.max(2.0, (to - from) * px),
+                          top: 3,
+                          height: MusicTimeline.waveHeight - 6,
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.secondary.withValues(
+                                  alpha: 0.35,
+                                ),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                          ),
+                        ),
+                        for (final (isIn, t) in [(true, from), (false, to)])
+                          Positioned(
+                            left: t * px - 7,
+                            top: 0,
+                            width: 14,
+                            height: MusicTimeline.waveHeight,
+                            child: _RangeEnd(
+                              key: Key(isIn ? 'range-in' : 'range-out'),
+                              isIn: isIn,
+                              t: t,
+                              secondsPerPixel: 1 / px,
+                              onStart: widget.onGestureStart,
+                              onEnd: widget.onGestureEnd,
+                              onMove: widget.onRange == null
+                                  ? null
+                                  : (v) => isIn
+                                        ? widget.onRange!(
+                                            v.clamp(0.0, to - 0.1),
+                                            to,
+                                          )
+                                        : widget.onRange!(
+                                            from,
+                                            math.max(v, from + 0.1),
+                                          ),
+                            ),
+                          ),
+                      ],
+
                       // the markers: a thin line through the tracks, and a
                       // flag on the time ruler to grab
                       for (final m in widget.markers)
@@ -967,6 +1041,72 @@ class _MusicTimelineState extends State<MusicTimeline> {
 
 /// Asks for a layer's new name. Stateful so the field's controller lives as
 /// long as the dialog does — including its closing animation.
+/// One end of the in/out range, on the beats strip: a bracket to drag.
+class _RangeEnd extends StatefulWidget {
+  const _RangeEnd({
+    super.key,
+    required this.isIn,
+    required this.t,
+    required this.secondsPerPixel,
+    required this.onStart,
+    required this.onEnd,
+    this.onMove,
+  });
+
+  final bool isIn;
+  final double t;
+  final double secondsPerPixel;
+  final VoidCallback onStart;
+  final VoidCallback onEnd;
+  final ValueChanged<double>? onMove;
+
+  @override
+  State<_RangeEnd> createState() => _RangeEndState();
+}
+
+class _RangeEndState extends State<_RangeEnd> {
+  double _from = 0;
+  double _moved = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final move = widget.onMove;
+    return Tooltip(
+      message: '${widget.isIn ? 'In' : 'Out'} ${formatClock(widget.t)}'
+          ' — drag to move (${widget.isIn ? 'I' : 'O'} sets it at the playhead)',
+      waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeLeftRight,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: move == null
+              ? null
+              : (_) {
+                  _from = widget.t;
+                  _moved = 0;
+                  widget.onStart();
+                },
+          onHorizontalDragUpdate: move == null
+              ? null
+              : (d) {
+                  _moved += d.delta.dx;
+                  move(_from + _moved * widget.secondsPerPixel);
+                },
+          onHorizontalDragEnd: move == null ? null : (_) => widget.onEnd(),
+          child: Center(
+            child: Icon(
+              widget.isIn ? Icons.first_page : Icons.last_page,
+              size: 14,
+              color: theme.colorScheme.secondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// A marker's flag on the time ruler, with its name beside it.
 class _MarkerFlag extends StatefulWidget {
   const _MarkerFlag({

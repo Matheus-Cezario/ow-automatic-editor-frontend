@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -3401,6 +3403,112 @@ void main() {
       await settle(tester);
       expect(layersOf(tester)[0].collapsed, isFalse);
       expect(headerHeight(tester, 0), MusicTimeline.blockHeight);
+    });
+  });
+
+  group('in and out points, loop and full screen', () {
+    MusicTimeline ruler(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline));
+
+    Future<void> key(
+      WidgetTester tester,
+      LogicalKeyboardKey k, {
+      LogicalKeyboardKey? holding,
+    }) async {
+      if (holding != null) await tester.sendKeyDownEvent(holding);
+      await tester.sendKeyEvent(k);
+      if (holding != null) await tester.sendKeyUpEvent(holding);
+      await tester.pump();
+    }
+
+    /// Three moments in a row: a montage long enough to mark inside.
+    Future<double> montage(WidgetTester tester) async {
+      await open(tester);
+      for (var i = 0; i < 3; i++) {
+        await cursorAt(tester, i * 3.0);
+        await tester.tap(moment(30.0));
+        await tester.pump();
+      }
+      return cutList(tester).map((c) => c.untilS).reduce(math.max);
+    }
+
+    testWidgets('I and O mark the range on the ruler; Alt+X clears it', (
+      tester,
+    ) async {
+      final end = await montage(tester);
+      expect(end, greaterThan(4));
+      await cursorAt(tester, 1);
+      await key(tester, LogicalKeyboardKey.keyI);
+      await cursorAt(tester, 3);
+      await key(tester, LogicalKeyboardKey.keyO);
+
+      final (from, to) = ruler(tester).range!;
+      expect(from, closeTo(1, 0.05));
+      expect(to, closeTo(3, 0.05));
+      expect(find.byKey(const Key('range-band')), findsOneWidget);
+      expect(find.byKey(const Key('range-chip')), findsOneWidget);
+
+      // the out end drags
+      await tester.timedDrag(
+        find.byKey(const Key('range-out')),
+        const Offset(60 + eatenBySlop, 0),
+        const Duration(milliseconds: 300),
+      );
+      await tester.pump();
+      expect(ruler(tester).range!.$2, closeTo(4, 0.3));
+
+      await key(
+        tester,
+        LogicalKeyboardKey.keyX,
+        holding: LogicalKeyboardKey.altLeft,
+      );
+      expect(ruler(tester).range, isNull);
+      expect(find.byKey(const Key('range-band')), findsNothing);
+    });
+
+    testWidgets('looping plays the range round and round', (tester) async {
+      await montage(tester);
+      await cursorAt(tester, 1);
+      await key(tester, LogicalKeyboardKey.keyI);
+      await cursorAt(tester, 2);
+      await key(tester, LogicalKeyboardKey.keyO);
+      await cursorAt(tester, 0.2); // outside: playing starts at the in point
+      await tester.tap(find.byKey(const Key('loop')));
+      await tester.pump();
+
+      await key(tester, LogicalKeyboardKey.space);
+      final seen = <double>[];
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        seen.add(ruler(tester).playheadS);
+      }
+      await key(tester, LogicalKeyboardKey.space);
+      expect(seen.every((t) => t >= 1 - 0.05 && t <= 2 + 0.05), isTrue);
+      // three seconds of a one-second range: it went round
+      expect(
+        seen.indexed.any((p) => p.$1 > 0 && p.$2 < seen[p.$1 - 1]),
+        isTrue,
+      );
+    });
+
+    testWidgets('F puts the monitor full screen; Esc brings it back', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await key(tester, LogicalKeyboardKey.keyF);
+      expect(find.byKey(const Key('fullscreen-layer')), findsOneWidget);
+      expect(find.byType(PreviewPlayer), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.escape);
+      expect(find.byKey(const Key('fullscreen-layer')), findsNothing);
+      expect(find.byType(PreviewPlayer), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('fullscreen')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('exit-fullscreen')));
+      await tester.pump();
+      expect(find.byKey(const Key('fullscreen-layer')), findsNothing);
     });
   });
 

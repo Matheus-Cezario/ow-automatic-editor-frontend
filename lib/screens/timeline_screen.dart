@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import '../api.dart';
 import '../montage.dart';
 import '../export_options.dart';
+import '../fullscreen.dart';
 import '../fonts.dart';
 import '../montage_state.dart';
 import '../recipe.dart';
@@ -143,6 +144,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// How tall an open track is on the ruler — see [MusicTimeline.trackHeights].
   double _trackHeight = MusicTimeline.blockHeight;
+
+  /// Playback loops: inside the in/out range when there is one, over the
+  /// whole video when not.
+  bool _loop = false;
+
+  /// The monitor over the whole window (and the screen, if the browser lets).
+  bool _fullscreen = false;
+  final _monitorKey = GlobalKey(debugLabel: 'monitor');
+  void Function()? _stopFullscreenWatch;
   bool _magnet = true;
 
   /// Insert mode: a clip dropped on others pushes them right instead of going
@@ -205,6 +215,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     // the service skips what is already there
     _api.requestFrames(widget.job.id).ignore();
     FocusManager.instance.addListener(_checkFocus);
+    // Esc belongs to the browser in full screen: when it leaves, so do we
+    _stopFullscreenWatch = onFullscreenExit(() {
+      if (mounted && _fullscreen) setState(() => _fullscreen = false);
+    });
   }
 
   /// Is someone typing in a field?
@@ -227,6 +241,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   @override
   void dispose() {
     FocusManager.instance.removeListener(_checkFocus);
+    _stopFullscreenWatch?.call();
     _focus.dispose();
     _debounce?.cancel();
     _clock?.cancel();
@@ -245,6 +260,192 @@ class _TimelineScreenState extends State<TimelineScreen> {
     setState(() => _history.apply(updated));
     _scheduleSave();
   }
+
+  /// The monitor. The same widget, by its key, moves between the editor and
+  /// full screen, so the player is not rebuilt — the picture does not go
+  /// black and reload on the way.
+  Widget _monitorView() => KeyedSubtree(
+    key: _monitorKey,
+    child: _withExact(PreviewPlayer(
+                // the proxy when there is one; for old matches, the recording
+                videoUrl: widget.job.monitorUrl,
+                layers: _state.layers,
+                cuts: _state.visibleClips,
+                library: {for (final m in _library) m.id: m},
+                export: _state.export,
+                aspectRatio: frameAspect(
+                  _state.export,
+                  width: widget.job.width,
+                  height: widget.job.height,
+                ),
+                atS: _cursor,
+                playing: _playing,
+                // the text is drawn over the picture, and dragging it there is
+                // how you decide where it goes: the alternative was typing two
+                // numbers and rendering the video to check
+                texts: _visibleTexts,
+                selectionIds: _state.selectionIds,
+                onSelectText: _select,
+                onMoveText: (id, x, y) =>
+                    _edit(positionOnFrame(_state, id, x: x, y: y)),
+                onDragging: (t) => setState(() => _dragLabel = t),
+                editingId: _editingTextId,
+                onEditing: _typeOnFrame,
+                onTextChanged: (id, v) =>
+                    _edit(changeText(_state, id, textValue: v)),
+                onGestureStart: _history.startGesture,
+                onGestureEnd: _history.endGesture,
+                fontFamily: _fonts.familyFor,
+              )),
+  );
+
+  /// In the monitor's corner: the in/out range, looping and full screen —
+  /// how the picture is watched, next to the picture.
+  Widget _playbackControls() {
+    final theme = Theme.of(context);
+    final range = _range;
+    return Material(
+      color: theme.colorScheme.surface.withValues(alpha: 0.85),
+      borderRadius: BorderRadius.circular(8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (range != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: InputChip(
+                key: const Key('range-chip'),
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(Icons.straighten, size: 16),
+                label: Text(
+                  '${formatClock(range.from)} – ${formatClock(range.to)}',
+                ),
+                tooltip:
+                    'In and out points (I / O): what loops and what is '
+                    'exported. Click to go to the in point',
+                onPressed: () => _goTo(range.from),
+                onDeleted: _clearRange,
+                deleteButtonTooltipMessage: 'Clear (Alt+X)',
+              ),
+            ),
+          IconButton(
+            key: const Key('loop'),
+            visualDensity: VisualDensity.compact,
+            tooltip: _loop
+                ? 'Looping ${range == null ? 'the whole video' : 'the in/out range'} (Shift+L)'
+                : 'Loop playback (Shift+L)',
+            isSelected: _loop,
+            onPressed: () => setState(() => _loop = !_loop),
+            icon: const Icon(Icons.repeat),
+            selectedIcon: Icon(Icons.repeat_on, color: theme.colorScheme.primary),
+          ),
+          IconButton(
+            key: const Key('fullscreen'),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Full screen (F)',
+            onPressed: () => _setFullscreen(true),
+            icon: const Icon(Icons.fullscreen),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setFullscreen(bool on) async {
+    if (on == _fullscreen) return;
+    setState(() => _fullscreen = on);
+    if (on) {
+      await enterFullscreen();
+    } else {
+      await exitFullscreen();
+    }
+  }
+
+  /// Full screen: the monitor over everything, and a bar to drive it.
+  Widget _fullscreenLayer() {
+    final theme = Theme.of(context);
+    const light = Colors.white;
+    return Material(
+      key: const Key('fullscreen-layer'),
+      color: Colors.black,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Expanded(child: Center(child: _monitorView())),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: _playing ? 'Pause (Space)' : 'Play (Space)',
+                    onPressed: _state.isBlank ? null : _togglePlay,
+                    icon: Icon(
+                      _playing ? Icons.pause : Icons.play_arrow,
+                      color: light,
+                    ),
+                  ),
+                  Text(
+                    '${formatClock(_cursor)} / '
+                    '${formatClock(videoDuration(_state.clips))}',
+                    style: theme.textTheme.titleSmall?.copyWith(color: light),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Loop playback (Shift+L)',
+                    isSelected: _loop,
+                    onPressed: () => setState(() => _loop = !_loop),
+                    icon: const Icon(Icons.repeat, color: Colors.white54),
+                    selectedIcon: const Icon(Icons.repeat_on, color: light),
+                  ),
+                  if (_range case final r?)
+                    Text(
+                      'in/out ${formatClock(r.from)} – ${formatClock(r.to)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white70,
+                      ),
+                    ),
+                  Expanded(
+                    child: Slider(
+                      value: _cursor
+                          .clamp(0.0, math.max(0.001, videoDuration(_state.clips)))
+                          .toDouble(),
+                      max: math.max(0.001, videoDuration(_state.clips)),
+                      onChanged: (v) => _goTo(v, reveal: false),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('exit-fullscreen'),
+                    tooltip: 'Leave full screen (Esc or F)',
+                    onPressed: () => _setFullscreen(false),
+                    icon: const Icon(Icons.fullscreen_exit, color: light),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The in/out range on the ruler, resolved — `null` when there is none.
+  ({double from, double to})? get _range {
+    if (!hasRange(_state.export)) return null;
+    final t = stretchOf(_state.export, videoDuration(_state.clips));
+    return (from: t.startTime, to: t.endTime);
+  }
+
+  /// What playback goes round, when looping.
+  ({double from, double to})? get _loopSpan {
+    if (!_loop) return null;
+    final end = videoDuration(_state.clips);
+    if (end <= 0) return null;
+    return _range ?? (from: 0.0, to: end);
+  }
+
+  void _markIn() => _edit(setRangeIn(_state, _cursor));
+  void _markOut() => _edit(setRangeOut(_state, _cursor));
+  void _clearRange() => _edit(exportAll(_state));
 
   /// A marker at the playhead, or away with the one already there.
   void _toggleMarker() => _edit(toggleMarker(_state, _cursor));
@@ -1152,8 +1353,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
     // at the end, play restarts: stopping on the last frame and doing nothing
     // would leave the button without effect
     final endTime = videoDuration(_state.clips);
+    final loop = _loopSpan;
     setState(() {
-      if (_cursor >= endTime - 0.05) _cursor = 0;
+      if (loop != null) {
+        // looping a stretch starts in it
+        if (_cursor < loop.from || _cursor >= loop.to - 0.05) _cursor = loop.from;
+      } else if (_cursor >= endTime - 0.05) {
+        _cursor = 0;
+      }
       _clock = Timer.periodic(_clockStep, (_) => _tick());
     });
     _syncMusic();
@@ -1281,6 +1488,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
       if ((byRecording - t).abs() < 0.5) t = byRecording;
     }
 
+    final loop = _loopSpan;
+    if (loop != null && t >= loop.to) {
+      // round again: the music follows the jump on the next sync
+      setState(() => _cursor = loop.from);
+      _followCursor(loop.from);
+      _syncMusic();
+      return;
+    }
     if (t >= endTime) {
       setState(() => _cursor = endTime);
       _pause();
@@ -1946,6 +2161,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _splitAtCursor(everyLayer: true),
       const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
       const SingleActivator(LogicalKeyboardKey.keyN): _toggleMarker,
+      const SingleActivator(LogicalKeyboardKey.keyI): _markIn,
+      const SingleActivator(LogicalKeyboardKey.keyO): _markOut,
+      const SingleActivator(LogicalKeyboardKey.keyX, alt: true): _clearRange,
+      const SingleActivator(LogicalKeyboardKey.keyL, shift: true): () =>
+          setState(() => _loop = !_loop),
       const SingleActivator(LogicalKeyboardKey.keyN, shift: true): () {
         if (nextMarker(_state, _cursor) case final t?) _goTo(t);
       },
@@ -1959,7 +2179,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _rippleDeleteSelection,
       const SingleActivator(LogicalKeyboardKey.backspace, shift: true):
           _rippleDeleteSelection,
-      const SingleActivator(LogicalKeyboardKey.escape): () => _select(null),
+      const SingleActivator(LogicalKeyboardKey.escape): () =>
+          _fullscreen ? _setFullscreen(false) : _select(null),
+      const SingleActivator(LogicalKeyboardKey.keyF): () =>
+          _setFullscreen(!_fullscreen),
       const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
           _goTo(_cursor - 1),
       const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
@@ -2020,7 +2243,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: Focus(
         focusNode: _focus,
         autofocus: true,
-        child: Scaffold(
+        child: Stack(
+          children: [
+            Scaffold(
           appBar: AppBar(
             title: _MontagePicker(
               displayName: _montageName,
@@ -2134,6 +2359,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
               );
             },
           ),
+            ),
+            // the monitor over everything; the editor stays built underneath,
+            // so leaving full screen is instant
+            if (_fullscreen) Positioned.fill(child: _fullscreenLayer()),
+          ],
         ),
       ),
     );
@@ -2165,6 +2395,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('M', 'align the selected block\'s play to the cursor'),
               _Shortcut('[ / ]', 'trim the start / end to the cursor'),
               _Shortcut('N / Shift + N', 'marker at the playhead / next marker'),
+              _Shortcut('I / O', 'in / out point at the playhead'),
+              _Shortcut('F', 'monitor full screen (Esc leaves)'),
+              _Shortcut('Alt + X', 'clear the in and out points'),
+              _Shortcut('Shift + L', 'loop playback (the in/out range, or all)'),
               _Shortcut('Delete', 'remove from the montage'),
               _Shortcut('Ctrl+Z / Ctrl+Shift+Z', 'undo / redo'),
               _Shortcut('Ctrl+C / Ctrl+V', 'copy / paste'),
@@ -2348,41 +2582,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
       if (widget.job.monitorUrl != null) ...[
         SizedBox(
           height: _monitorH,
-          child: Center(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: _withExact(PreviewPlayer(
-                // the proxy when there is one; for old matches, the recording
-                videoUrl: widget.job.monitorUrl,
-                layers: _state.layers,
-                cuts: _state.visibleClips,
-                library: {for (final m in _library) m.id: m},
-                export: _state.export,
-                aspectRatio: frameAspect(
-                  _state.export,
-                  width: widget.job.width,
-                  height: widget.job.height,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _fullscreen
+                        ? const SizedBox.shrink()
+                        : _monitorView(),
+                  ),
                 ),
-                atS: _cursor,
-                playing: _playing,
-                // the text is drawn over the picture, and dragging it there is
-                // how you decide where it goes: the alternative was typing two
-                // numbers and rendering the video to check
-                texts: _visibleTexts,
-                selectionIds: _state.selectionIds,
-                onSelectText: _select,
-                onMoveText: (id, x, y) =>
-                    _edit(positionOnFrame(_state, id, x: x, y: y)),
-                onDragging: (t) => setState(() => _dragLabel = t),
-                editingId: _editingTextId,
-                onEditing: _typeOnFrame,
-                onTextChanged: (id, v) =>
-                    _edit(changeText(_state, id, textValue: v)),
-                onGestureStart: _history.startGesture,
-                onGestureEnd: _history.endGesture,
-                fontFamily: _fonts.familyFor,
-              )),
-            ),
+              ),
+              Positioned(top: 4, right: 4, child: _playbackControls()),
+            ],
           ),
         ),
         _HeightHandle(
@@ -2584,6 +2797,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onRemoveMarker: (i) => _edit(removeMarker(_state, i)),
         trackHeight: _trackHeight,
         onTrackHeight: (h) => setState(() => _trackHeight = h),
+        range: switch (_range) {
+          final r? => (r.from, r.to),
+          null => null,
+        },
+        onRange: (from, to) => _edit(
+          _state.copyWith(
+            export: _state.export.copyWith(fromS: from, toS: to),
+          ),
+        ),
         onAdjustLayer: (i, {muted, hidden, locked, collapsed}) => _edit(
           adjustLayer(
             _state,
