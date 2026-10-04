@@ -865,6 +865,7 @@ MontageState? rampIntoMoment(
   double easeS = 0.3,
   double leadS = 0.5,
   double settleS = 0.4,
+  bool grow = true,
 }) {
   final location = s.locate(id);
   if (location == null) return null;
@@ -894,13 +895,21 @@ MontageState? rampIntoMoment(
   // what the ramp eats of the source, and what is left of the clip after it
   // at full speed
   final eaten = a + 2 * easedSource + (end - a - easeS) * slow;
-  var length = rampOut + math.max(0.0, c.sourceConsumedS - eaten);
-  final others = s.layers[layerIndex].clips;
-  while (!fits(others, c.atS, length, ignore: i)) {
-    length -= 0.05;
-    if (length < rampOut) return null; // the next clip leaves no room
+  final double d;
+  if (grow) {
+    var length = rampOut + math.max(0.0, c.sourceConsumedS - eaten);
+    final others = s.layers[layerIndex].clips;
+    while (!fits(others, c.atS, length, ignore: i)) {
+      length -= 0.05;
+      if (length < rampOut) return null; // the next clip leaves no room
+    }
+    d = length;
+  } else {
+    // the length is fixed (a cut fitted to the beats): the ramp fits inside
+    // it or not at all
+    if (rampOut > c.durationS + 1e-9) return null;
+    d = c.durationS;
   }
-  final d = length;
 
   final ramped = c.copyWith(
     durationS: d,

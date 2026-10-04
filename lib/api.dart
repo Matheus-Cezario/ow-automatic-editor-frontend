@@ -1421,6 +1421,14 @@ class Recipe {
     this.musicVolume = 1,
     this.gameVolume = 0,
     this.export = const ExportSpec(),
+    this.zoomSmooth = false,
+    this.transition = '',
+    this.transitionS = 0.5,
+    this.ramp = false,
+    this.rampSlow = 0.35,
+    this.duckPlays = false,
+    this.duckLevel = 0.3,
+    this.labelStyle,
   });
 
   factory Recipe.fromJson(Map<String, dynamic> j) => Recipe(
@@ -1443,7 +1451,39 @@ class Recipe {
     export: ExportSpec.fromJson(
       (j['export'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
+    zoomSmooth: j['zoom_smooth'] as bool? ?? false,
+    transition: j['transition'] as String? ?? '',
+    transitionS: (j['transition_s'] as num?)?.toDouble() ?? 0.5,
+    ramp: j['ramp'] as bool? ?? false,
+    rampSlow: (j['ramp_slow'] as num?)?.toDouble() ?? 0.35,
+    duckPlays: j['duck_plays'] as bool? ?? false,
+    duckLevel: (j['duck_level'] as num?)?.toDouble() ?? 0.3,
+    labelStyle: j['label_style'] == null
+        ? null
+        : ClipTextStyle.fromJson(
+            (j['label_style'] as Map).cast<String, dynamic>(),
+          ),
   );
+
+  // ── the style a template carries, beyond the way of cutting ──
+
+  /// The zoom eases in and out instead of punching.
+  final bool zoomSmooth;
+
+  /// How each cut enters over the one before — empty is a plain cut.
+  final String transition;
+  final double transitionS;
+
+  /// Slow motion through each play, and how slow.
+  final bool ramp;
+  final double rampSlow;
+
+  /// Ducking at the plays.
+  final bool duckPlays;
+  final double duckLevel;
+
+  /// How the labels the system writes look; `null` is the default style.
+  final ClipTextStyle? labelStyle;
 
   /// Which events become cuts.
   final List<String> kinds;
@@ -1490,6 +1530,14 @@ class Recipe {
     double? musicVolume,
     double? gameVolume,
     ExportSpec? export,
+    bool? zoomSmooth,
+    String? transition,
+    double? transitionS,
+    bool? ramp,
+    double? rampSlow,
+    bool? duckPlays,
+    double? duckLevel,
+    ClipTextStyle? labelStyle,
   }) => Recipe(
     kinds: kinds ?? this.kinds,
     leadS: leadS ?? this.leadS,
@@ -1505,6 +1553,14 @@ class Recipe {
     musicVolume: musicVolume ?? this.musicVolume,
     gameVolume: gameVolume ?? this.gameVolume,
     export: export ?? this.export,
+    zoomSmooth: zoomSmooth ?? this.zoomSmooth,
+    transition: transition ?? this.transition,
+    transitionS: transitionS ?? this.transitionS,
+    ramp: ramp ?? this.ramp,
+    rampSlow: rampSlow ?? this.rampSlow,
+    duckPlays: duckPlays ?? this.duckPlays,
+    duckLevel: duckLevel ?? this.duckLevel,
+    labelStyle: labelStyle ?? this.labelStyle,
   );
 
   Map<String, dynamic> toJson() => {
@@ -1522,6 +1578,14 @@ class Recipe {
     'music_volume': musicVolume,
     'game_volume': gameVolume,
     'export': export.toJson(),
+    if (zoomSmooth) 'zoom_smooth': true,
+    if (transition.isNotEmpty) 'transition': transition,
+    if (transition.isNotEmpty) 'transition_s': transitionS,
+    if (ramp) 'ramp': true,
+    if (ramp) 'ramp_slow': rampSlow,
+    if (duckPlays) 'duck_plays': true,
+    if (duckPlays) 'duck_level': duckLevel,
+    if (labelStyle != null) 'label_style': labelStyle!.toJson(),
   };
 }
 

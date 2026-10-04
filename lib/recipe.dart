@@ -77,12 +77,34 @@ MontageState applyRecipe(
         sourceT: moment.t,
         kind: moment.kind,
         speed: r.speed,
-        zoom: r.zoom ? punch() : const [],
+        zoom: r.zoom ? _zoomOf(r) : const [],
         fade: r.fadeS > 0
             ? ClipFade(inS: r.fadeS, outS: r.fadeS)
             : const ClipFade(),
       ),
     );
+
+    // Slow motion makes a cut longer, so the ramp goes on before the next
+    // cut is placed: free cuts grow and the next one starts after; cuts
+    // fitted to the beat keep their length and ramp only when it fits.
+    if (r.ramp) {
+      final alone = MontageState(
+        layers: [
+          Layer(clips: [clips.last]),
+        ],
+      );
+      final ramped = rampIntoMoment(
+        alone,
+        clips.last.id,
+        slow: r.rampSlow,
+        grow: !onGrid,
+      );
+      if (ramped != null) {
+        final c = ramped.layers.single.clips.single;
+        clips[clips.length - 1] = c;
+        if (!onGrid) position = c.untilS + r.gapS;
+      }
+    }
   }
 
   final layerList = <Layer>[Layer(clips: clips)];
@@ -97,8 +119,13 @@ MontageState applyRecipe(
     layerList.add(
       Layer(
         name: 'text',
-        clips: [for (final t in texts) t.copyWith(id: newCutId())]
-          ..sort((a, b) => a.atS.compareTo(b.atS)),
+        clips: [
+          for (final t in texts)
+            t.copyWith(
+              id: newCutId(),
+              textStyle: r.labelStyle ?? t.textStyle,
+            ),
+        ]..sort((a, b) => a.atS.compareTo(b.atS)),
       ),
     );
   }
@@ -110,14 +137,95 @@ MontageState applyRecipe(
     for (final l in previous.layers)
       if (l.isAudio && l.clips.isNotEmpty) l,
   ];
-  return previous.copyWith(
+  final built = previous.copyWith(
     layers: [...layerList, ...sound],
     selectionIds: const {},
     activeLayer: 0,
     musicVolume: r.musicVolume,
     gameVolume: r.gameVolume,
+    duckPlays: r.duckPlays,
+    duckLevel: r.duckLevel,
     export: r.export,
   );
+  return _withTransitions(built, r);
+}
+
+/// A template's **style** on the montage already on screen — its cuts stay.
+///
+/// What the template says about the look goes on: fades, zoom, the
+/// transition between cuts, slow motion through each play (where there is
+/// room), ducking, the labels' style and the mix. What it says about cutting
+/// (which moments, how long, speed) is left alone: the cuts were chosen by
+/// hand, and that is the point of applying only the style.
+MontageState applyStyle(MontageState s, Recipe r) {
+  var out = s.copyWith(
+    musicVolume: r.musicVolume,
+    gameVolume: r.gameVolume,
+    duckPlays: r.duckPlays,
+    duckLevel: r.duckLevel,
+  );
+  final pictures = [
+    for (final l in out.layers)
+      if (!l.isAudio && !l.locked)
+        for (final c in l.clips)
+          if (c.source == 'recording' && !c.isText) c.id,
+  ];
+  for (final id in pictures) {
+    out = adjustEffect(
+      out,
+      id,
+      fade: r.fadeS > 0 ? ClipFade(inS: r.fadeS, outS: r.fadeS) : const ClipFade(),
+      zoom: r.zoom ? _zoomOf(r) : const [],
+    );
+    if (r.ramp) {
+      out = rampIntoMoment(out, id, slow: r.rampSlow) ?? out;
+    }
+  }
+  if (r.labelStyle case final style?) {
+    out = out.copyWith(
+      layers: [
+        for (final l in out.layers)
+          l.locked
+              ? l
+              : l.copyWith(
+                  clips: [
+                    for (final c in l.clips)
+                      c.isText ? c.copyWith(textStyle: style) : c,
+                  ],
+                ),
+      ],
+    );
+  }
+  return _withTransitions(out, r);
+}
+
+List<ZoomKey> _zoomOf(Recipe r) {
+  final keys = punch();
+  if (!r.zoomSmooth) return keys;
+  return [keys.first.copyWith(ease: Ease.easeInOut), ...keys.skip(1)];
+}
+
+/// The template's transition on every picture cut but the first of each
+/// layer — no longer than half the cut, which the server would refuse.
+MontageState _withTransitions(MontageState s, Recipe r) {
+  if (r.transition.isEmpty) return s;
+  var out = s;
+  for (final l in s.layers) {
+    if (l.isAudio || l.locked) continue;
+    final cuts = [
+      for (final c in l.clips)
+        if (!c.isText) c,
+    ]..sort((a, b) => a.atS.compareTo(b.atS));
+    for (final c in cuts.skip(1)) {
+      out = applyTransition(out, [
+        c.id,
+      ], ClipTransition(
+        kind: r.transition,
+        durationS: math.min(r.transitionS, c.durationS / 2),
+      ));
+    }
+  }
+  return out;
 }
 
 /// The recipe describing a montage that already exists.
@@ -161,6 +269,30 @@ Recipe recipeFromMontage(MontageState s, {double? beatsPerCut}) {
             if (!c.fade.isNeutral) c.fade.inS,
         ]) ??
         0,
+    zoomSmooth: fromRecording.any(
+      (c) => c.zoom.isNotEmpty && c.zoom.first.ease == Ease.easeInOut,
+    ),
+    transition: _mostCommon([
+      for (final c in fromRecording)
+        if (c.transition != null) c.transition!.kind,
+    ]) ?? '',
+    transitionS:
+        _median([
+          for (final c in fromRecording)
+            if (c.transition != null) c.transition!.durationS,
+        ]) ??
+        0.5,
+    ramp: fromRecording.any((c) => c.isRamped),
+    rampSlow:
+        _median([
+          for (final c in fromRecording)
+            if (c.isRamped)
+              c.keysFor(KeyProp.speed).map((k) => k.value).reduce(math.min),
+        ]) ??
+        0.35,
+    duckPlays: s.duckPlays,
+    duckLevel: s.duckLevel,
+    labelStyle: s.clips.where((c) => c.isText).firstOrNull?.textStyle,
     counter: s.clips.any((c) => c.isText && int.tryParse(c.text) != null),
     streaks:
         s.clips.any((c) => c.isText && streakName(2) == c.text) ||
@@ -169,6 +301,15 @@ Recipe recipeFromMontage(MontageState s, {double? beatsPerCut}) {
     gameVolume: s.gameVolume,
     export: s.export,
   );
+}
+
+String? _mostCommon(List<String> v) {
+  if (v.isEmpty) return null;
+  final counts = <String, int>{};
+  for (final x in v) {
+    counts[x] = (counts[x] ?? 0) + 1;
+  }
+  return counts.entries.reduce((a, b) => b.value > a.value ? b : a).key;
 }
 
 double? _median(List<double> v) {

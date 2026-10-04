@@ -1646,7 +1646,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   // ── presets ───────────────────────────────────────────────────────────────
 
   Future<void> _savePreset() async {
-    final displayName = await _askName('Save as preset');
+    final displayName = await _askName('Save as template');
     if (displayName == null || !mounted) return;
     try {
       await _api.createPreset(
@@ -1654,7 +1654,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         recipeFromMontage(_state, beatsPerCut: _beatsPerCut),
       );
       if (mounted) {
-        _notify('"$displayName" now works for any match.');
+        _notify('Template "$displayName" saved: it works for any match.');
       }
     } catch (e) {
       if (mounted) setState(() => _saveError = '$e');
@@ -1688,7 +1688,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return isRound;
   }
 
-  Future<void> _applyPreset() async {
+  /// Applies a saved template: rebuilding the cuts from this match's
+  /// moments, or — [styleOnly] — only its look on the cuts already here.
+  Future<void> _applyPreset({bool styleOnly = false}) async {
     List<Preset> presets;
     try {
       presets = await _api.listPresets();
@@ -1701,13 +1703,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final pickedOne = await showDialog<Preset>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Presets'),
+        title: Text(styleOnly ? 'Apply a template\'s style' : 'Templates'),
         content: SizedBox(
           width: 420,
           child: presets.isEmpty
               ? const Text(
                   'None yet. Build a video the way you like it and use '
-                  '"Save as preset" — from then on the next match '
+                  '"Save as template" — from then on the next match '
                   'comes out ready.',
                 )
               : ListView(
@@ -1733,11 +1735,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
     if (pickedOne == null || !mounted) return;
 
+    if (styleOnly) {
+      _edit(applyStyle(_state, pickedOne.recipe));
+      _notify('The style of "${pickedOne.name}" is on your cuts.');
+      return;
+    }
+
     if (!_state.isBlank) {
       final ok = await _confirm(
         'Apply "${pickedOne.name}"?',
         'The cuts on screen are replaced. You can undo it '
-            'with Ctrl+Z.',
+            'with Ctrl+Z. To keep them and take only the look, use '
+            '"Apply template style".',
       );
       if (!ok || !mounted) return;
     }
@@ -1759,9 +1768,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ? '${r.beatsPerCut.toStringAsFixed(0)} beat(s) per cut'
         : '${r.durationS.toStringAsFixed(1)}s per cut';
     final extras = [
-      if (r.zoom) 'zoom',
+      if (r.zoom) r.zoomSmooth ? 'smooth zoom' : 'zoom',
+      if (r.transition.isNotEmpty)
+        TransitionType.of(r.transition)?.name ?? r.transition,
+      if (r.ramp) 'slow-mo ramps',
+      if (r.duckPlays) 'ducking',
       if (r.counter) 'counter',
       if (r.streaks) 'streaks',
+      if (r.labelStyle?.font case final f? when f.isNotEmpty) 'font $f',
       if (r.export.width > 0) '${r.export.width}x${r.export.height}',
     ];
     return '${r.kinds.join(', ')} · $sizeValue'
@@ -1934,6 +1948,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   if (v == 'mark') _markVersion();
                   if (v == 'history') _showHistory();
                   if (v == 'apply-preset') _applyPreset();
+                  if (v == 'apply-style') _applyPreset(styleOnly: true);
                   if (v == 'save-preset') _savePreset();
                 },
                 itemBuilder: (_) => const [
@@ -1945,11 +1960,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'apply-preset',
-                    child: Text('Apply preset…'),
+                    child: Text('Apply template…'),
+                  ),
+                  PopupMenuItem(
+                    key: Key('apply-style'),
+                    value: 'apply-style',
+                    child: Text('Apply template style…'),
                   ),
                   PopupMenuItem(
                     value: 'save-preset',
-                    child: Text('Save as preset…'),
+                    child: Text('Save as template…'),
                   ),
                   PopupMenuDivider(),
                   PopupMenuItem(

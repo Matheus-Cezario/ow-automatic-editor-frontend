@@ -1433,8 +1433,9 @@ void main() {
       expect(find.text('Duplicate this montage'), findsOneWidget);
       expect(find.text('Rename'), findsOneWidget);
       expect(find.text('Version history…'), findsOneWidget);
-      expect(find.text('Apply preset…'), findsOneWidget);
-      expect(find.text('Save as preset…'), findsOneWidget);
+      expect(find.text('Apply template…'), findsOneWidget);
+      expect(find.text('Apply template style…'), findsOneWidget);
+      expect(find.text('Save as template…'), findsOneWidget);
     });
 
     testWidgets('the title saved in the montage comes back in the name field', (
