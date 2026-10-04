@@ -105,6 +105,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// it is music, its layer does, and pasting must put it back on one.
   Set<String> _clipboardAudio = const {};
 
+  /// The clip whose effects were copied, as it was then — "Paste effects"
+  /// puts its look on other clips.
+  TimelineClip? _effectsFrom;
+
   /// The match media library. It starts with what came from the server and
   /// grows as the user brings files.
   late List<Media> _library = [...widget.job.media];
@@ -642,6 +646,33 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (_state.clips.length == beforeState) {
       _notify('Too close to the edge: an invisible piece would be left.');
     }
+  }
+
+  /// Takes the effects of [id] — or of the one selected clip.
+  void _copyEffects([String? id]) {
+    final from = id ?? (_state.selectionIds.length == 1 ? _state.selectionIds.first : null);
+    final clip = from == null ? null : _state.clipItem(from);
+    if (clip == null) {
+      _notify('Select one clip to copy its effects.');
+      return;
+    }
+    setState(() => _effectsFrom = clip);
+    _notify('Effects copied. Select clips and paste them (Ctrl+Shift+V).');
+  }
+
+  /// Puts the copied effects on [ids] — or on the selection.
+  void _pasteEffects([Set<String>? ids]) {
+    final from = _effectsFrom;
+    final targets = ids ?? _state.selectionIds;
+    if (from == null) {
+      _notify('Copy a clip\'s effects first (Ctrl+Shift+C).');
+      return;
+    }
+    if (targets.isEmpty) {
+      _notify('Select the clips that should get the effects.');
+      return;
+    }
+    _edit(pasteEffects(_state, targets, from));
   }
 
   /// Deletes the selection and closes the gaps it leaves.
@@ -1820,6 +1851,26 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SingleActivator(LogicalKeyboardKey.keyJ): () =>
           _goTo(_cursor - 2),
       const SingleActivator(LogicalKeyboardKey.keyS): _splitAtCursor,
+      const SingleActivator(
+        LogicalKeyboardKey.keyC,
+        control: true,
+        shift: true,
+      ): _copyEffects,
+      const SingleActivator(
+        LogicalKeyboardKey.keyC,
+        meta: true,
+        shift: true,
+      ): _copyEffects,
+      const SingleActivator(
+        LogicalKeyboardKey.keyV,
+        control: true,
+        shift: true,
+      ): _pasteEffects,
+      const SingleActivator(
+        LogicalKeyboardKey.keyV,
+        meta: true,
+        shift: true,
+      ): _pasteEffects,
       const SingleActivator(LogicalKeyboardKey.equal): () =>
           _setZoom(_px * kZoomStep),
       const SingleActivator(LogicalKeyboardKey.minus): () =>
@@ -2042,6 +2093,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('Ctrl+Z / Ctrl+Shift+Z', 'undo / redo'),
               _Shortcut('Ctrl+C / Ctrl+V', 'copy / paste'),
               _Shortcut('Ctrl+D', 'duplicate'),
+              _Shortcut('Ctrl+Shift+C / V', 'copy / paste effects'),
               _Shortcut('Ctrl+A', 'select all'),
               _Shortcut('Shift + click', 'add to the selection'),
               _Shortcut('drag ↑ ↓', 'move the cut to another layer'),
@@ -2389,6 +2441,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onDuplicateClip: (id) => _edit(duplicate(_state, {id})),
         onDeleteClip: (id) => _edit(removeClips(_state, {id})),
         onRippleDeleteClip: (id) => _edit(rippleDelete(_state, {id})),
+        onCopyEffects: _copyEffects,
+        onPasteEffects: _effectsFrom == null
+            ? null
+            : (id) => _pasteEffects(
+                // pasting on a clip of the selection pastes on all of it
+                _state.selectionIds.contains(id) ? _state.selectionIds : {id},
+              ),
         onSelectMany: (ids, {bool add = false}) => _withoutHistory(
           _state.copyWith(
             selectionIds: add ? {..._state.selectionIds, ...ids} : ids,
@@ -2471,6 +2530,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onDuplicate: _duplicate,
             onClearSelection: () => _select(null),
             onRippleDelete: _rippleDeleteSelection,
+            onPasteEffects: _effectsFrom == null ? null : _pasteEffects,
           ),
         ),
       ],
@@ -2917,9 +2977,13 @@ class _MultiSelection extends StatelessWidget {
     required this.onDuplicate,
     required this.onClearSelection,
     required this.onRippleDelete,
+    this.onPasteEffects,
   });
 
   final int count;
+
+  /// `null` while nothing was copied.
+  final VoidCallback? onPasteEffects;
   final VoidCallback onDelete;
   final VoidCallback onRippleDelete;
   final VoidCallback onDuplicate;
@@ -2942,6 +3006,12 @@ class _MultiSelection extends StatelessWidget {
             tooltip: 'Remove from the montage (Delete)',
             onPressed: onDelete,
             icon: const Icon(Icons.delete_outline),
+          ),
+          IconButton(
+            key: const Key('paste-effects'),
+            tooltip: 'Paste effects (Ctrl+Shift+V)',
+            onPressed: onPasteEffects,
+            icon: const Icon(Icons.format_paint_outlined),
           ),
           IconButton(
             key: const Key('ripple-delete'),

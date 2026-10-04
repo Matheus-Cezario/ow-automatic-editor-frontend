@@ -79,6 +79,8 @@ class MusicTimeline extends StatefulWidget {
     this.onDuplicateClip,
     this.onDeleteClip,
     this.onRippleDeleteClip,
+    this.onCopyEffects,
+    this.onPasteEffects,
     this.onSelectMany,
     this.snapGuideS,
     this.onZoom,
@@ -130,6 +132,11 @@ class MusicTimeline extends StatefulWidget {
 
   /// Deletes the clip and pulls the following ones on its layer back.
   final ValueChanged<String>? onRippleDeleteClip;
+
+  /// Takes this clip's effects / puts the copied ones on it. Paste is `null`
+  /// while nothing was copied.
+  final ValueChanged<String>? onCopyEffects;
+  final ValueChanged<String>? onPasteEffects;
 
   /// Where the magnet stuck the clip being dragged — another clip's edge or
   /// the playhead — drawn as a guide line across every track.
@@ -433,6 +440,19 @@ class _MusicTimelineState extends State<MusicTimeline> {
           const PopupMenuDivider(),
         if (widget.onDuplicateClip != null)
           const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
+        if (widget.onCopyEffects != null)
+          const PopupMenuItem(
+            key: Key('clip-menu-copy-effects'),
+            value: 'copy-effects',
+            child: Text('Copy effects'),
+          ),
+        if (widget.onCopyEffects != null)
+          PopupMenuItem(
+            key: const Key('clip-menu-paste-effects'),
+            value: 'paste-effects',
+            enabled: widget.onPasteEffects != null && !locked,
+            child: const Text('Paste effects'),
+          ),
         if (widget.onDeleteClip != null)
           PopupMenuItem(
             key: const Key('clip-menu-delete'),
@@ -461,6 +481,10 @@ class _MusicTimelineState extends State<MusicTimeline> {
         widget.onDeleteClip!(id);
       case 'ripple':
         widget.onRippleDeleteClip!(id);
+      case 'copy-effects':
+        widget.onCopyEffects!(id);
+      case 'paste-effects':
+        widget.onPasteEffects?.call(id);
     }
   }
 

@@ -3151,6 +3151,46 @@ void main() {
     });
   });
 
+  group('copy and paste effects', () {
+    testWidgets('Ctrl+Shift+C on one clip, Ctrl+Shift+V on another', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final [a, b] = cutList(tester);
+
+      // a gets a zoom, then lends it
+      await tester.tap(block(tester, 0));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Effects'));
+      await tester.tap(find.text('Effects'));
+      await settle(tester);
+      await tester.ensureVisible(find.text('medium'));
+      await tester.tap(find.text('medium'));
+      await tester.pump();
+      Future<void> chord(LogicalKeyboardKey k) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(k);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pump();
+      }
+
+      await chord(LogicalKeyboardKey.keyC);
+      await tester.tap(find.byKey(ValueKey('block-${b.id}')));
+      await tester.pump();
+      await chord(LogicalKeyboardKey.keyV);
+
+      final pasted = cutList(tester).firstWhere((c) => c.id == b.id);
+      expect(pasted.zoom, isNotEmpty);
+      expect(cutList(tester).firstWhere((c) => c.id == a.id).zoom, isNotEmpty);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

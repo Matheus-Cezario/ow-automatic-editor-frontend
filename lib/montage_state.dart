@@ -1129,6 +1129,66 @@ List<ClipKey> _keysWithin(TimelineClip c, double fromS, double toS) {
   return out;
 }
 
+/// Puts [from]'s effects on the clips in [ids] — their cuts stay as they are.
+///
+/// A picture clip takes the look and the motion: colour, fades, zoom, place,
+/// keyframes (a speed ramp included), transition, speed, freeze, reverse and
+/// its sound. A text takes the text's style too, when [from] is a text. A
+/// music block takes only what is sound: its volume and volume keyframes.
+/// Fades and a transition longer than the clip are shortened to fit — the
+/// server would refuse them.
+MontageState pasteEffects(MontageState s, Set<String> ids, TimelineClip from) {
+  var out = s;
+  for (final id in ids) {
+    if (id == from.id) continue;
+    final where = out.locate(id);
+    if (where == null) continue;
+    final (layerIndex, i) = where;
+    final layer = out.layers[layerIndex];
+    if (layer.locked) continue;
+    final c = layer.clips[i];
+
+    TimelineClip next;
+    if (layer.isAudio) {
+      next = c.copyWith(
+        audio: from.audio,
+        keys: [
+          for (final k in from.keys)
+            if (k.prop == KeyProp.volume) k,
+        ],
+      );
+    } else {
+      final fade = _fadeWithin(from.fade, c.durationS);
+      final tr = from.transition;
+      next = c.copyWith(
+        color: from.color,
+        fade: fade,
+        zoom: from.zoom,
+        transform: from.transform,
+        keys: from.keys,
+        speed: from.speed,
+        freeze: from.freeze,
+        reverse: from.reverse,
+        audio: from.audio,
+        textStyle: c.isText && from.isText ? from.textStyle : null,
+        transition: tr?.copyWith(
+          durationS: math.min(tr.durationS, c.durationS / 2),
+        ),
+        clearTransition: tr == null,
+      );
+    }
+    out = out.withClip(layerIndex, i, next);
+  }
+  return out;
+}
+
+ClipFade _fadeWithin(ClipFade f, double duration) {
+  final sum = f.inS + f.outS;
+  if (sum <= duration) return f;
+  final k = duration / sum;
+  return ClipFade(inS: f.inS * k, outS: f.outS * k);
+}
+
 /// Duplicates the chosen clips, putting the copies after the montage's end.
 ///
 /// Pictures and music are pasted apart, each on a layer of its own kind.
