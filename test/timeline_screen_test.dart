@@ -3491,6 +3491,33 @@ void main() {
       );
     });
 
+    testWidgets('framing guides switch on and off from the corner menu', (
+      tester,
+    ) async {
+      await open(tester);
+      expect(find.byKey(const Key('monitor-guides')), findsNothing);
+      for (final name in ['thirds', 'vertical']) {
+        await tester.tap(find.byKey(const Key('guides')));
+        await settle(tester);
+        await tester.tap(find.byKey(ValueKey('guide-$name')));
+        await settle(tester);
+      }
+      expect(
+        tester.widget<PreviewPlayer>(find.byType(PreviewPlayer)).guides,
+        {MonitorGuide.thirds, MonitorGuide.vertical},
+      );
+      expect(find.byKey(const Key('monitor-guides')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('guides')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('guide-thirds')));
+      await settle(tester);
+      expect(
+        tester.widget<PreviewPlayer>(find.byType(PreviewPlayer)).guides,
+        {MonitorGuide.vertical},
+      );
+    });
+
     testWidgets('F puts the monitor full screen; Esc brings it back', (
       tester,
     ) async {

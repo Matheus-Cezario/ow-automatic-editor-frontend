@@ -151,6 +151,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// The monitor over the whole window (and the screen, if the browser lets).
   bool _fullscreen = false;
+
+  /// Framing guides over the monitor — see [MonitorGuide].
+  Set<MonitorGuide> _guides = const {};
   final _monitorKey = GlobalKey(debugLabel: 'monitor');
   void Function()? _stopFullscreenWatch;
   bool _magnet = true;
@@ -296,6 +299,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 onGestureStart: _history.startGesture,
                 onGestureEnd: _history.endGesture,
                 fontFamily: _fonts.familyFor,
+                guides: _guides,
               )),
   );
 
@@ -338,6 +342,28 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onPressed: () => setState(() => _loop = !_loop),
             icon: const Icon(Icons.repeat),
             selectedIcon: Icon(Icons.repeat_on, color: theme.colorScheme.primary),
+          ),
+          PopupMenuButton<MonitorGuide>(
+            key: const Key('guides'),
+            tooltip: 'Framing guides',
+            icon: Icon(
+              Icons.grid_4x4,
+              color: _guides.isEmpty ? null : theme.colorScheme.primary,
+            ),
+            onSelected: (g) => setState(() {
+              _guides = _guides.contains(g)
+                  ? ({..._guides}..remove(g))
+                  : {..._guides, g};
+            }),
+            itemBuilder: (_) => [
+              for (final g in MonitorGuide.values)
+                CheckedPopupMenuItem(
+                  key: ValueKey('guide-${g.name}'),
+                  value: g,
+                  checked: _guides.contains(g),
+                  child: Text(g.label),
+                ),
+            ],
           ),
           IconButton(
             key: const Key('fullscreen'),

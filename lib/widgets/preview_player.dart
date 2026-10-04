@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -24,6 +25,16 @@ import 'highlight_style.dart';
 /// > playback: each clip runs on its own media element, corrected when it
 /// > drifts. The exact cut is the final file's, which the server assembles
 /// > with ffmpeg.
+/// Lines drawn over the monitor to frame the shot; never in the video.
+enum MonitorGuide {
+  thirds('Rule of thirds'),
+  safe('Safe areas (action 93%, title 90%)'),
+  vertical('9:16 crop, for Shorts and Reels');
+
+  const MonitorGuide(this.label);
+  final String label;
+}
+
 class PreviewPlayer extends StatelessWidget {
   const PreviewPlayer({
     super.key,
@@ -46,7 +57,11 @@ class PreviewPlayer extends StatelessWidget {
     this.onGestureStart,
     this.onGestureEnd,
     this.fontFamily,
+    this.guides = const {},
   });
+
+  /// Framing guides drawn over the picture.
+  final Set<MonitorGuide> guides;
 
   /// The Flutter family a text's font id is drawn with — `null` while it is
   /// not loaded, and then the default face stands in.
@@ -186,6 +201,14 @@ class PreviewPlayer extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+              ),
+
+            if (guides.isNotEmpty)
+              IgnorePointer(
+                child: CustomPaint(
+                  key: const Key('monitor-guides'),
+                  painter: _GuidesPainter(guides),
                 ),
               ),
 
@@ -551,4 +574,51 @@ class _CentreAt extends SingleChildLayoutDelegate {
   @override
   bool shouldRelayout(_CentreAt old) =>
       old.x != x || old.y != y || old.drop != drop;
+}
+
+/// The framing guides: thirds, the safe areas, and a 9:16 window with the
+/// rest dimmed — what a vertical cut of this frame would keep.
+class _GuidesPainter extends CustomPainter {
+  _GuidesPainter(this.guides);
+
+  final Set<MonitorGuide> guides;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final line = Paint()
+      ..color = Colors.white.withValues(alpha: 0.55)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    if (guides.contains(MonitorGuide.vertical) && w / h > 9 / 16 + 1e-3) {
+      final vw = h * 9 / 16;
+      final left = (w - vw) / 2;
+      final dim = Paint()..color = Colors.black.withValues(alpha: 0.5);
+      canvas.drawRect(Rect.fromLTWH(0, 0, left, h), dim);
+      canvas.drawRect(Rect.fromLTWH(left + vw, 0, w - left - vw, h), dim);
+      canvas.drawRect(Rect.fromLTWH(left, 0, vw, h), line);
+    }
+    if (guides.contains(MonitorGuide.thirds)) {
+      for (final f in const [1 / 3, 2 / 3]) {
+        canvas.drawLine(Offset(w * f, 0), Offset(w * f, h), line);
+        canvas.drawLine(Offset(0, h * f), Offset(w, h * f), line);
+      }
+    }
+    if (guides.contains(MonitorGuide.safe)) {
+      for (final (inset, alpha) in const [(0.035, 0.55), (0.05, 0.35)]) {
+        canvas.drawRect(
+          Rect.fromLTRB(w * inset, h * inset, w * (1 - inset), h * (1 - inset)),
+          Paint()
+            ..color = Colors.amberAccent.withValues(alpha: alpha)
+            ..strokeWidth = 1
+            ..style = PaintingStyle.stroke,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GuidesPainter old) => !setEquals(old.guides, guides);
 }
