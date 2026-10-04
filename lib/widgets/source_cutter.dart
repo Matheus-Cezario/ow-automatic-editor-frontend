@@ -75,6 +75,8 @@ class _SourceCutterState extends State<SourceCutter> {
   final _focus = FocusNode(debugLabel: 'source-cutter');
   final _nameFocus = FocusNode(debugLabel: 'cut-name');
   final _name = TextEditingController();
+  final _lengthFocus = FocusNode(debugLabel: 'cut-length');
+  final _length = TextEditingController(text: '3.0');
 
   double _pos = 0;
   late double _in = 0;
@@ -86,6 +88,9 @@ class _SourceCutterState extends State<SourceCutter> {
   late double _winLen = math.min(30, math.max(widget.durationS, 1));
 
   bool _playing = false;
+
+  /// Playing only the cut, from IN to OUT and around again.
+  bool _loopCut = false;
   Timer? _clock;
   String? _added;
 
@@ -124,6 +129,8 @@ class _SourceCutterState extends State<SourceCutter> {
     _focus.dispose();
     _nameFocus.dispose();
     _name.dispose();
+    _lengthFocus.dispose();
+    _length.dispose();
     super.dispose();
   }
 
@@ -154,7 +161,10 @@ class _SourceCutterState extends State<SourceCutter> {
     if (_playing) {
       _clock?.cancel();
       _c?.pause();
-      setState(() => _playing = false);
+      setState(() {
+        _playing = false;
+        _loopCut = false;
+      });
       return;
     }
     _c?.play();
@@ -164,6 +174,10 @@ class _SourceCutterState extends State<SourceCutter> {
       final now = c != null && c.value.isInitialized
           ? c.value.position.inMilliseconds / 1000
           : _pos + 0.05;
+      if (_loopCut && now >= _out) {
+        _seek(_in, keepWindow: true);
+        return;
+      }
       if (now >= _duration) {
         _togglePlay();
         return;
@@ -174,6 +188,18 @@ class _SourceCutterState extends State<SourceCutter> {
         _reveal(now);
       });
     });
+  }
+
+  /// Plays just the cut, looping, until paused.
+  void _togglePlayCut() {
+    if (_playing) {
+      final wasCut = _loopCut;
+      _togglePlay();
+      if (wasCut) return;
+    }
+    _seek(_in);
+    setState(() => _loopCut = true);
+    _togglePlay();
   }
 
   void _pause() {
@@ -189,6 +215,7 @@ class _SourceCutterState extends State<SourceCutter> {
       _in = v;
       if (_play != null && _play! < v) _play = null;
     });
+    _syncLength();
     _seek(v, keepWindow: true);
   }
 
@@ -199,7 +226,58 @@ class _SourceCutterState extends State<SourceCutter> {
       _out = v;
       if (_play != null && _play! > v) _play = null;
     });
+    _syncLength();
     _seek(v, keepWindow: true);
+  }
+
+  /// Slides the whole cut, keeping its length; the picture shows its start.
+  void _moveRange(double t) {
+    _pause();
+    final len = _out - _in;
+    final to = t.clamp(0.0, math.max(0.0, _duration - len)).toDouble();
+    final delta = to - _in;
+    setState(() {
+      _in = to;
+      _out = to + len;
+      if (_play != null) _play = _play! + delta;
+    });
+    _seek(to, keepWindow: true);
+  }
+
+  /// Sets how long the cut is: the end moves, unless it would run past the
+  /// recording — then the start gives way.
+  void _setLength(double len) {
+    _pause();
+    final l = len.clamp(_minCut, _duration).toDouble();
+    setState(() {
+      _out = _in + l;
+      if (_out > _duration) {
+        _out = _duration;
+        _in = _duration - l;
+      }
+      if (_play != null && (_play! < _in || _play! > _out)) _play = null;
+    });
+    // the shortcuts live on the cutter; an unfocused field would leave
+    // focus above it
+    _focus.requestFocus();
+    _syncLength(force: true);
+    _seek(_in, keepWindow: true);
+  }
+
+  void _applyLengthText() {
+    final l = double.tryParse(_length.text.replaceAll(',', '.'));
+    if (l != null && (l - (_out - _in)).abs() > 1e-6) {
+      _setLength(l);
+    } else {
+      _focus.requestFocus();
+      _syncLength(force: true);
+    }
+  }
+
+  void _syncLength({bool force = false}) {
+    if (force || !_lengthFocus.hasFocus) {
+      _length.text = (_out - _in).toStringAsFixed(1);
+    }
   }
 
   /// I past the OUT line carries the cut along, keeping its length.
@@ -233,17 +311,22 @@ class _SourceCutterState extends State<SourceCutter> {
           : 'Added "${span.name.trim()}" to the timeline.';
       _name.clear();
     });
+    _focus.requestFocus();
   }
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     // typing the name is typing, not shortcuts
-    if (_nameFocus.hasFocus) return KeyEventResult.ignored;
+    if (_nameFocus.hasFocus || _lengthFocus.hasFocus) {
+      return KeyEventResult.ignored;
+    }
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     final k = e.logicalKey;
     void Function()? act;
-    if (k == LogicalKeyboardKey.space) act = _togglePlay;
+    if (k == LogicalKeyboardKey.space) {
+      act = HardwareKeyboard.instance.isShiftPressed ? _togglePlayCut : _togglePlay;
+    }
     if (k == LogicalKeyboardKey.arrowLeft) act = () => _seek(_pos - 1);
     if (k == LogicalKeyboardKey.arrowRight) act = () => _seek(_pos + 1);
     if (k == LogicalKeyboardKey.comma) act = () => _seek(_pos - _frame);
@@ -277,7 +360,7 @@ class _SourceCutterState extends State<SourceCutter> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'drag IN and OUT · I / O / P · Space · ← → · , .',
+                    'drag IN, OUT or the bar between · I / O / P · Space · Shift+Space plays the cut · ← → · , .',
                     textAlign: TextAlign.right,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -329,18 +412,31 @@ class _SourceCutterState extends State<SourceCutter> {
                   onPressed: () => _seek(_pos + _frame),
                   icon: const Icon(Icons.chevron_right),
                 ),
+                const SizedBox(width: 4),
+                OutlinedButton.icon(
+                  key: const Key('cutter-play-cut'),
+                  onPressed: _togglePlayCut,
+                  icon: Icon(
+                    _playing && _loopCut ? Icons.stop : Icons.repeat,
+                    size: 18,
+                  ),
+                  label: Text(_playing && _loopCut ? 'Stop' : 'Play the cut'),
+                ),
                 const SizedBox(width: 8),
-                Text(
-                  '${_clockOf(_pos)} / ${_clockOf(widget.durationS)}',
-                  key: const Key('cutter-clock'),
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                Expanded(
+                  child: Text(
+                    '${_clockOf(_pos)} / ${_clockOf(widget.durationS)}',
+                    key: const Key('cutter-clock'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
-                const Spacer(),
                 const Icon(Icons.zoom_out, size: 18),
                 SizedBox(
-                  width: 160,
+                  width: 120,
                   child: Slider(
                     key: const Key('cutter-zoom'),
                     // the detail window, on a log scale: 5 s to the whole match
@@ -383,6 +479,7 @@ class _SourceCutterState extends State<SourceCutter> {
               },
               onIn: _setIn,
               onOut: _setOut,
+              onMove: _moveRange,
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -404,9 +501,39 @@ class _SourceCutterState extends State<SourceCutter> {
                       hintText: 'e.g. the flank on B',
                     ),
                     onSubmitted: (_) => _add(),
-                    onTapOutside: (_) => _nameFocus.unfocus(),
+                    onTapOutside: (_) {
+                      if (_nameFocus.hasFocus) _focus.requestFocus();
+                    },
                   ),
                 ),
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    key: const Key('cut-length'),
+                    controller: _length,
+                    focusNode: _lengthFocus,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Length',
+                      suffixText: 's',
+                    ),
+                    onSubmitted: (_) => _applyLengthText(),
+                    // clicking away keeps what was typed, like Enter
+                    onTapOutside: (_) {
+                      if (_lengthFocus.hasFocus) _applyLengthText();
+                    },
+                  ),
+                ),
+                for (final l in const [3.0, 5.0, 10.0])
+                  ActionChip(
+                    key: ValueKey('cut-length-$l'),
+                    label: Text('${l.round()} s'),
+                    onPressed: () => _setLength(l),
+                  ),
                 ActionChip(
                   key: const Key('cutter-mark-play'),
                   avatar: const Icon(Icons.adjust, size: 16),
@@ -589,6 +716,7 @@ class _Strip extends StatelessWidget {
     required this.onSeek,
     required this.onIn,
     required this.onOut,
+    required this.onMove,
   });
 
   final double winStart, winLen, inS, outS, pos;
@@ -597,6 +725,9 @@ class _Strip extends StatelessWidget {
   final ValueChanged<double> onSeek;
   final ValueChanged<double> onIn;
   final ValueChanged<double> onOut;
+
+  /// The whole cut slid to start here.
+  final ValueChanged<double> onMove;
 
   static const height = 86.0;
 
@@ -687,6 +818,32 @@ class _Strip extends StatelessWidget {
                   child: ColoredBox(color: theme.colorScheme.error),
                 ),
               ),
+              // the bar between the lines carries the whole cut
+              if (x(outS) > 0 && x(inS) < w)
+                Positioned(
+                  left: x(inS),
+                  width: math.max(0.0, x(outS) - x(inS)),
+                  top: 28,
+                  height: 22,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.grab,
+                    child: _HandleDrag(
+                      key: const Key('cutter-range'),
+                      t: inS,
+                      secondsPerPixel: winLen / w,
+                      onMove: onMove,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.tertiary.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Center(
+                          child: Icon(Icons.drag_handle, size: 16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               handle('IN', inS, onIn, const Key('cutter-in')),
               handle('OUT', outS, onOut, const Key('cutter-out')),
             ],

@@ -169,5 +169,104 @@ void main() {
       await key(tester, LogicalKeyboardKey.keyI);
       expect(spanText(tester), '00:10.0 → 00:13.0 · 3.0 s');
     });
+
+    testWidgets('the bar between the lines slides the whole cut', (
+      tester,
+    ) async {
+      await pump(tester);
+      final strip = tester.getSize(find.byKey(const Key('cutter-strip')));
+      // 30 s on screen: a fifth of it is 6 s
+      await tester.drag(
+        find.byKey(const Key('cutter-range')),
+        Offset(strip.width / 5, 0),
+      );
+      await tester.pump();
+      final m = RegExp(r'([\d:.]+) → ([\d:.]+) · ([\d.]+) s')
+          .firstMatch(spanText(tester))!;
+      expect(m.group(3), '3.0', reason: 'the length is kept');
+      expect(double.parse(m.group(1)!.split(':').last), closeTo(6.0, 0.2));
+    });
+
+    testWidgets('the cut cannot slide past the recording', (tester) async {
+      await pump(tester);
+      await tester.drag(
+        find.byKey(const Key('cutter-range')),
+        const Offset(-300, 0),
+      );
+      await tester.pump();
+      expect(spanText(tester), '00:00.0 → 00:03.0 · 3.0 s');
+    });
+
+    testWidgets('the length is typed or picked', (tester) async {
+      await pump(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight, 10);
+      await key(tester, LogicalKeyboardKey.keyI); // 10 → 13
+      await tester.enterText(find.byKey(const Key('cut-length')), '7,5');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(spanText(tester), '00:10.0 → 00:17.5 · 7.5 s');
+
+      await tester.tap(find.byKey(const ValueKey('cut-length-5.0')));
+      await tester.pump();
+      expect(spanText(tester), '00:10.0 → 00:15.0 · 5.0 s');
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('cut-length'))).controller!.text,
+        '5.0',
+      );
+
+      // dragging a line keeps the field honest
+      await key(tester, LogicalKeyboardKey.arrowRight, 10); // 20 s
+      await key(tester, LogicalKeyboardKey.keyO);
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('cut-length'))).controller!.text,
+        '10.0',
+      );
+    });
+
+    testWidgets('a length past the end of the recording moves the start', (
+      tester,
+    ) async {
+      final added = <SourceSpan>[];
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SourceCutter(videoUrl: null, durationS: 8, onAdd: added.add),
+          ),
+        ),
+      );
+      await tester.pump();
+      await key(tester, LogicalKeyboardKey.arrowRight, 6);
+      await key(tester, LogicalKeyboardKey.keyI); // 6 → 8 (clamped)
+      await tester.tap(find.byKey(const ValueKey('cut-length-5.0')));
+      await tester.pump();
+      expect(spanText(tester), '00:03.0 → 00:08.0 · 5.0 s');
+    });
+
+    testWidgets('playing the cut loops between the lines', (tester) async {
+      await pump(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight, 20); // away from it
+      await tester.tap(find.byKey(const Key('cutter-play-cut')));
+      await tester.pump();
+      expect(find.text('Stop'), findsOneWidget);
+
+      String clock() =>
+          tester.widget<Text>(find.byKey(const Key('cutter-clock'))).data!;
+      expect(clock(), startsWith('00:00.0'), reason: 'starts at IN');
+
+      // 3 s of cut, then 1 s more: back near the start, never past OUT
+      var latest = 0.0;
+      for (var i = 0; i < 80; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        latest = double.parse(clock().split(' ').first.split(':').last);
+        expect(latest, lessThanOrEqualTo(3.0));
+      }
+      expect(latest, lessThan(1.5));
+
+      await tester.tap(find.byKey(const Key('cutter-play-cut')));
+      await tester.pump();
+      expect(find.text('Play the cut'), findsOneWidget);
+    });
   });
 }
