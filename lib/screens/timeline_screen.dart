@@ -22,6 +22,7 @@ import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
 import '../widgets/source_viewer.dart';
+import '../zoom.dart';
 
 /// Building the video by hand: listening to the song and placing each moment
 /// wherever you want.
@@ -1269,6 +1270,43 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   /// Keeps the playhead on screen while the video runs.
+  /// Changes the zoom keeping [anchorS] where it is on screen — the instant
+  /// under the mouse for Ctrl+scroll, the playhead otherwise.
+  void _setZoom(double px, {double? anchorS, double? anchorDx}) {
+    final next = clampZoom(px);
+    if (next == _px) return;
+    var at = anchorS, dx = anchorDx;
+    if (at == null || dx == null) {
+      at = _cursor;
+      if (_scroll.hasClients) {
+        final window = _scroll.position.viewportDimension;
+        final x = _cursor * _px - _scroll.offset;
+        // the playhead stays where it is if it is on screen; brought to a
+        // third of the window if not
+        dx = x >= 0 && x <= window ? x : window / 3;
+      } else {
+        dx = 0;
+      }
+    }
+    setState(() => _px = next);
+    final offset = anchoredOffset(at, dx, next);
+    // the ruler's new width is only known after the next layout
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      _scroll.jumpTo(offset.clamp(0.0, _scroll.position.maxScrollExtent));
+    });
+  }
+
+  /// The whole montage in the window.
+  void _zoomToFit() {
+    if (!_scroll.hasClients) return;
+    final window = _scroll.position.viewportDimension;
+    setState(() => _px = fitZoom(videoDuration(_state.clips), window));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.jumpTo(0);
+    });
+  }
+
   void _followCursor(double t) {
     if (!_scroll.hasClients) return;
     final x = t * _px;
@@ -1752,6 +1790,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SingleActivator(LogicalKeyboardKey.keyJ): () =>
           _goTo(_cursor - 2),
       const SingleActivator(LogicalKeyboardKey.keyS): _splitAtCursor,
+      const SingleActivator(LogicalKeyboardKey.equal): () =>
+          _setZoom(_px * kZoomStep),
+      const SingleActivator(LogicalKeyboardKey.minus): () =>
+          _setZoom(_px / kZoomStep),
+      const SingleActivator(LogicalKeyboardKey.backslash): _zoomToFit,
       const SingleActivator(LogicalKeyboardKey.keyS, shift: true): () =>
           _splitAtCursor(everyLayer: true),
       const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
@@ -1952,6 +1995,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('Shift + ← →', 'nudge the selected cuts'),
               _Shortcut('S', 'split the cut under the cursor'),
               _Shortcut('Shift + S', 'split every layer at the cursor'),
+              _Shortcut('= / -', 'zoom the ruler in / out'),
+              _Shortcut('\\', 'fit the whole montage'),
               _Shortcut('Shift + Delete', 'delete and close the gap'),
               _Shortcut('drag on an empty track', 'select with a rectangle'),
               _Shortcut('M', 'align the selected block\'s play to the cursor'),
@@ -2253,14 +2298,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           : null,
                       icon: const Icon(Icons.layers_clear_outlined),
                     ),
+                    IconButton(
+                      key: const Key('zoom-fit'),
+                      tooltip: 'Fit the whole montage (\\)',
+                      onPressed: _zoomToFit,
+                      icon: const Icon(Icons.fit_screen_outlined),
+                    ),
                     const Icon(Icons.zoom_out, size: 18),
                     SizedBox(
                       width: 120,
                       child: Slider(
-                        value: _px,
-                        min: 20,
-                        max: 220,
-                        onChanged: (v) => setState(() => _px = v),
+                        key: const Key('zoom-slider'),
+                        value: zoomToSlider(_px),
+                        onChanged: (v) => _setZoom(sliderToZoom(v)),
                       ),
                     ),
                     const Icon(Icons.zoom_in, size: 18),
