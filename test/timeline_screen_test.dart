@@ -2043,6 +2043,99 @@ void main() {
     List<Layer> layersOf(WidgetTester tester) =>
         tester.widget<MusicTimeline>(find.byType(MusicTimeline)).layers;
 
+    testWidgets('a multi-selection goes up a layer together, gaps kept', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await cursorAt(tester, 6);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final before = cutList(tester)..sort((a, b) => a.atS.compareTo(b.atS));
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+
+      // no layer above: dragging up opens one, as it does for a single clip
+      await tester.drag(
+        find.byKey(ValueKey('block-${before.first.id}')),
+        const Offset(0, -MusicTimeline.blockHeight),
+      );
+      await settle(tester);
+
+      final layerList = layersOf(tester);
+      expect(layerList, hasLength(2));
+      expect(layerList[0].clips, isEmpty);
+      final moved = [...layerList[1].clips]
+        ..sort((a, b) => a.atS.compareTo(b.atS));
+      expect([for (final c in moved) c.id], [for (final c in before) c.id]);
+      expect(
+        moved[1].atS - moved[0].atS,
+        closeTo(before[1].atS - before[0].atS, 1e-6),
+      );
+    });
+
+    testWidgets('Alt+Up and Alt+Down move the selection between layers', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+      final id = cutList(tester).single.id;
+      await tester.tap(find.byKey(ValueKey('block-$id')));
+      await tester.pump();
+
+      Future<void> alt(LogicalKeyboardKey k) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyEvent(k);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        await tester.pump();
+      }
+
+      await alt(LogicalKeyboardKey.arrowUp);
+      expect(layersOf(tester)[1].clips.single.id, id);
+      await alt(LogicalKeyboardKey.arrowDown);
+      expect(layersOf(tester)[0].clips.single.id, id);
+      // nothing below the bottom layer: it stays, and says why
+      await alt(LogicalKeyboardKey.arrowDown);
+      expect(layersOf(tester)[0].clips.single.id, id);
+      expect(find.text('There is no layer there.'), findsOneWidget);
+    });
+
+    testWidgets('dragging one of a multi-selection sideways moves them all', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await cursorAt(tester, 6);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await cursorAt(tester, 15); // the playhead out of the magnet's way
+      final before = cutList(tester)..sort((a, b) => a.atS.compareTo(b.atS));
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+
+      await tester.drag(
+        find.byKey(ValueKey('block-${before.first.id}')),
+        const Offset(2 * px + eatenBySlop, 0),
+      );
+      await settle(tester);
+
+      final after = {for (final c in cutList(tester)) c.id: c.atS};
+      final shift = after[before[0].id]! - before[0].atS;
+      expect(shift, greaterThan(1));
+      expect(after[before[1].id]! - before[1].atS, closeTo(shift, 1e-6));
+    });
+
     testWidgets('a drag that starts sideways can still change layer', (
       tester,
     ) async {

@@ -322,8 +322,41 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (at != _snapGuide) setState(() => _snapGuide = at);
   }
 
+  /// Is [id] one of several selected clips? Then a drag on it carries them all.
+  bool _inGroup(String id) =>
+      _state.selectionIds.length > 1 && _state.selectionIds.contains(id);
+
   void _move(String id, double atS) {
+    if (_inGroup(id)) {
+      _moveGroup(id, atS);
+      return;
+    }
     _edit(moveBlock(_state, id, atS, beats: _magnetFor(id), snap: _magnet));
+    _guideFor(id);
+  }
+
+  /// The selection follows the dragged clip, keeping its spacing; the magnet
+  /// works on the dragged clip, and nothing in the group goes before zero.
+  void _moveGroup(String id, double atS) {
+    final clip = _state.clipItem(id);
+    if (clip == null) return;
+    final landing = snapMove(
+      clip,
+      atS,
+      beats: magnetPoints(
+        _state,
+        moving: _state.selectionIds,
+        beats: _beats,
+        playheadS: _cursor,
+      ),
+      snap: _magnet,
+    );
+    final first = _state.selectedClips
+        .map((c) => c.atS)
+        .reduce(math.min);
+    final delta = math.max(landing - clip.atS, -first);
+    if (delta.abs() < 1e-9) return;
+    _edit(moveSelection(_state, delta, beats: const [], snap: false));
     _guideFor(id);
   }
 
@@ -906,6 +939,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   void _dropClip(String id, double fromS, double atS, int destination) {
     final location = _state.locate(id);
     if (location == null) return;
+    if (_inGroup(id)) {
+      _shiftSelection(destination - location.$1);
+      return;
+    }
     final origin = _state.layers[location.$1];
     var base = _state;
     if (destination >= base.layers.length && !origin.isAudio) {
@@ -948,6 +985,29 @@ class _TimelineScreenState extends State<TimelineScreen> {
       return;
     }
     _edit(updated);
+  }
+
+  /// The selection, whole, [shift] layers up (down when negative): each
+  /// clip the same number of layers, at the same instant. A group let go on
+  /// another track comes here — across time it already moved with the drag —
+  /// and so do Alt+↑ / Alt+↓.
+  void _shiftSelection(int shift) {
+    if (shift == 0 || _state.selectionIds.isEmpty) return;
+    var base = _state;
+    // going up past the top opens layers for the pictures, as a single clip does
+    final top = base.selectedClips
+        .map((c) => base.locate(c.id)!.$1 + shift)
+        .reduce(math.max);
+    final pictures = base.selectedClips.every((c) => !_isAudioClip(c.id));
+    while (pictures && top >= base.layers.length) {
+      base = addLayer(base).copyWith(selectionIds: base.selectionIds);
+    }
+    final refusal = selectionLayerRefusal(base, shift);
+    if (refusal != null) {
+      _notify(refusal);
+      return;
+    }
+    _edit(moveSelectionToLayers(base, shift));
   }
 
   /// The text clips the monitor draws over the picture.
@@ -1905,6 +1965,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _push(-0.1),
       const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
           _push(0.1),
+      const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): () =>
+          _shiftSelection(1),
+      const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): () =>
+          _shiftSelection(-1),
       const SingleActivator(LogicalKeyboardKey.bracketLeft): () =>
           _trimAtCursor(startTime: true),
       const SingleActivator(LogicalKeyboardKey.bracketRight): () =>
@@ -2087,6 +2151,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('← →', 'move the playhead (1s)'),
               _Shortcut(', / .', 'step one frame'),
               _Shortcut('Shift + ← →', 'nudge the selected cuts'),
+              _Shortcut('Alt + ↑ ↓', 'move the selected cuts a layer up / down'),
               _Shortcut('S', 'split the cut under the cursor'),
               _Shortcut('Shift + S', 'split every layer at the cursor'),
               _Shortcut('= / -', 'zoom the ruler in / out'),

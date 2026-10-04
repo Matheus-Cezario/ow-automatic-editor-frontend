@@ -1385,6 +1385,64 @@ MontageState moveToLayer(MontageState s, String id, int destination) {
   return s.copyWith(layers: list, activeLayer: destination);
 }
 
+/// Why a selection cannot go [shift] layers up — or `null` when it can.
+///
+/// The reasons are the single clip's: no layer there, sound and pictures,
+/// a locked layer, something already in the way.
+String? selectionLayerRefusal(MontageState s, int shift) {
+  for (final c in s.selectedClips) {
+    final (origin, _) = s.locate(c.id)!;
+    final to = origin + shift;
+    if (to < 0 || to >= s.layers.length) return 'There is no layer there.';
+    final target = s.layers[to];
+    if (target.isAudio != s.layers[origin].isAudio) {
+      return s.layers[origin].isAudio
+          ? 'Music only goes on a sound layer.'
+          : 'This is a sound layer: pictures do not go in it.';
+    }
+    if (target.locked) return 'The layer "${target.name}" is locked.';
+    final staying = [
+      for (final o in target.clips)
+        if (!s.selectionIds.contains(o.id)) o,
+    ];
+    if (!fits(staying, c.atS, c.durationS)) {
+      return 'Something is in the way on the other layer.';
+    }
+  }
+  return null;
+}
+
+/// The whole selection, [shift] layers up (down when negative), every clip
+/// at the same instant and the same distance apart. All of it moves or none
+/// of it does — see [selectionLayerRefusal].
+MontageState moveSelectionToLayers(MontageState s, int shift) {
+  if (shift == 0 || s.selectionIds.isEmpty) return s;
+  if (selectionLayerRefusal(s, shift) != null) return s;
+  final moving = <int, List<TimelineClip>>{};
+  final list = [...s.layers];
+  for (final (i, l) in s.layers.indexed) {
+    final going = [
+      for (final c in l.clips)
+        if (s.selectionIds.contains(c.id)) c,
+    ];
+    if (going.isEmpty) continue;
+    moving[i + shift] = going;
+    list[i] = l.copyWith(
+      clips: [
+        for (final c in l.clips)
+          if (!s.selectionIds.contains(c.id)) c,
+      ],
+    );
+  }
+  for (final MapEntry(key: to, value: clips) in moving.entries) {
+    list[to] = list[to].copyWith(clips: [...list[to].clips, ...clips]);
+  }
+  return s.copyWith(
+    layers: list,
+    activeLayer: (s.activeLayer + shift).clamp(0, list.length - 1),
+  );
+}
+
 /// Where a dragged clip lands when it is let go: at [atS] on layer
 /// [destination], having left [fromS] — where the drag started.
 ///
