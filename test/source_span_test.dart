@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ow_editor/montage.dart';
 import 'package:ow_editor/widgets/music_timeline.dart';
-import 'package:ow_editor/widgets/source_viewer.dart';
+import 'package:ow_editor/widgets/source_cutter.dart';
 
 /// Cutting by hand from the whole recording.
 void main() {
@@ -33,6 +33,17 @@ void main() {
       expect(c.sourceT, 0);
     });
 
+    test('its name becomes the clip\'s name', () {
+      final c = spanClip(
+        const SourceSpan(inS: 1, outS: 3, name: '  ace on A  '),
+        atS: 0,
+      );
+      expect(c.label, 'ace on A');
+      expect(c.toJson()['label'], 'ace on A');
+      expect(spanClip(const SourceSpan(inS: 1, outS: 3), atS: 0).toJson(),
+          isNot(contains('label')));
+    });
+
     test('too short is not a stretch', () {
       expect(const SourceSpan(inS: 1, outS: 1.01).isValid, isFalse);
     });
@@ -45,24 +56,23 @@ void main() {
     });
   });
 
-  group('the source viewer', () {
+  group('the source cutter', () {
     Future<List<SourceSpan>> pump(WidgetTester tester) async {
       final added = <SourceSpan>[];
-      await tester.binding.setSurfaceSize(const Size(400, 900));
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
-              child: SourceViewer(
-                videoUrl: null,
-                durationS: 600,
-                onAdd: added.add,
-              ),
+            body: SourceCutter(
+              videoUrl: null,
+              durationS: 600,
+              onAdd: added.add,
             ),
           ),
         ),
       );
+      await tester.pump();
       return added;
     }
 
@@ -77,51 +87,87 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('in, out and play from the keyboard, then add', (tester) async {
-      final added = await pump(tester);
-      await tester.tap(find.byKey(const Key('source-clock')));
-      await tester.pump();
+    String spanText(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const Key('cutter-span'))).data!;
 
+    testWidgets('starts as a short cut where the recording begins', (
+      tester,
+    ) async {
+      await pump(tester);
+      expect(spanText(tester), '00:00.0 → 00:03.0 · 3.0 s');
+    });
+
+    testWidgets('in, out and play from the keyboard, named, then added', (
+      tester,
+    ) async {
+      final added = await pump(tester);
       await key(tester, LogicalKeyboardKey.arrowRight, 2); // 2 s
       await key(tester, LogicalKeyboardKey.keyI);
-      await key(tester, LogicalKeyboardKey.arrowRight, 3); // 5 s
+      await key(tester, LogicalKeyboardKey.arrowRight, 4); // 6 s
       await key(tester, LogicalKeyboardKey.keyO);
-      await key(tester, LogicalKeyboardKey.arrowLeft); // 4 s
+      await key(tester, LogicalKeyboardKey.arrowLeft); // 5 s
       await key(tester, LogicalKeyboardKey.keyP);
+      expect(spanText(tester), '00:02.0 → 00:06.0 · 4.0 s');
 
-      expect(find.text('3.0 s from the recording'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('add-span')));
+      await tester.enterText(find.byKey(const Key('cut-name')), 'flank on B');
+      await tester.tap(find.byKey(const Key('cutter-add')));
       await tester.pump();
 
       final span = added.single;
-      expect((span.inS, span.outS, span.playS), (2.0, 5.0, 4.0));
-    });
-
-    testWidgets('nothing to add until both ends are marked', (tester) async {
-      await pump(tester);
-      final add = tester.widget<FilledButton>(
-        find.byKey(const Key('add-span')),
-      );
-      expect(add.onPressed, isNull);
-      await tester.tap(find.byKey(const Key('mark-in')));
-      await tester.pump();
       expect(
-        tester
-            .widget<FilledButton>(find.byKey(const Key('add-span')))
-            .onPressed,
-        isNull,
+        (span.inS, span.outS, span.playS, span.name),
+        (2.0, 6.0, 5.0, 'flank on B'),
+      );
+      expect(find.text('Added "flank on B" to the timeline.'), findsOneWidget);
+      // ready for the next cut
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('cut-name'))).controller!.text,
+        isEmpty,
       );
     });
 
-    testWidgets('an out before the in starts the stretch over', (tester) async {
+    testWidgets('typing the name is not a shortcut', (tester) async {
       await pump(tester);
-      await tester.tap(find.byKey(const Key('source-clock')));
-      await key(tester, LogicalKeyboardKey.arrowRight, 5);
-      await key(tester, LogicalKeyboardKey.keyI); // in at 5
-      await key(tester, LogicalKeyboardKey.arrowLeft, 3);
-      await key(tester, LogicalKeyboardKey.keyO); // out at 2: before the in
-      expect(find.textContaining('In ('), findsOneWidget, reason: 'in cleared');
-      expect(find.text('Out 00:02'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('cut-name')));
+      await tester.pump();
+      await key(tester, LogicalKeyboardKey.keyO);
+      expect(spanText(tester), '00:00.0 → 00:03.0 · 3.0 s');
+    });
+
+    testWidgets('dragging the OUT line moves the end of the cut', (
+      tester,
+    ) async {
+      await pump(tester);
+      final strip = tester.getSize(find.byKey(const Key('cutter-strip')));
+      // the strip shows 30 s: this many pixels are 3 s
+      final threeSeconds = strip.width / 10;
+      await tester.drag(
+        find.byKey(const Key('cutter-out')),
+        Offset(threeSeconds, 0),
+      );
+      await tester.pump();
+      final out = double.parse(
+        RegExp(r'· ([\d.]+) s').firstMatch(spanText(tester))!.group(1)!,
+      );
+      expect(out, closeTo(6.0, 0.2));
+    });
+
+    testWidgets('the lines never cross', (tester) async {
+      await pump(tester);
+      final strip = tester.getSize(find.byKey(const Key('cutter-strip')));
+      await tester.drag(
+        find.byKey(const Key('cutter-in')),
+        Offset(strip.width / 2, 0),
+      );
+      await tester.pump();
+      expect(spanText(tester), '00:02.8 → 00:03.0 · 0.2 s');
+    });
+
+    testWidgets('an IN past the end carries the cut along', (tester) async {
+      await pump(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight, 10);
+      await key(tester, LogicalKeyboardKey.keyI);
+      expect(spanText(tester), '00:10.0 → 00:13.0 · 3.0 s');
     });
   });
 }

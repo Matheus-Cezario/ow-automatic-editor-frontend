@@ -1677,54 +1677,43 @@ void main() {
       expect(cutList(tester).single.atS, closeTo(4.0, 0.2));
     });
 
-    testWidgets('a stretch marked on the recording drops onto the ruler', (
+    testWidgets('a cut made in the recording window goes in at the playhead', (
       tester,
     ) async {
       await open(tester);
       await tab(tester, 'Source');
-      await tester.tap(find.byKey(const Key('source-clock')));
-      await tester.pump();
-      for (final k in [
-        LogicalKeyboardKey.arrowRight,
-        LogicalKeyboardKey.keyI,
-        LogicalKeyboardKey.arrowRight,
-        LogicalKeyboardKey.arrowRight,
-        LogicalKeyboardKey.keyO,
-      ]) {
-        await tester.sendKeyEvent(k);
-        await tester.pump();
-      }
+      await tester.tap(find.byKey(const Key('open-source-cutter')));
+      await settle(tester);
+      expect(find.byKey(const Key('source-cutter')), findsOneWidget);
 
-      await dragOnto(tester, find.byIcon(Icons.drag_indicator).first, 3.0);
-
-      final c = cutList(tester).single;
-      expect((c.kind, c.startS, c.durationS), ('custom', 1.0, 2.0));
-      expect(c.atS, closeTo(3.0, 0.2));
-    });
-
-    testWidgets('a stretch marked on the recording goes in at the playhead', (
-      tester,
-    ) async {
-      await open(tester);
-      await tab(tester, 'Source');
-      await tester.tap(find.byKey(const Key('mark-in')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('source-clock')));
       for (var i = 0; i < 4; i++) {
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       }
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
       await tester.pump();
-      await tester.tap(find.byKey(const Key('mark-out')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('add-span')));
+      await tester.enterText(find.byKey(const Key('cut-name')), 'the opener');
+      await tester.tap(find.byKey(const Key('cutter-add')));
       await tester.pump();
 
-      final c = cutList(tester).single;
-      expect((c.kind, c.startS, c.durationS, c.atS), ('custom', 0.0, 4.0, 0.0));
+      // a second one follows the first
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+      await tester.tap(find.byKey(const Key('cutter-add')));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('close-source-cutter')));
+      await settle(tester);
+      expect(find.byKey(const Key('source-cutter')), findsNothing);
+
+      final cuts = cutList(tester);
+      expect(cuts, hasLength(2));
+      final first = cuts.firstWhere((c) => c.label == 'the opener');
       expect(
-        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).selectionIds,
-        {c.id},
+        (first.kind, first.startS, first.durationS, first.atS),
+        ('custom', 0.0, 4.0, 0.0),
       );
+      final second = cuts.firstWhere((c) => c.label.isEmpty);
+      expect(second.atS, closeTo(4.0, 0.05));
+      expect(find.text('the opener'), findsWidgets, reason: 'named on the ruler');
     });
 
     testWidgets('the playhead does not move with the drag', (

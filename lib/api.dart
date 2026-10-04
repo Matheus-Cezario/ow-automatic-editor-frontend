@@ -782,6 +782,7 @@ class TimelineClip {
     this.text = '',
     this.textStyle = const ClipTextStyle(),
     this.transition,
+    this.label = '',
   });
 
   /// Identity of the block **inside the editor**. It does not go to the server
@@ -838,6 +839,10 @@ class TimelineClip {
   /// Freezes instead of running. The duration is still the block's.
   final bool freeze;
   final bool reverse;
+
+  /// The name the user gave the clip — shown on the ruler, never drawn in
+  /// the video.
+  final String label;
 
   /// What is written, when [source] is `text`.
   final String text;
@@ -942,6 +947,7 @@ class TimelineClip {
     ClipTextStyle? textStyle,
     ClipTransition? transition,
     bool clearTransition = false,
+    String? label,
   }) => TimelineClip(
     sourceT: sourceT ?? this.sourceT,
     startS: startS ?? this.startS,
@@ -963,6 +969,7 @@ class TimelineClip {
     text: text ?? this.text,
     textStyle: textStyle ?? this.textStyle,
     transition: clearTransition ? null : transition ?? this.transition,
+    label: label ?? this.label,
   );
 
   /// The `id` does not come from the server: it is assigned on load, by
@@ -975,6 +982,7 @@ class TimelineClip {
     kind: j['kind'] as String? ?? '',
     source: j['source'] as String? ?? 'recording',
     mediaId: j['media_id'] as String?,
+    label: j['label'] as String? ?? '',
     transform: ClipTransform.fromJson(
       (j['transform'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
@@ -1028,6 +1036,7 @@ class TimelineClip {
     if (isText) 'text': text,
     if (isText) 'text_style': textStyle.toJson(),
     if (transition != null) 'transition': transition!.toJsonFor(durationS),
+    if (label.isNotEmpty) 'label': label,
   };
 }
 

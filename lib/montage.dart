@@ -162,11 +162,19 @@ TimelineClip cutForMoment(
 /// where it starts, where it ends and, optionally, where its play is — the
 /// instant that ducking and "Ramp into the play" work around.
 class SourceSpan {
-  const SourceSpan({required this.inS, required this.outS, this.playS});
+  const SourceSpan({
+    required this.inS,
+    required this.outS,
+    this.playS,
+    this.name = '',
+  });
 
   final double inS;
   final double outS;
   final double? playS;
+
+  /// The name the user gave the cut — what its block says on the ruler.
+  final String name;
 
   double get lengthS => outS - inS;
 
@@ -185,6 +193,7 @@ TimelineClip spanClip(SourceSpan span, {required double atS}) {
     startS: span.inS,
     durationS: span.lengthS,
     sourceT: hasPlay ? play : 0,
+    label: span.name.trim(),
   );
 }
 

@@ -21,7 +21,7 @@ import '../widgets/motion_panel.dart';
 import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
-import '../widgets/source_viewer.dart';
+import '../widgets/source_cutter.dart';
 import '../zoom.dart';
 
 /// Building the video by hand: listening to the song and placing each moment
@@ -2147,13 +2147,45 @@ class _TimelineScreenState extends State<TimelineScreen> {
   );
 
   /// The whole recording, to cut by hand what the analysis did not find.
-  Widget _recordingPanel() => SourceViewer(
+  ///
+  /// The cutting itself happens in a large window: choosing a frame needs a
+  /// picture bigger than a sidebar.
+  Widget _recordingPanel() {
+    final theme = Theme.of(context);
+    return Column(
+      key: const Key('recording-panel'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Cut from the recording', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(
+          'Find what the analysis missed: drag the start and end lines over '
+          'the match, name the cut and add it at the playhead.',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.tonalIcon(
+          key: const Key('open-source-cutter'),
+          onPressed: _sending ? null : _openSourceCutter,
+          icon: const Icon(Icons.content_cut),
+          label: const Text('Open the recording'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openSourceCutter() => openSourceCutter(
+    context,
     videoUrl: widget.job.monitorUrl,
     durationS: widget.job.durationS,
     fps: widget.job.fps,
     events: widget.job.events,
-    enabled: !_sending,
-    onAdd: (span) => _addSpan(span),
+    onAdd: (span) {
+      final at = _cursor;
+      _addSpan(span);
+      // the next cut follows this one
+      _goTo(at + span.lengthS);
+    },
   );
 
   Widget _transitions({required bool docked}) {
@@ -3152,9 +3184,14 @@ class _SelectedBlock extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    m == null
+                    cut.label.isNotEmpty
+                        ? cut.label
+                        : m != null
+                        ? m.name
+                        : cut.sourceT > 0
                         ? '${style.label} at ${formatClock(cut.sourceT)}'
-                        : m.name,
+                        // a hand-made cut has no moment: say where it starts
+                        : '${style.label} from ${formatClock(cut.startS)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium,

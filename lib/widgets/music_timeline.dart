@@ -1397,7 +1397,10 @@ class _BlockState extends State<_Block> {
     // a music block is not a match moment: it has the track's colour, which
     // is the same as the waveform drawn at the top of the ruler
     final fillColour = music != null ? theme.colorScheme.primary : style.color;
-    final blockLabel = music?.name ?? style.label;
+    // a name the user gave wins over the kind's
+    final blockLabel = widget.cut.label.isNotEmpty
+        ? widget.cut.label
+        : music?.name ?? style.label;
     final widthPx = math.max(10.0, widget.cut.durationS * widget.pxPerSecond);
     final textFits = widthPx > 56;
 
