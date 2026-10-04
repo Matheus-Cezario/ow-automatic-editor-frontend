@@ -230,6 +230,7 @@ class Layer {
     this.muted = false,
     this.hidden = false,
     this.locked = false,
+    this.collapsed = false,
     this.clips = const [],
   });
 
@@ -239,6 +240,7 @@ class Layer {
     muted: j['muted'] as bool? ?? false,
     hidden: j['hidden'] as bool? ?? false,
     locked: j['locked'] as bool? ?? false,
+    collapsed: j['collapsed'] as bool? ?? false,
     clips: ((j['clips'] as List?) ?? [])
         .map((e) => TimelineClip.fromJson(e as Map<String, dynamic>))
         .toList(),
@@ -255,6 +257,10 @@ class Layer {
 
   /// Locked changes nothing in the video — it is the app that refuses edits.
   final bool locked;
+
+  /// Drawn as a thin strip on the ruler, to make room when the stack grows.
+  /// Only the editor cares.
+  final bool collapsed;
   final List<TimelineClip> clips;
 
   double get durationS => clips.fold(0, (m, c) => c.untilS > m ? c.untilS : m);
@@ -265,6 +271,7 @@ class Layer {
     bool? muted,
     bool? hidden,
     bool? locked,
+    bool? collapsed,
     List<TimelineClip>? clips,
   }) => Layer(
     kind: kind ?? this.kind,
@@ -272,6 +279,7 @@ class Layer {
     muted: muted ?? this.muted,
     hidden: hidden ?? this.hidden,
     locked: locked ?? this.locked,
+    collapsed: collapsed ?? this.collapsed,
     clips: clips ?? this.clips,
   );
 
@@ -281,6 +289,7 @@ class Layer {
     'muted': muted,
     'hidden': hidden,
     'locked': locked,
+    if (collapsed) 'collapsed': true,
     'clips': [for (final c in clips) c.toJson()],
   };
 }

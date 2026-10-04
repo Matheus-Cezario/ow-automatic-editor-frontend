@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -91,11 +92,20 @@ class MusicTimeline extends StatefulWidget {
     this.matchDuration = 0,
     this.tracks = const {},
     this.fallbackDurationS = 60,
+    this.trackHeight = blockHeight,
+    this.onTrackHeight,
     this.markers = const [],
     this.onMoveMarker,
     this.onRenameMarker,
     this.onRemoveMarker,
   });
+
+  /// How tall an open track is: [blockHeight] by default, smaller to see
+  /// more layers at once, bigger to read the clips.
+  final double trackHeight;
+
+  /// Asks for another track height; without it the control is not shown.
+  final ValueChanged<double>? onTrackHeight;
 
   /// The notes on the ruler. A flag on the time ruler: a click goes there,
   /// a drag moves it, a double click names it, a right click offers the rest.
@@ -166,7 +176,13 @@ class MusicTimeline extends StatefulWidget {
   /// (from, to) — dragging one header over another swaps the order in which
   /// the layers are drawn.
   final void Function(int from, int to) onReorderLayers;
-  final void Function(int layerIndex, {bool? muted, bool? hidden, bool? locked})
+  final void Function(
+    int layerIndex, {
+    bool? muted,
+    bool? hidden,
+    bool? locked,
+    bool? collapsed,
+  })
   onAdjustLayer;
 
   /// The right-click menu's own operations; without them, the entry is left
@@ -214,6 +230,12 @@ class MusicTimeline extends StatefulWidget {
   static const double rulerHeight = 20;
   static const double headerWidth = 148;
 
+  /// A collapsed layer: a strip that shows where its clips are, no more.
+  static const double collapsedHeight = 24;
+
+  /// The heights a track can be set to, small to large.
+  static const trackHeights = [58.0, blockHeight, 104.0];
+
   static double heightFor(int layerCount) =>
       waveHeight + blockHeight * layerCount + rulerHeight;
 
@@ -248,9 +270,48 @@ class _MusicTimelineState extends State<MusicTimeline> {
   Rect? _band;
   bool _bandAdds = false;
 
+  // ── the tracks' layout: open tracks are [MusicTimeline.trackHeight] tall,
+  // collapsed ones a thin strip, so a row's top is the sum of those above
+
+  double _rowHeight(int layerIndex) => widget.layers[layerIndex].collapsed
+      ? MusicTimeline.collapsedHeight
+      : widget.trackHeight;
+
+  double _rowTop(int layerIndex) {
+    final n = widget.layers.length;
+    var y = MusicTimeline.waveHeight;
+    for (var line = 0; line < MusicTimeline.layerRow(layerIndex, n); line++) {
+      y += _rowHeight(MusicTimeline.rowLayer(line, n));
+    }
+    return y;
+  }
+
+  double get _tracksBottom {
+    var y = MusicTimeline.waveHeight;
+    for (var i = 0; i < widget.layers.length; i++) {
+      y += _rowHeight(i);
+    }
+    return y;
+  }
+
+  /// The track line (0 = the top one) at height [dy]. Above the tracks it
+  /// counts on upwards in negative lines, below them past the last one, so
+  /// a clip dragged off the stack still says how far.
+  int _lineAt(double dy) {
+    final n = widget.layers.length;
+    if (dy < MusicTimeline.waveHeight) {
+      return -((MusicTimeline.waveHeight - dy) / widget.trackHeight).ceil();
+    }
+    var y = MusicTimeline.waveHeight;
+    for (var line = 0; line < n; line++) {
+      y += _rowHeight(MusicTimeline.rowLayer(line, n));
+      if (dy < y) return line;
+    }
+    return n + ((dy - y) / widget.trackHeight).floor();
+  }
+
   bool _onTracks(double y) =>
-      y >= MusicTimeline.waveHeight &&
-      y < MusicTimeline.waveHeight + widget.layers.length * MusicTimeline.blockHeight;
+      y >= MusicTimeline.waveHeight && y < _tracksBottom;
 
   void _bandStart(Offset at) {
     // the beats band and the time ruler move the playhead; only the tracks
@@ -279,10 +340,9 @@ class _MusicTimelineState extends State<MusicTimeline> {
           for (final c in widget.layers[i].clips)
             if (Rect.fromLTWH(
               c.atS * px,
-              MusicTimeline.waveHeight +
-                  MusicTimeline.layerRow(i, n) * MusicTimeline.blockHeight,
+              _rowTop(i),
               c.durationS * px,
-              MusicTimeline.blockHeight,
+              _rowHeight(i),
             ).overlaps(band))
               c.id,
     };
@@ -341,8 +401,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
 
   /// Which layer a point of the ruler falls on — the inverse of the stacking.
   int _layerAt(double dy) {
-    final line = ((dy - MusicTimeline.waveHeight) / MusicTimeline.blockHeight)
-        .floor();
+    final line = _lineAt(dy);
     return MusicTimeline.rowLayer(
       line.clamp(0, math.max(0, widget.layers.length - 1)),
       widget.layers.length,
@@ -538,6 +597,11 @@ class _MusicTimelineState extends State<MusicTimeline> {
           value: 'lock',
           child: Text(layer.locked ? 'Unlock' : 'Lock'),
         ),
+        PopupMenuItem(
+          key: const Key('layer-menu-collapse'),
+          value: 'collapse',
+          child: Text(layer.collapsed ? 'Expand the track' : 'Collapse the track'),
+        ),
         if (widget.onRemoveLayer != null) ...[
           const PopupMenuDivider(),
           PopupMenuItem(
@@ -565,6 +629,8 @@ class _MusicTimelineState extends State<MusicTimeline> {
         widget.onAdjustLayer(i, muted: !layer.muted);
       case 'lock':
         widget.onAdjustLayer(i, locked: !layer.locked);
+      case 'collapse':
+        widget.onAdjustLayer(i, collapsed: !layer.collapsed);
       case 'delete':
         widget.onRemoveLayer!(i);
     }
@@ -621,7 +687,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
     final theme = Theme.of(context);
     final px = widget.pxPerSecond;
     final widthPx = _durationS * px;
-    final heightPx = MusicTimeline.heightFor(widget.layers.length);
+    final heightPx = _tracksBottom + MusicTimeline.rulerHeight;
 
     return SizedBox(
       height: heightPx,
@@ -637,6 +703,9 @@ class _MusicTimelineState extends State<MusicTimeline> {
               onAdjust: widget.onAdjustLayer,
               onReorder: widget.onReorderLayers,
               onMenu: _layerMenu,
+              rowHeight: _rowHeight,
+              trackHeight: widget.trackHeight,
+              onTrackHeight: widget.onTrackHeight,
             ),
           ),
           const VerticalDivider(width: 1),
@@ -680,14 +749,9 @@ class _MusicTimelineState extends State<MusicTimeline> {
                             // survive it, or setting a second keyframe would
                             // lose the clip being animated. An empty spot on
                             // a track is what clears it.
-                            final y = d.localPosition.dy;
-                            final onTracks =
-                                y >= MusicTimeline.waveHeight &&
-                                y <
-                                    MusicTimeline.waveHeight +
-                                        widget.layers.length *
-                                            MusicTimeline.blockHeight;
-                            if (onTracks) widget.onSelect(null);
+                            if (_onTracks(d.localPosition.dy)) {
+                              widget.onSelect(null);
+                            }
                           },
                           onSecondaryTapUp: (d) => _layerMenu(
                             _layerAt(d.localPosition.dy),
@@ -706,7 +770,18 @@ class _MusicTimelineState extends State<MusicTimeline> {
                                 beats: widget.beatTimes,
                                 durationS: _durationS,
                                 pxPerSecond: px,
-                                layerList: widget.layers.length,
+                                dividers: [
+                                  for (var line = 0;
+                                      line < widget.layers.length;
+                                      line++)
+                                    _rowTop(
+                                      MusicTimeline.rowLayer(
+                                        line,
+                                        widget.layers.length,
+                                      ),
+                                    ),
+                                  _tracksBottom,
+                                ],
                                 onColor: theme.colorScheme.primary,
                                 waveColor: theme.colorScheme.primary.withValues(
                                   alpha: 0.35,
@@ -733,14 +808,20 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           markAtCursor: _playAtCursor(clip),
                           pxPerSecond: px,
                           left: clip.atS * px,
-                          top:
-                              MusicTimeline.waveHeight +
+                          top: _rowTop(layerIndex),
+                          height: _rowHeight(layerIndex),
+                          // tracks differ in height: how many a drag
+                          // crossed is read off the layout, not divided out
+                          stepsFor: (rose) =>
+                              _lineAt(
+                                _rowTop(layerIndex) +
+                                    _rowHeight(layerIndex) / 2 +
+                                    rose,
+                              ) -
                               MusicTimeline.layerRow(
-                                    layerIndex,
-                                    widget.layers.length,
-                                  ) *
-                                  MusicTimeline.blockHeight,
-                          height: MusicTimeline.blockHeight,
+                                layerIndex,
+                                widget.layers.length,
+                              ),
                           onSelect: ({bool toggle = false}) =>
                               widget.onSelect(clip.id, toggle: toggle),
                           onMove: (at) => widget.onMove(clip.id, at),
@@ -829,14 +910,8 @@ class _MusicTimelineState extends State<MusicTimeline> {
                       if (_crosshair != null)
                         Positioned(
                           left: _crosshair!.$1 * px,
-                          top:
-                              MusicTimeline.waveHeight +
-                              MusicTimeline.layerRow(
-                                    _crosshair!.$2,
-                                    widget.layers.length,
-                                  ) *
-                                  MusicTimeline.blockHeight,
-                          height: MusicTimeline.blockHeight,
+                          top: _rowTop(_crosshair!.$2),
+                          height: _rowHeight(_crosshair!.$2),
                           width: math.max(2, _crosshairWidth * px),
                           child: IgnorePointer(
                             child: DecoratedBox(
@@ -1071,15 +1146,30 @@ class _Headers extends StatefulWidget {
     required this.onAdjust,
     required this.onReorder,
     required this.onMenu,
+    required this.rowHeight,
+    required this.trackHeight,
+    this.onTrackHeight,
   });
+
+  final double trackHeight;
+  final ValueChanged<double>? onTrackHeight;
 
   final List<Layer> layers;
   final int active;
 
+  /// How tall the track of each layer is — the headers line up with it.
+  final double Function(int layerIndex) rowHeight;
+
   /// (layer, where the right click happened).
   final void Function(int layerIndex, Offset global) onMenu;
   final ValueChanged<int> onActive;
-  final void Function(int layerIndex, {bool? muted, bool? hidden, bool? locked})
+  final void Function(
+    int layerIndex, {
+    bool? muted,
+    bool? hidden,
+    bool? locked,
+    bool? collapsed,
+  })
   onAdjust;
 
   /// (from, to) — the layers' new order.
@@ -1100,16 +1190,33 @@ class _HeadersState extends State<_Headers> {
     final layers = widget.layers;
     return Column(
       children: [
-        // the grid band, which belongs to no layer
+        // the grid band, which belongs to no layer — and, beside it, the
+        // tracks' height, which belongs to all of them
         SizedBox(
           height: MusicTimeline.waveHeight,
-          child: Center(
-            child: Text(
-              'beats',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.hintColor,
+          child: Row(
+            children: [
+              const SizedBox(width: 24),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    'beats',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              SizedBox(
+                width: 24,
+                child: widget.onTrackHeight == null
+                    ? null
+                    : _TrackHeightButton(
+                        height: widget.trackHeight,
+                        onChanged: widget.onTrackHeight!,
+                      ),
+              ),
+            ],
           ),
         ),
         // The tracks, **from top to bottom**: the first row is the top layer,
@@ -1137,22 +1244,28 @@ class _HeadersState extends State<_Headers> {
                     color: Colors.transparent,
                     child: SizedBox(
                       width: MusicTimeline.headerWidth,
-                      height: MusicTimeline.blockHeight,
+                      height: widget.rowHeight(i),
                       child: Opacity(
                         opacity: 0.9,
                         child: _LayerHeader(
                           layer: layers[i],
                           index: i,
                           active: true,
+                          compact: widget.rowHeight(i) < 60,
                           onActive: () {},
                           onAdjust:
-                              ({bool? muted, bool? hidden, bool? locked}) {},
+                              ({
+                                bool? muted,
+                                bool? hidden,
+                                bool? locked,
+                                bool? collapsed,
+                              }) {},
                         ),
                       ),
                     ),
                   ),
                   childWhenDragging: SizedBox(
-                    height: MusicTimeline.blockHeight,
+                    height: widget.rowHeight(i),
                     child: ColoredBox(
                       color: theme.colorScheme.primary.withValues(alpha: 0.08),
                     ),
@@ -1162,7 +1275,7 @@ class _HeadersState extends State<_Headers> {
                         widget.onMenu(i, d.globalPosition),
                     child: Container(
                       key: ValueKey('header-$i'),
-                      height: MusicTimeline.blockHeight,
+                      height: widget.rowHeight(i),
                       decoration: _target == i
                           ? BoxDecoration(
                               border: Border.all(
@@ -1174,14 +1287,21 @@ class _HeadersState extends State<_Headers> {
                         layer: layers[i],
                         index: i,
                         active: i == widget.active,
+                        compact: widget.rowHeight(i) < 60,
                         handle: handle,
                         onActive: () => widget.onActive(i),
-                        onAdjust: ({bool? muted, bool? hidden, bool? locked}) =>
-                            widget.onAdjust(
+                        onAdjust:
+                            ({
+                              bool? muted,
+                              bool? hidden,
+                              bool? locked,
+                              bool? collapsed,
+                            }) => widget.onAdjust(
                               i,
                               muted: muted,
                               hidden: hidden,
                               locked: locked,
+                              collapsed: collapsed,
                             ),
                       ),
                     ),
@@ -1191,6 +1311,33 @@ class _HeadersState extends State<_Headers> {
             },
           ),
       ],
+    );
+  }
+}
+
+/// Cycles the tracks through small, medium and large.
+class _TrackHeightButton extends StatelessWidget {
+  const _TrackHeightButton({required this.height, required this.onChanged});
+
+  final double height;
+  final ValueChanged<double> onChanged;
+
+  static const _names = ['small', 'medium', 'large'];
+
+  @override
+  Widget build(BuildContext context) {
+    const sizes = MusicTimeline.trackHeights;
+    final i = sizes.indexOf(height);
+    final next = sizes[(i + 1) % sizes.length];
+    return Tooltip(
+      message:
+          'Tracks: ${i < 0 ? 'custom' : _names[i]} — click for '
+          '${_names[sizes.indexOf(next)]}',
+      child: InkWell(
+        key: const Key('track-height'),
+        onTap: () => onChanged(next),
+        child: Icon(Icons.height, size: 16, color: Theme.of(context).hintColor),
+      ),
     );
   }
 }
@@ -1250,13 +1397,23 @@ class _LayerHeader extends StatelessWidget {
     required this.onActive,
     required this.onAdjust,
     this.handle,
+    this.compact = false,
   });
+
+  /// A short track: tighter spacing so name and buttons still fit.
+  final bool compact;
 
   final Layer layer;
   final int index;
   final bool active;
   final VoidCallback onActive;
-  final void Function({bool? muted, bool? hidden, bool? locked}) onAdjust;
+  final void Function({
+    bool? muted,
+    bool? hidden,
+    bool? locked,
+    bool? collapsed,
+  })
+  onAdjust;
 
   /// The grip by which the layer is dragged to another position in the stack.
   ///
@@ -1267,10 +1424,53 @@ class _LayerHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fold = InkWell(
+      key: ValueKey('collapse-$index'),
+      onTap: () => onAdjust(collapsed: !layer.collapsed),
+      child: Tooltip(
+        message: layer.collapsed ? 'Expand the track' : 'Collapse the track',
+        child: Icon(
+          layer.collapsed ? Icons.chevron_right : Icons.expand_more,
+          size: 16,
+          color: theme.hintColor,
+        ),
+      ),
+    );
+    final name = Expanded(
+      child: Text(
+        layer.name.isEmpty ? 'Layer ${index + 1}' : layer.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.labelMedium,
+      ),
+    );
+    if (layer.collapsed) {
+      return InkWell(
+        onTap: onActive,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: active
+                ? theme.colorScheme.primary.withValues(alpha: 0.10)
+                : null,
+            border: Border(
+              top: BorderSide(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
+              ),
+              left: BorderSide(
+                width: 3,
+                color: active ? theme.colorScheme.primary : Colors.transparent,
+              ),
+            ),
+          ),
+          child: Row(children: [fold, const SizedBox(width: 2), name, ?handle]),
+        ),
+      );
+    }
     return InkWell(
       onTap: onActive,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 6, vertical: compact ? 0 : 4),
         decoration: BoxDecoration(
           color: active
               ? theme.colorScheme.primary.withValues(alpha: 0.10)
@@ -1291,20 +1491,14 @@ class _LayerHeader extends StatelessWidget {
           children: [
             Row(
               children: [
+                fold,
                 Icon(
                   layer.isAudio ? Icons.music_note : Icons.layers,
                   size: 13,
                   color: theme.hintColor,
                 ),
                 const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    layer.name.isEmpty ? 'Layer ${index + 1}' : layer.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium,
-                  ),
-                ),
+                name,
                 ?handle,
               ],
             ),
@@ -1314,6 +1508,7 @@ class _LayerHeader extends StatelessWidget {
                 // wanted from it is mute
                 if (!layer.isAudio)
                   _Toggle(
+                    small: compact,
                     turnedOn: !layer.hidden,
                     isOn: Icons.visibility,
                     off: Icons.visibility_off,
@@ -1321,6 +1516,7 @@ class _LayerHeader extends StatelessWidget {
                     onTap: () => onAdjust(hidden: !layer.hidden),
                   ),
                 _Toggle(
+                  small: compact,
                   turnedOn: !layer.muted,
                   isOn: Icons.volume_up,
                   off: Icons.volume_off,
@@ -1328,6 +1524,7 @@ class _LayerHeader extends StatelessWidget {
                   onTap: () => onAdjust(muted: !layer.muted),
                 ),
                 _Toggle(
+                  small: compact,
                   turnedOn: !layer.locked,
                   isOn: Icons.lock_open,
                   off: Icons.lock,
@@ -1345,6 +1542,7 @@ class _LayerHeader extends StatelessWidget {
 
 class _Toggle extends StatelessWidget {
   const _Toggle({
+    this.small = false,
     required this.turnedOn,
     required this.isOn,
     required this.off,
@@ -1352,6 +1550,7 @@ class _Toggle extends StatelessWidget {
     required this.onTap,
   });
 
+  final bool small;
   final bool turnedOn;
   final IconData isOn;
   final IconData off;
@@ -1366,8 +1565,8 @@ class _Toggle extends StatelessWidget {
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 26, minHeight: 24),
-      iconSize: 15,
+      constraints: BoxConstraints(minWidth: 26, minHeight: small ? 20 : 24),
+      iconSize: small ? 13 : 15,
       icon: Icon(
         turnedOn ? isOn : off,
         color: turnedOn ? theme.hintColor : theme.colorScheme.error,
@@ -1396,6 +1595,7 @@ class _Block extends StatefulWidget {
     required this.left,
     required this.top,
     required this.height,
+    this.stepsFor,
     required this.onSelect,
     required this.onMove,
     required this.onTrim,
@@ -1428,6 +1628,10 @@ class _Block extends StatefulWidget {
   final double left;
   final double top;
   final double height;
+
+  /// How many tracks a vertical drag of this many pixels crossed — down is
+  /// positive. Tracks are not all the same height, so the timeline answers.
+  final int Function(double rose)? stepsFor;
   final void Function({bool toggle}) onSelect;
   final ValueChanged<double> onMove;
   final ValueChanged<double> onTrim;
@@ -1528,7 +1732,8 @@ class _BlockState extends State<_Block> {
   }
 
   /// How many tracks the finger is away from the clip's own — negative is up.
-  int get _steps => (_rose / widget.height).round();
+  int get _steps =>
+      widget.stepsFor?.call(_rose) ?? (_rose / widget.height).round();
 
   /// Lets go of a move. Where it lands — another track, a swap — is decided
   /// **inside** the same gesture, so one undo takes back the whole drag.
@@ -1620,7 +1825,9 @@ class _BlockState extends State<_Block> {
         ? widget.cut.label
         : music?.name ?? style.label;
     final widthPx = math.max(10.0, widget.cut.durationS * widget.pxPerSecond);
-    final textFits = widthPx > 56;
+    // a short track has room for the name only; a collapsed one for nothing
+    final textFits = widthPx > 56 && widget.height >= 40;
+    final roomForLength = widget.height >= 60;
 
     return Positioned(
       left: _left,
@@ -1650,7 +1857,7 @@ class _BlockState extends State<_Block> {
           onVerticalDragEnd: widget.isLocked ? null : (_) => _drop(),
           onVerticalDragCancel: widget.isLocked ? null : _drop,
           child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4),
+            margin: EdgeInsets.symmetric(vertical: widget.height < 40 ? 2 : 4),
             decoration: BoxDecoration(
               color: fillColour.withValues(alpha: widget.selected ? 0.45 : 0.25),
               borderRadius: BorderRadius.circular(6),
@@ -1771,14 +1978,15 @@ class _BlockState extends State<_Block> {
                             color: fillColour,
                           ),
                         ),
-                        Text(
-                          '${widget.cut.durationS.toStringAsFixed(1)}s',
-                          maxLines: 1,
-                          softWrap: false,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.hintColor,
+                        if (roomForLength)
+                          Text(
+                            '${widget.cut.durationS.toStringAsFixed(1)}s',
+                            maxLines: 1,
+                            softWrap: false,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.hintColor,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -1857,7 +2065,7 @@ class _RulerPainter extends CustomPainter {
     required this.beats,
     required this.durationS,
     required this.pxPerSecond,
-    required this.layerList,
+    required this.dividers,
     required this.onColor,
     required this.waveColor,
     required this.beatColor,
@@ -1868,7 +2076,9 @@ class _RulerPainter extends CustomPainter {
   final List<double> beats;
   final double durationS;
   final double pxPerSecond;
-  final int layerList;
+  /// Where the lines between the tracks go: each track's top, then the
+  /// bottom of the last.
+  final List<double> dividers;
   final Color onColor;
   final Color waveColor;
   final Color beatColor;
@@ -1904,8 +2114,7 @@ class _RulerPainter extends CustomPainter {
     final line = Paint()
       ..color = beatColor
       ..strokeWidth = 1;
-    for (var i = 0; i <= layerList; i++) {
-      final y = MusicTimeline.waveHeight + i * MusicTimeline.blockHeight;
+    for (final y in dividers) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), line);
     }
 
@@ -1963,5 +2172,5 @@ class _RulerPainter extends CustomPainter {
       old.beats != beats ||
       old.pxPerSecond != pxPerSecond ||
       old.durationS != durationS ||
-      old.layerList != layerList;
+      !listEquals(old.dividers, dividers);
 }

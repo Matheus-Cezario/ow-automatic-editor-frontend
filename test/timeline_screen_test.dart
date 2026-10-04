@@ -3344,6 +3344,66 @@ void main() {
     });
   });
 
+  group('track height and collapsed layers', () {
+    List<Layer> layersOf(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).layers;
+    double headerHeight(WidgetTester tester, int i) =>
+        tester.getSize(find.byKey(ValueKey('header-$i'))).height;
+
+    testWidgets('the tracks cycle through large, small and medium', (
+      tester,
+    ) async {
+      await open(tester);
+      expect(headerHeight(tester, 0), MusicTimeline.blockHeight);
+      final before = tester.getSize(find.byType(MusicTimeline)).height;
+
+      await tester.tap(find.byKey(const Key('track-height')));
+      await tester.pump();
+      expect(headerHeight(tester, 0), 104);
+      await tester.tap(find.byKey(const Key('track-height')));
+      await tester.pump();
+      expect(headerHeight(tester, 0), 58);
+      expect(
+        tester.getSize(find.byType(MusicTimeline)).height,
+        before - (MusicTimeline.blockHeight - 58),
+      );
+    });
+
+    testWidgets('a collapsed layer is a strip, and its clips still move', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byTooltip('New layer'));
+      await settle(tester);
+      final id = cutList(tester).single.id;
+
+      await tester.tap(find.byKey(const ValueKey('collapse-0')));
+      await tester.pump();
+      expect(layersOf(tester)[0].collapsed, isTrue);
+      expect(headerHeight(tester, 0), MusicTimeline.collapsedHeight);
+      final block = find.byKey(ValueKey('block-$id'));
+      expect(tester.getSize(block).height, MusicTimeline.collapsedHeight);
+
+      // up past the strip: one track up, even though the strip is thin
+      await tester.drag(block, const Offset(0, -40));
+      await settle(tester);
+      expect(layersOf(tester)[1].clips.single.id, id);
+
+      // the menu expands it again
+      await tester.tap(
+        find.byKey(const ValueKey('header-0')),
+        buttons: kSecondaryButton,
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('layer-menu-collapse')));
+      await settle(tester);
+      expect(layersOf(tester)[0].collapsed, isFalse);
+      expect(headerHeight(tester, 0), MusicTimeline.blockHeight);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

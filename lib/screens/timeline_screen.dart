@@ -140,6 +140,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// Timeline zoom. 60 px/s shows about 10 seconds on a phone — close enough
   /// to snap to the beat without needing a surgeon's precision.
   double _px = 60;
+
+  /// How tall an open track is on the ruler — see [MusicTimeline.trackHeights].
+  double _trackHeight = MusicTimeline.blockHeight;
   bool _magnet = true;
 
   /// Insert mode: a clip dropped on others pushes them right instead of going
@@ -2579,13 +2582,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onMoveMarker: (i, t) => _edit(moveMarker(_state, i, t)),
         onRenameMarker: (i, label) => _edit(renameMarker(_state, i, label)),
         onRemoveMarker: (i) => _edit(removeMarker(_state, i)),
-        onAdjustLayer: (i, {muted, hidden, locked}) => _edit(
+        trackHeight: _trackHeight,
+        onTrackHeight: (h) => setState(() => _trackHeight = h),
+        onAdjustLayer: (i, {muted, hidden, locked, collapsed}) => _edit(
           adjustLayer(
             _state,
             i,
             muted: muted,
             hidden: hidden,
             locked: locked,
+            collapsed: collapsed,
           ),
         ),
         matchWaveform: widget.job.waveform,

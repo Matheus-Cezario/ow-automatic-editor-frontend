@@ -1344,6 +1344,7 @@ MontageState adjustLayer(
   bool? muted,
   bool? hidden,
   bool? locked,
+  bool? collapsed,
   String? name,
 }) {
   if (index < 0 || index >= s.layers.length) return s;
@@ -1353,6 +1354,7 @@ MontageState adjustLayer(
       muted: muted,
       hidden: hidden,
       locked: locked,
+      collapsed: collapsed,
       name: name,
     ),
   );
