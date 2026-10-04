@@ -3539,6 +3539,32 @@ void main() {
     });
   });
 
+  group('crop and rotate', () {
+    testWidgets('a picture clip gets the panel, and turning it is undoable', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(block(tester, 0));
+      await tester.pump();
+
+      await tester.ensureVisible(find.byKey(const Key('crop-panel')));
+      await tester.tap(find.text('Crop & rotate'));
+      await settle(tester);
+      await tester.ensureVisible(find.byKey(const Key('rotate-right')));
+      await tester.tap(find.byKey(const Key('rotate-right')));
+      await tester.pump();
+      expect(firstCut(tester).transform.rotation, 90);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(firstCut(tester).transform.rotation, 0);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);

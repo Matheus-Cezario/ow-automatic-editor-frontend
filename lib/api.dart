@@ -138,40 +138,106 @@ class ClipTransform {
     this.x = 0,
     this.y = 0,
     this.opacity = 1,
+    this.cropLeft = 0,
+    this.cropTop = 0,
+    this.cropRight = 0,
+    this.cropBottom = 0,
+    this.rotation = 0,
+    this.flipH = false,
+    this.flipV = false,
   });
 
-  factory ClipTransform.fromJson(Map<String, dynamic> j) => ClipTransform(
-    scale: (j['scale'] as num?)?.toDouble() ?? 1,
-    x: (j['x'] as num?)?.toDouble() ?? 0,
-    y: (j['y'] as num?)?.toDouble() ?? 0,
-    opacity: (j['opacity'] as num?)?.toDouble() ?? 1,
-  );
+  factory ClipTransform.fromJson(Map<String, dynamic> j) {
+    double n(String k, double d) => (j[k] as num?)?.toDouble() ?? d;
+    return ClipTransform(
+      scale: n('scale', 1),
+      x: n('x', 0),
+      y: n('y', 0),
+      opacity: n('opacity', 1),
+      cropLeft: n('crop_left', 0),
+      cropTop: n('crop_top', 0),
+      cropRight: n('crop_right', 0),
+      cropBottom: n('crop_bottom', 0),
+      rotation: n('rotation', 0),
+      flipH: j['flip_h'] as bool? ?? false,
+      flipV: j['flip_v'] as bool? ?? false,
+    );
+  }
 
   final double scale;
   final double x;
   final double y;
   final double opacity;
 
+  /// What is cut off each edge, as a fraction of the frame. The picture keeps
+  /// its size and place; the cut edges become transparent.
+  final double cropLeft;
+  final double cropTop;
+  final double cropRight;
+  final double cropBottom;
+
+  /// Degrees, clockwise, around the frame's centre.
+  final double rotation;
+  final bool flipH;
+  final bool flipV;
+
+  bool get hasCrop =>
+      cropLeft != 0 || cropTop != 0 || cropRight != 0 || cropBottom != 0;
+
+  /// Rotated or mirrored.
+  bool get hasTurn => rotation % 360 != 0 || flipH || flipV;
+
   /// The clip comes in as it came, with nothing on top.
-  bool get isNeutral => scale == 1 && x == 0 && y == 0 && opacity == 1;
+  bool get isNeutral =>
+      scale == 1 &&
+      x == 0 &&
+      y == 0 &&
+      opacity == 1 &&
+      !hasCrop &&
+      !hasTurn;
 
   ClipTransform copyWith({
     double? scale,
     double? x,
     double? y,
     double? opacity,
+    double? cropLeft,
+    double? cropTop,
+    double? cropRight,
+    double? cropBottom,
+    double? rotation,
+    bool? flipH,
+    bool? flipV,
   }) => ClipTransform(
     scale: scale ?? this.scale,
     x: x ?? this.x,
     y: y ?? this.y,
     opacity: opacity ?? this.opacity,
+    cropLeft: cropLeft ?? this.cropLeft,
+    cropTop: cropTop ?? this.cropTop,
+    cropRight: cropRight ?? this.cropRight,
+    cropBottom: cropBottom ?? this.cropBottom,
+    rotation: rotation ?? this.rotation,
+    flipH: flipH ?? this.flipH,
+    flipV: flipV ?? this.flipV,
   );
+
+  /// Back to the uncropped, unturned picture; place, size and alpha stay.
+  ClipTransform get withoutCropTurn =>
+      ClipTransform(scale: scale, x: x, y: y, opacity: opacity);
 
   Map<String, dynamic> toJson() => {
     'scale': scale,
     'x': x,
     'y': y,
     'opacity': opacity,
+    if (cropLeft != 0) 'crop_left': cropLeft,
+    if (cropTop != 0) 'crop_top': cropTop,
+    if (cropRight != 0) 'crop_right': cropRight,
+    if (cropBottom != 0) 'crop_bottom': cropBottom,
+    if (rotation != 0) 'rotation': rotation,
+    if (flipH) 'flip_h': true,
+    if (flipV) 'flip_v': true,
   };
 }
 

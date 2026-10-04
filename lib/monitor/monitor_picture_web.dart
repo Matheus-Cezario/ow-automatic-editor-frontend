@@ -273,9 +273,21 @@ class _Slot {
       ..setProperty('display', 'block')
       ..setProperty('z-index', '$z')
       ..setProperty('opacity', '${p.opacity}')
+      // as the server does it: crop, mirror, rotate, then size and place —
+      // a CSS transform list applies right to left, and the clip-path is in
+      // the element's own, untransformed box
       ..setProperty(
         'transform',
-        'translate(${p.offsetX * 100}%, ${p.offsetY * 100}%) scale(${p.scale})',
+        'translate(${p.offsetX * 100}%, ${p.offsetY * 100}%) scale(${p.scale})'
+            '${p.crop.rotation % 360 != 0 ? ' rotate(${p.crop.rotation}deg)' : ''}'
+            '${p.crop.flipH || p.crop.flipV ? ' scale(${p.crop.flipH ? -1 : 1}, ${p.crop.flipV ? -1 : 1})' : ''}',
+      )
+      ..setProperty(
+        'clip-path',
+        p.crop.hasCrop
+            ? 'inset(${p.crop.cropTop * 100}% ${p.crop.cropRight * 100}% '
+                  '${p.crop.cropBottom * 100}% ${p.crop.cropLeft * 100}%)'
+            : 'none',
       );
     media.style
       ..setProperty('object-fit', p.fit == 'contain' ? 'contain' : 'cover')

@@ -38,6 +38,7 @@ class FramePiece {
     required this.contrast,
     required this.saturation,
     required this.fit,
+    this.crop = const ClipTransform(),
     this.veil,
     this.veilOpacity = 0,
   });
@@ -80,6 +81,10 @@ class FramePiece {
 
   /// `cover` or `contain`.
   final String fit;
+
+  /// The crop, rotation and mirroring — only those fields are read; the place,
+  /// size and alpha above are already resolved for this instant.
+  final ClipTransform crop;
 
   /// A dip's colour over the clip (`#000000` / `#ffffff`), if one is on.
   final String? veil;
@@ -320,6 +325,7 @@ FramePiece? _piece(
     contrast: clip.color.contrast,
     saturation: clip.color.saturation,
     fit: fit,
+    crop: clip.transform,
     veil: veilOpacity > 0 ? veil : null,
     veilOpacity: veilOpacity,
   );

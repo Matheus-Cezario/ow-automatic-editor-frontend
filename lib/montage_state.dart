@@ -324,6 +324,15 @@ List<double> magnetPoints(
   ?playheadS,
 ];
 
+/// The clip's transform, whole — crop, rotation and mirroring included.
+MontageState setTransform(MontageState s, String id, ClipTransform t) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final clip = s.layers[layerIndex].clips[i];
+  return s.withClip(layerIndex, i, clip.copyWith(transform: t));
+}
+
 // ── markers ────────────────────────────────────────────────────────────────
 
 /// Two markers closer than this are the same one.
@@ -629,11 +638,11 @@ MontageState positionOnFrame(
     layerIndex,
     i,
     c.copyWith(
-      transform: ClipTransform(
+      // copyWith, so the crop and rotation stay
+      transform: t.copyWith(
         scale: (scaleFactor ?? t.scale).clamp(0.1, 4.0),
         x: (x ?? t.x).clamp(-1.0, 1.0),
         y: (y ?? t.y).clamp(-1.0, 1.0),
-        opacity: t.opacity,
       ),
     ),
   );

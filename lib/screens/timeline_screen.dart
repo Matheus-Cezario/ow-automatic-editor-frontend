@@ -22,6 +22,7 @@ import '../widgets/motion_panel.dart';
 import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
+import '../widgets/crop_panel.dart';
 import '../widgets/source_cutter.dart';
 import '../zoom.dart';
 
@@ -629,6 +630,28 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// The playhead in seconds from the clip's start.
   double _localIn(String id) => _cursor - (_state.clipItem(id)?.atS ?? 0);
+
+  /// Motion, and crop & rotate for a picture: the panels that act on how the
+  /// clip sits in the frame.
+  Widget? _picturePanels(String id) {
+    final motion = _motionPanel(id);
+    final crop = _cropPanel(id);
+    if (motion == null || crop == null) return motion ?? crop;
+    return Column(mainAxisSize: MainAxisSize.min, children: [motion, crop]);
+  }
+
+  /// Crop & rotate — only for pictures: text is placed by its own style and a
+  /// song has no picture.
+  Widget? _cropPanel(String id) {
+    final clip = _state.clipItem(id);
+    if (clip == null || clip.isText || _isAudioClip(id)) return null;
+    return CropPanel(
+      transform: clip.transform,
+      onChanged: (t) => _edit(setTransform(_state, id, t)),
+      onGestureStart: _history.startGesture,
+      onGestureEnd: _history.endGesture,
+    );
+  }
 
   /// The Motion panel of the selected clip, or `null` when it has nothing to
   /// animate (a text clip).
@@ -2890,7 +2913,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onDelete: _deleteSelection,
             onSplit: _splitAtCursor,
             onDuplicate: _duplicate,
-            motion: _motionPanel(selectionIds.first),
+            motion: _picturePanels(selectionIds.first),
             fonts: _fonts,
             onRamp: () => _rampIntoMoment(selectionIds.first),
           ),
