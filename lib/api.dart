@@ -1222,6 +1222,36 @@ class ExactPreview {
   bool get isWorking => !isDone && !isFailed;
 }
 
+/// A note pinned to an instant of the montage — "the drop starts here".
+///
+/// Only the editor sees it: the ruler shows it and the magnet snaps to it.
+class Marker {
+  const Marker({required this.tS, this.label = ''});
+
+  final double tS;
+  final String label;
+
+  Marker copyWith({double? tS, String? label}) =>
+      Marker(tS: tS ?? this.tS, label: label ?? this.label);
+
+  factory Marker.fromJson(Map<String, dynamic> j) => Marker(
+    tS: (j['t_s'] as num).toDouble(),
+    label: j['label'] as String? ?? '',
+  );
+
+  Map<String, dynamic> toJson() => {
+    't_s': tS,
+    if (label.isNotEmpty) 'label': label,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is Marker && other.tS == tS && other.label == label;
+
+  @override
+  int get hashCode => Object.hash(tS, label);
+}
+
 /// A hand-made video: the layers and blocks that form it.
 class Montage {
   const Montage({
@@ -1237,9 +1267,13 @@ class Montage {
     this.duckPlays = false,
     this.duckLevel = 0.3,
     this.export = const ExportSpec(),
+    this.markers = const [],
   });
 
   final String title;
+
+  /// The notes on the ruler.
+  final List<Marker> markers;
 
   /// **Old format**: the continuous track that played under everything and
   /// could not be cut. It is still read — it becomes a block on the sound
@@ -1315,6 +1349,10 @@ class Montage {
       export: ExportSpec.fromJson(
         (j['export'] as Map?)?.cast<String, dynamic>() ?? const {},
       ),
+      markers: [
+        for (final m in (j['markers'] as List?) ?? const [])
+          Marker.fromJson((m as Map).cast<String, dynamic>()),
+      ],
     );
   }
 
@@ -1333,6 +1371,7 @@ class Montage {
     if (duckPlays) 'duck_plays': true,
     if (duckPlays) 'duck_level': duckLevel,
     'export': export.toJson(),
+    if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
   };
 }
 

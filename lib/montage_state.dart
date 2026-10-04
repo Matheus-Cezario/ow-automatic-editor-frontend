@@ -36,7 +36,9 @@ class MontageState {
     this.duckPlays = false,
     this.duckLevel = 0.3,
     this.export = const ExportSpec(),
-  }) : layers = List.unmodifiable(
+    List<Marker> markers = const [],
+  }) : markers = List.unmodifiable(markers),
+       layers = List.unmodifiable(
          (layers.isEmpty ? const [Layer()] : layers).map(
            // the guarantee must reach the clips: `clips` is a getter that
            // returns a new list, and locking only it would leave the inner
@@ -77,6 +79,11 @@ class MontageState {
   /// How the final video is written. It does not change the montage — it
   /// changes the window.
   final ExportSpec export;
+
+  /// The notes on the ruler, in the order they were made — not by time: a
+  /// marker dragged past another keeps its index while the drag lasts. Part
+  /// of the state so that adding or moving one is undone like any other edit.
+  final List<Marker> markers;
 
   /// Every clip, from every layer, bottom to top.
   List<TimelineClip> get clips => [for (final l in layers) ...l.clips];
@@ -146,6 +153,7 @@ class MontageState {
     bool? duckPlays,
     double? duckLevel,
     ExportSpec? export,
+    List<Marker>? markers,
   }) => MontageState(
     layers: layers ?? this.layers,
     selectionIds: selectionIds ?? this.selectionIds,
@@ -159,6 +167,7 @@ class MontageState {
     duckPlays: duckPlays ?? this.duckPlays,
     duckLevel: duckLevel ?? this.duckLevel,
     export: export ?? this.export,
+    markers: markers ?? this.markers,
   );
 
   /// Which layer, and which position in it, the clip is at.
@@ -207,6 +216,7 @@ class MontageState {
     duckPlays: duckPlays,
     duckLevel: duckLevel,
     export: export,
+    markers: markers,
   );
 }
 
@@ -233,6 +243,7 @@ MontageState montageFromDraft(Montage draft) => MontageState(
   duckPlays: draft.duckPlays,
   duckLevel: draft.duckLevel,
   export: draft.export,
+  markers: draft.markers,
 );
 
 /// The audio layer an old montage gets when it is opened.
@@ -293,8 +304,8 @@ List<Layer>? _trackBecomesBlock(Montage draft) {
 // ── the magnet ─────────────────────────────────────────────────────────────
 
 /// Everything the magnet pulls a clip toward: the beats, the edges of every
-/// other clip — on any layer, so cuts line up across the stack — and the
-/// playhead.
+/// other clip — on any layer, so cuts line up across the stack —, the
+/// markers and the playhead.
 ///
 /// The clips in [moving] are left out: a clip must not snap to where it
 /// already is, or it would never leave.
@@ -309,8 +320,58 @@ List<double> magnetPoints(
     if (!l.hidden)
       for (final c in l.clips)
         if (!moving.contains(c.id)) ...[c.atS, c.untilS],
+  for (final m in s.markers) m.tS,
   ?playheadS,
 ];
+
+// ── markers ────────────────────────────────────────────────────────────────
+
+/// Two markers closer than this are the same one.
+const kMarkerToleranceS = 0.05;
+
+/// The marker at [tS], if there is one.
+int? markerAt(MontageState s, double tS) {
+  final i = s.markers.indexWhere(
+    (m) => (m.tS - tS).abs() <= kMarkerToleranceS,
+  );
+  return i < 0 ? null : i;
+}
+
+/// A marker at [tS], or none if there was one there already: the same key
+/// puts it and takes it away.
+MontageState toggleMarker(MontageState s, double tS) {
+  final i = markerAt(s, tS);
+  if (i != null) return removeMarker(s, i);
+  return s.copyWith(markers: [...s.markers, Marker(tS: math.max(0, tS))]);
+}
+
+MontageState removeMarker(MontageState s, int index) =>
+    s.copyWith(markers: [...s.markers]..removeAt(index));
+
+MontageState moveMarker(MontageState s, int index, double tS) {
+  final list = [...s.markers];
+  list[index] = list[index].copyWith(tS: math.max(0, tS));
+  return s.copyWith(markers: list);
+}
+
+MontageState renameMarker(MontageState s, int index, String label) {
+  final list = [...s.markers];
+  final clean = label.trim();
+  list[index] = list[index].copyWith(
+    label: clean.length > 40 ? clean.substring(0, 40) : clean,
+  );
+  return s.copyWith(markers: list);
+}
+
+/// The first marker after [tS], wrapping round to the first one.
+double? nextMarker(MontageState s, double tS) {
+  if (s.markers.isEmpty) return null;
+  final times = [for (final m in s.markers) m.tS]..sort();
+  for (final t in times) {
+    if (t > tS + kMarkerToleranceS) return t;
+  }
+  return times.first;
+}
 
 /// The edge or playhead a clip ended up stuck to, for the guide line —
 /// `null` when it rests on none (a beat already has its own line).

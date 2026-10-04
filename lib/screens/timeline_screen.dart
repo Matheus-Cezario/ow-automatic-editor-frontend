@@ -243,6 +243,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _scheduleSave();
   }
 
+  /// A marker at the playhead, or away with the one already there.
+  void _toggleMarker() => _edit(toggleMarker(_state, _cursor));
+
   /// Changes the state **without** creating an undo step — selection and
   /// title, which are not edits of the video.
   void _withoutHistory(MontageState updated) {
@@ -1879,6 +1882,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SingleActivator(LogicalKeyboardKey.keyS, shift: true): () =>
           _splitAtCursor(everyLayer: true),
       const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
+      const SingleActivator(LogicalKeyboardKey.keyN): _toggleMarker,
+      const SingleActivator(LogicalKeyboardKey.keyN, shift: true): () {
+        if (nextMarker(_state, _cursor) case final t?) _goTo(t);
+      },
       // comma and period move one frame, like in any editor. The arrows keep
       // the coarse one-second step — both have their use.
       const SingleActivator(LogicalKeyboardKey.comma): () => _frameStep(-1),
@@ -2089,6 +2096,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('drag on an empty track', 'select with a rectangle'),
               _Shortcut('M', 'align the selected block\'s play to the cursor'),
               _Shortcut('[ / ]', 'trim the start / end to the cursor'),
+              _Shortcut('N / Shift + N', 'marker at the playhead / next marker'),
               _Shortcut('Delete', 'remove from the montage'),
               _Shortcut('Ctrl+Z / Ctrl+Shift+Z', 'undo / redo'),
               _Shortcut('Ctrl+C / Ctrl+V', 'copy / paste'),
@@ -2420,6 +2428,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       icon: const Icon(Icons.layers_clear_outlined),
                     ),
                     IconButton(
+                      key: const Key('add-marker'),
+                      tooltip: markerAt(_state, _cursor) == null
+                          ? 'Marker at the playhead (N)'
+                          : 'Remove the marker at the playhead (N)',
+                      onPressed: _toggleMarker,
+                      icon: Icon(
+                        markerAt(_state, _cursor) == null
+                            ? Icons.bookmark_add_outlined
+                            : Icons.bookmark_remove_outlined,
+                      ),
+                    ),
+                    IconButton(
                       key: const Key('zoom-fit'),
                       tooltip: 'Fit the whole montage (\\)',
                       onPressed: _zoomToFit,
@@ -2490,6 +2510,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
             _edit(reorderLayers(_state, from, to)),
         onRenameLayer: (i, name) => _edit(adjustLayer(_state, i, name: name)),
         onRemoveLayer: (i) => _edit(removeLayer(_state, i)),
+        markers: _state.markers,
+        onMoveMarker: (i, t) => _edit(moveMarker(_state, i, t)),
+        onRenameMarker: (i, label) => _edit(renameMarker(_state, i, label)),
+        onRemoveMarker: (i) => _edit(removeMarker(_state, i)),
         onAdjustLayer: (i, {muted, hidden, locked}) => _edit(
           adjustLayer(
             _state,

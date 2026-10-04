@@ -91,7 +91,18 @@ class MusicTimeline extends StatefulWidget {
     this.matchDuration = 0,
     this.tracks = const {},
     this.fallbackDurationS = 60,
+    this.markers = const [],
+    this.onMoveMarker,
+    this.onRenameMarker,
+    this.onRemoveMarker,
   });
+
+  /// The notes on the ruler. A flag on the time ruler: a click goes there,
+  /// a drag moves it, a double click names it, a right click offers the rest.
+  final List<Marker> markers;
+  final void Function(int index, double tS)? onMoveMarker;
+  final void Function(int index, String label)? onRenameMarker;
+  final ValueChanged<int>? onRemoveMarker;
 
   final List<Layer> layers;
   final int activeLayer;
@@ -564,6 +575,47 @@ class _MusicTimelineState extends State<MusicTimeline> {
     builder: (_) => _RenameDialog(current: current),
   );
 
+  Future<void> _nameMarker(int i) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameDialog(
+        current: widget.markers[i].label,
+        title: 'Name the marker',
+        fieldKey: const Key('marker-name'),
+        maxLength: 40,
+      ),
+    );
+    if (name != null && mounted) widget.onRenameMarker?.call(i, name);
+  }
+
+  Future<void> _markerMenu(int i, Offset global) async {
+    final choice = await showMenu<String>(
+      context: context,
+      position: _at(global),
+      items: [
+        if (widget.onRenameMarker != null)
+          const PopupMenuItem(
+            key: Key('marker-menu-rename'),
+            value: 'rename',
+            child: Text('Name…'),
+          ),
+        if (widget.onRemoveMarker != null)
+          const PopupMenuItem(
+            key: Key('marker-menu-delete'),
+            value: 'delete',
+            child: Text('Delete marker'),
+          ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'rename':
+        await _nameMarker(i);
+      case 'delete':
+        widget.onRemoveMarker!(i);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -716,6 +768,44 @@ class _MusicTimelineState extends State<MusicTimeline> {
                               _clipMenu(clip.id, layerIndex, global),
                         ),
 
+                      // the markers: a thin line through the tracks, and a
+                      // flag on the time ruler to grab
+                      for (final m in widget.markers)
+                        Positioned(
+                          left: m.tS * px - 0.5,
+                          top: MusicTimeline.waveHeight,
+                          bottom: MusicTimeline.rulerHeight,
+                          width: 1,
+                          child: IgnorePointer(
+                            child: ColoredBox(
+                              color: theme.colorScheme.tertiary.withValues(
+                                alpha: 0.55,
+                              ),
+                            ),
+                          ),
+                        ),
+                      for (final (i, m) in widget.markers.indexed)
+                        Positioned(
+                          left: m.tS * px - 6,
+                          bottom: 0,
+                          height: MusicTimeline.rulerHeight,
+                          child: _MarkerFlag(
+                            key: ValueKey('marker-$i'),
+                            marker: m,
+                            secondsPerPixel: 1 / px,
+                            onTap: () => widget.onSeek(m.tS),
+                            onDoubleTap: widget.onRenameMarker == null
+                                ? null
+                                : () => _nameMarker(i),
+                            onMenu: (g) => _markerMenu(i, g),
+                            onMoveStart: widget.onGestureStart,
+                            onMove: widget.onMoveMarker == null
+                                ? null
+                                : (t) => widget.onMoveMarker!(i, t),
+                            onMoveEnd: widget.onGestureEnd,
+                          ),
+                        ),
+
                       // the selection rectangle being drawn
                       if (_band case final band?)
                         Positioned.fromRect(
@@ -802,10 +892,137 @@ class _MusicTimelineState extends State<MusicTimeline> {
 
 /// Asks for a layer's new name. Stateful so the field's controller lives as
 /// long as the dialog does — including its closing animation.
+/// A marker's flag on the time ruler, with its name beside it.
+class _MarkerFlag extends StatefulWidget {
+  const _MarkerFlag({
+    super.key,
+    required this.marker,
+    required this.secondsPerPixel,
+    required this.onTap,
+    required this.onMenu,
+    required this.onMoveStart,
+    required this.onMoveEnd,
+    this.onDoubleTap,
+    this.onMove,
+  });
+
+  final Marker marker;
+  final double secondsPerPixel;
+  final VoidCallback onTap;
+  final VoidCallback? onDoubleTap;
+  final ValueChanged<Offset> onMenu;
+  final VoidCallback onMoveStart;
+  final ValueChanged<double>? onMove;
+  final VoidCallback onMoveEnd;
+
+  @override
+  State<_MarkerFlag> createState() => _MarkerFlagState();
+}
+
+class _MarkerFlagState extends State<_MarkerFlag> {
+  double _from = 0;
+  double _moved = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.tertiary;
+    final label = widget.marker.label;
+    final move = widget.onMove;
+    return Tooltip(
+      message: label.isEmpty
+          ? 'Marker at ${formatClock(widget.marker.tS)}'
+          : '$label · ${formatClock(widget.marker.tS)}',
+      waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: move == null
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.resizeLeftRight,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          onDoubleTap: widget.onDoubleTap,
+          onSecondaryTapUp: (d) => widget.onMenu(d.globalPosition),
+          onLongPressStart: (d) => widget.onMenu(d.globalPosition),
+          onHorizontalDragStart: move == null
+              ? null
+              : (_) {
+                  _from = widget.marker.tS;
+                  _moved = 0;
+                  widget.onMoveStart();
+                },
+          onHorizontalDragUpdate: move == null
+              ? null
+              : (d) {
+                  _moved += d.delta.dx;
+                  move(_from + _moved * widget.secondsPerPixel);
+                },
+          onHorizontalDragEnd: move == null ? null : (_) => widget.onMoveEnd(),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CustomPaint(
+                size: const Size(12, MusicTimeline.rulerHeight),
+                painter: _FlagPainter(color),
+              ),
+              if (label.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onTertiary,
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A small pennant whose point sits exactly on the marker's instant.
+class _FlagPainter extends CustomPainter {
+  _FlagPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final x = size.width / 2;
+    final path = Path()
+      ..moveTo(x - 5, 2)
+      ..lineTo(x + 5, 2)
+      ..lineTo(x + 5, size.height - 8)
+      ..lineTo(x, size.height - 2)
+      ..lineTo(x - 5, size.height - 8)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_FlagPainter old) => old.color != color;
+}
+
 class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.current});
+  const _RenameDialog({
+    required this.current,
+    this.title = 'Rename layer',
+    this.fieldKey = const Key('layer-name'),
+    this.maxLength,
+  });
 
   final String current;
+  final String title;
+  final Key fieldKey;
+  final int? maxLength;
 
   @override
   State<_RenameDialog> createState() => _RenameDialogState();
@@ -824,11 +1041,12 @@ class _RenameDialogState extends State<_RenameDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Rename layer'),
+    title: Text(widget.title),
     content: TextField(
-      key: const Key('layer-name'),
+      key: widget.fieldKey,
       controller: _field,
       autofocus: true,
+      maxLength: widget.maxLength,
       onSubmitted: (_) => _done(),
     ),
     actions: [

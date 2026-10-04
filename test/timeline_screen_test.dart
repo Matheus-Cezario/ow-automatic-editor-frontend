@@ -3180,6 +3180,77 @@ void main() {
     });
   });
 
+  group('markers', () {
+    List<Marker> markers(WidgetTester tester) =>
+        tester.widget<MusicTimeline>(find.byType(MusicTimeline)).markers;
+
+    testWidgets('N puts a marker at the playhead, Shift+N goes to the next', (
+      tester,
+    ) async {
+      await open(tester);
+      await cursorAt(tester, 2);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.pump();
+      await cursorAt(tester, 5);
+      await tester.tap(find.byKey(const Key('add-marker')));
+      await tester.pump();
+      expect([for (final m in markers(tester)) m.tS], [
+        closeTo(2, 0.05),
+        closeTo(5, 0.05),
+      ]);
+      expect(find.byKey(const ValueKey('marker-1')), findsOneWidget);
+
+      await cursorAt(tester, 0.5);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await settle(tester);
+      expect(find.text('00:02'), findsOneWidget);
+
+      // N on a marker takes it away; undo brings it back
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.pump();
+      expect(markers(tester), hasLength(1));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(markers(tester), hasLength(2));
+    });
+
+    testWidgets('a flag is dragged, named and deleted', (tester) async {
+      await open(tester);
+      await cursorAt(tester, 2);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.pump();
+
+      final flag = find.byKey(const ValueKey('marker-0'));
+      await tester.timedDrag(
+        flag,
+        const Offset(3 * px, 0),
+        const Duration(milliseconds: 300),
+      );
+      await tester.pump();
+      expect(markers(tester).single.tS, closeTo(5, 0.4));
+
+      await tester.tap(flag);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(flag);
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('marker-name')), 'drop');
+      await tester.tap(find.text('Rename'));
+      await settle(tester);
+      expect(markers(tester).single.label, 'drop');
+      expect(find.text('drop'), findsOneWidget);
+
+      await tester.tap(flag, buttons: kSecondaryButton);
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('marker-menu-delete')));
+      await settle(tester);
+      expect(markers(tester), isEmpty);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
