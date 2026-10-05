@@ -35,6 +35,7 @@ const _renderStages = {
   'nothing_chosen': 'nothing chosen',
   'nothing_to_cut': 'nothing can be cut',
   'error': 'error',
+  'cancelled': 'cancelled',
 };
 
 String renderStageText(Render render) {

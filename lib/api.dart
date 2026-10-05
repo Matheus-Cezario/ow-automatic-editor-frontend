@@ -2076,9 +2076,22 @@ class Render {
     required this.createdAt,
     this.error,
     this.clips = const [],
+    this.jobId = '',
+    this.jobName = '',
+    this.titles = const [],
+    this.etaS,
+    this.queuePosition,
   });
 
   factory Render.fromJson(Map<String, dynamic> j) => Render(
+    jobId: j['job_id'] as String? ?? '',
+    jobName: j['job_name'] as String? ?? '',
+    titles: [
+      for (final t in (j['timelines'] as List?) ?? const [])
+        if (t is Map) (t['title'] as String?) ?? '',
+    ],
+    etaS: (j['eta_s'] as num?)?.toDouble(),
+    queuePosition: (j['queue_position'] as num?)?.toInt(),
     id: j['id'] as String,
     status: j['status'] as String,
     stage: j['stage'] as String? ?? '',
@@ -2097,6 +2110,26 @@ class Render {
   final DateTime createdAt;
   final String? error;
   final List<Clip> clips;
+
+  final String jobId;
+
+  /// The match's file name — what the queue shows across matches.
+  final String jobName;
+
+  /// The videos asked for, by title.
+  final List<String> titles;
+
+  /// Seconds still needed, while rendering — `null` when it cannot be said.
+  final double? etaS;
+
+  /// Requests ahead of this one, while it waits — `null` once it runs.
+  final int? queuePosition;
+
+  bool get isCancelled => status == 'cancelled';
+
+  /// The time left, coarse — "~3 min".
+  String? get remainingText =>
+      etaS == null ? null : formatRemaining(Duration(seconds: etaS!.round()));
 
   /// Names of the songs used in this request, without repeats.
   ///
@@ -2352,6 +2385,24 @@ class ApiClient {
     final r = await http.get(Uri.parse('$baseUrl/api/renders/$id'));
     _check(r);
     return Render.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// Stops a request that is waiting or rendering; nothing it made is kept.
+  Future<void> cancelRender(String id) async {
+    final r = await http.post(Uri.parse('$baseUrl/api/renders/$id/cancel'));
+    _check(r);
+  }
+
+  /// The render queue across every match: waiting, rendering, and what
+  /// finished in the last minutes — oldest first.
+  Future<List<Render>> renderQueue() async {
+    final r = await http.get(Uri.parse('$baseUrl/api/renders'));
+    _check(r);
+    return [
+      for (final e
+          in (jsonDecode(r.body) as Map<String, dynamic>)['renders'] as List)
+        Render.fromJson(e as Map<String, dynamic>),
+    ];
   }
 
   Future<void> deleteRender(String id) async {

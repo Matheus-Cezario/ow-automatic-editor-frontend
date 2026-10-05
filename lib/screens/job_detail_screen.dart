@@ -7,6 +7,7 @@ import '../stage_text.dart';
 import '../main.dart' show PhoneWidth;
 import '../widgets/download.dart';
 import '../widgets/highlight_style.dart';
+import '../widgets/render_queue.dart';
 import '../widgets/timeline.dart';
 import 'player_screen.dart';
 import 'timeline_screen.dart';
@@ -62,6 +63,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (done == true) await _refresh();
   }
 
+  Future<void> _cancelRequest(Render r) async {
+    try {
+      await _api.cancelRender(r.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not cancel: $e')));
+      }
+    }
+    await _refresh();
+  }
+
   Future<void> _deleteRequest(Render r) async {
     try {
       await _api.deleteRender(r.id);
@@ -81,7 +95,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text(job?.videoName ?? 'Match')),
+      appBar: AppBar(
+        title: Text(job?.videoName ?? 'Match'),
+        actions: [
+          RenderQueueButton(
+            load: _api.renderQueue,
+            cancel: _api.cancelRender,
+          ),
+        ],
+      ),
       body: PhoneWidth(
         child: job == null
             ? Center(
@@ -154,6 +176,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         _RenderCard(
                           render: r,
                           onDelete: () => _deleteRequest(r),
+                          onCancel: () => _cancelRequest(r),
                           onOpen: (c) => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => PlayerScreen(clip: c),
@@ -174,11 +197,13 @@ class _RenderCard extends StatelessWidget {
     required this.render,
     required this.onOpen,
     required this.onDelete,
+    this.onCancel,
   });
 
   final Render render;
   final ValueChanged<Clip> onOpen;
   final VoidCallback onDelete;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -231,13 +256,7 @@ class _RenderCard extends StatelessWidget {
             ),
             if (render.isActive) ...[
               const SizedBox(height: 10),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(
-                  value: render.progress > 0 ? render.progress : null,
-                  minHeight: 6,
-                ),
-              ),
+              RenderProgressLine(render: render, onCancel: onCancel),
             ],
             if (render.isFailed && render.error != null) ...[
               const SizedBox(height: 8),

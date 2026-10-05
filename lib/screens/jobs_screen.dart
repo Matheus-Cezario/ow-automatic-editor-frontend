@@ -7,6 +7,7 @@ import '../stage_text.dart';
 import '../main.dart' show PhoneWidth;
 import '../widgets/download.dart';
 import '../widgets/highlight_style.dart';
+import '../widgets/render_queue.dart';
 import 'job_detail_screen.dart';
 import 'new_job_screen.dart';
 
@@ -81,6 +82,13 @@ class _JobsScreenState extends State<JobsScreen> {
       appBar: AppBar(
         title: const Text('Matches'),
         actions: [
+          RenderQueueButton(
+            load: _api.renderQueue,
+            cancel: _api.cancelRender,
+            onOpenJob: (id) => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => JobDetailScreen(jobId: id)),
+            ),
+          ),
           IconButton(
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
