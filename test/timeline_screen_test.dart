@@ -3569,6 +3569,29 @@ void main() {
     });
   });
 
+  group('loudness', () {
+    testWidgets('the meter sits under the clock; a target can be picked', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      expect(find.byKey(const Key('level-meter')), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const ValueKey('loudness--14')));
+      await tester.tap(find.byKey(const ValueKey('loudness--14')));
+      await tester.pump();
+      final chip = tester.widget<ChoiceChip>(
+        find.byKey(const ValueKey('loudness--14')),
+      );
+      expect(chip.selected, isTrue);
+      expect(
+        tester.widget<ChoiceChip>(find.byKey(const Key('loudness-off'))).selected,
+        isFalse,
+      );
+    });
+  });
+
   group('several formats', () {
     testWidgets('ticking extra formats renders them together', (tester) async {
       await open(tester);

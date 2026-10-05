@@ -92,6 +92,13 @@ List<Montage> renderVariants(
   return out;
 }
 
+/// Loudness targets, in LUFS, and where each is the norm.
+const loudnessTargets = [
+  (-14.0, 'YouTube, Spotify, TikTok'),
+  (-16.0, 'Apple, podcasts'),
+  (-23.0, 'TV (EBU R128)'),
+];
+
 /// Quality, in three steps.
 ///
 /// The number is H.264's CRF, where lower is better and each +6 roughly halves

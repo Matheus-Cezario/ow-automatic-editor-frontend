@@ -518,6 +518,9 @@ class _ClipCard extends StatelessWidget {
                         if (clip.isLooped && !clip.onlyCuts) 'shuffled',
                         if (clip.keepsOriginalAudio && !clip.onlyCuts)
                           'match audio',
+                        if (clip.loudness case final lufs?)
+                          '${lufs.toStringAsFixed(1)} LUFS'
+                              '${clip.truePeak == null ? '' : ' · peak ${clip.truePeak!.toStringAsFixed(1)} dBTP'}',
                       ].join('  ·  '),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: clip.onlyCuts

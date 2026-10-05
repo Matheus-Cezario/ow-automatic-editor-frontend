@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import '../api.dart';
 import '../montage.dart';
 import '../export_options.dart';
+import '../levels.dart';
 import '../fullscreen.dart';
 import '../fonts.dart';
 import '../montage_state.dart';
@@ -25,6 +26,7 @@ import '../widgets/preview_player.dart';
 import '../widgets/blend_panel.dart';
 import '../widgets/crop_panel.dart';
 import '../widgets/fx_panel.dart';
+import '../widgets/level_meter.dart';
 import '../widgets/source_cutter.dart';
 import '../zoom.dart';
 
@@ -3060,6 +3062,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     color: theme.hintColor,
                   ),
                 ),
+                const SizedBox(height: 3),
+                LevelMeter(
+                  level: mixLevelAt(
+                    _state,
+                    _cursor,
+                    tracks: _tracks,
+                    matchWave: widget.job.waveform,
+                    matchDurationS: widget.job.durationS,
+                  ),
+                ),
               ],
             ),
             const SizedBox(width: 6),
@@ -5259,6 +5271,32 @@ class _ExportPanel extends StatelessWidget {
                     ),
                 ],
               ),
+
+            _OptionRow(
+              textClip: 'Loudness',
+              children: [
+                ChoiceChip(
+                  key: const Key('loudness-off'),
+                  label: const Text('As mixed'),
+                  tooltip: 'the sound comes out at the levels set here',
+                  selected: spec.loudness == null,
+                  onSelected: enabled
+                      ? (_) => onChange(spec.copyWith(clearLoudness: true))
+                      : null,
+                ),
+                for (final (lufs, where) in loudnessTargets)
+                  ChoiceChip(
+                    key: ValueKey('loudness-${lufs.round()}'),
+                    label: Text('${lufs.round()} LUFS'),
+                    tooltip: '$where — the render brings the whole mix to '
+                        'it, peaks under -1.5 dBTP',
+                    selected: spec.loudness == lufs,
+                    onSelected: enabled
+                        ? (_) => onChange(spec.copyWith(loudness: lufs))
+                        : null,
+                  ),
+              ],
+            ),
 
             _OptionRow(
               textClip: 'Frame rate',

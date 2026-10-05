@@ -1314,6 +1314,7 @@ class ExportSpec {
     this.watermarkY = -0.82,
     this.watermarkOpacity = 0.65,
     this.killfeedInset = false,
+    this.loudness,
     this.extraFormats = const [],
     this.extraFit = 'cover',
     this.extraKillfeed = false,
@@ -1333,6 +1334,7 @@ class ExportSpec {
     watermarkY: (j['watermark_y'] as num?)?.toDouble() ?? -0.82,
     watermarkOpacity: (j['watermark_opacity'] as num?)?.toDouble() ?? 0.65,
     killfeedInset: j['killfeed_inset'] as bool? ?? false,
+    loudness: (j['loudness'] as num?)?.toDouble(),
     extraFormats: [
       for (final f in (j['extra_formats'] as List?) ?? const []) f as String,
     ],
@@ -1355,6 +1357,10 @@ class ExportSpec {
   /// In a portrait output, the recording's killfeed brought back at the top
   /// — a centre crop cuts it away.
   final bool killfeedInset;
+
+  /// Integrated loudness the sound is brought to, in LUFS; `null` leaves the
+  /// mix as it is.
+  final double? loudness;
 
   /// Other aspects rendered with this one (`9:16`, `1:1`, ...), and how they
   /// are framed — see `renderVariants`.
@@ -1383,7 +1389,8 @@ class ExportSpec {
       fromS == 0 &&
       toS == null &&
       watermarkId == null &&
-      !killfeedInset;
+      !killfeedInset &&
+      loudness == null;
 
   ExportSpec copyWith({
     int? width,
@@ -1401,6 +1408,8 @@ class ExportSpec {
     double? watermarkY,
     double? watermarkOpacity,
     bool? killfeedInset,
+    double? loudness,
+    bool clearLoudness = false,
     List<String>? extraFormats,
     String? extraFit,
     bool? extraKillfeed,
@@ -1418,6 +1427,7 @@ class ExportSpec {
     watermarkY: watermarkY ?? this.watermarkY,
     watermarkOpacity: watermarkOpacity ?? this.watermarkOpacity,
     killfeedInset: killfeedInset ?? this.killfeedInset,
+    loudness: clearLoudness ? null : (loudness ?? this.loudness),
     extraFormats: extraFormats ?? this.extraFormats,
     extraFit: extraFit ?? this.extraFit,
     extraKillfeed: extraKillfeed ?? this.extraKillfeed,
@@ -1437,6 +1447,7 @@ class ExportSpec {
     'watermark_y': watermarkY,
     'watermark_opacity': watermarkOpacity,
     if (killfeedInset) 'killfeed_inset': true,
+    if (loudness != null) 'loudness': loudness,
     if (extraFormats.isNotEmpty) 'extra_formats': extraFormats,
     if (extraFit != 'cover') 'extra_fit': extraFit,
     if (extraKillfeed) 'extra_killfeed': true,
@@ -2063,6 +2074,11 @@ class Clip {
   /// The montage failed but the cuts are available.
   bool get onlyCuts => videoUrl == null && segmentsZipUrl != null;
   String? get renderError => meta['render_error'] as String?;
+
+  /// How loud the video came out (LUFS) and its true peak (dBTP), measured
+  /// by the server after rendering.
+  double? get loudness => (meta['loudness'] as num?)?.toDouble();
+  double? get truePeak => (meta['true_peak'] as num?)?.toDouble();
 }
 
 /// A generation request: the montages sent to the server at once.
