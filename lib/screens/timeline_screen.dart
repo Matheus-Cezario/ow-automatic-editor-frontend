@@ -153,6 +153,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// The monitor over the whole window (and the screen, if the browser lets).
   bool _fullscreen = false;
 
+  /// Is the right-hand settings sidebar open (on a wide screen)?
+  bool _settingsOpen = true;
+
   /// Framing guides over the monitor — see [MonitorGuide].
   Set<MonitorGuide> _guides = const {};
   final _monitorKey = GlobalKey(debugLabel: 'monitor');
@@ -2278,6 +2281,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// single column — the app stays usable on a phone.
   static const double _editorWidth = 900;
 
+  /// From this width the settings move to a sidebar on the right; below it
+  /// the ruler would be too narrow to work on, and they stay under it.
+  static const double _settingsAsideWidth = 1200;
+  static const double _settingsWidth = 360;
+
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
@@ -2398,12 +2406,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
               if (!sidebarFits) {
                 return _main(dockMoments: true);
               }
+              final aside = bounds.maxWidth >= _settingsAsideWidth;
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(width: 300, child: _sidebar()),
                   const VerticalDivider(width: 1),
-                  Expanded(child: _main(dockMoments: false)),
+                  Expanded(
+                    child: _main(dockMoments: false, settingsAside: aside),
+                  ),
+                  if (aside) ...[
+                    const VerticalDivider(width: 1),
+                    _settingsSidebar(),
+                  ],
                 ],
               );
             },
@@ -2473,6 +2488,76 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// The sidebar: what the system found and what the user brought, side by
   /// side — both answer the same question, "what do I put in now?".
+  /// The right-hand sidebar with the settings. Collapsed, it is a thin strip
+  /// that gives the room back to the ruler and opens again with a click.
+  Widget _settingsSidebar() {
+    final theme = Theme.of(context);
+    final selected = _state.selectionIds.length;
+    if (!_settingsOpen) {
+      return SizedBox(
+        key: const Key('settings-collapsed'),
+        width: 44,
+        child: Column(
+          children: [
+            const SizedBox(height: 4),
+            IconButton(
+              key: const Key('settings-expand'),
+              tooltip: 'Show the settings',
+              onPressed: () => setState(() => _settingsOpen = true),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            const SizedBox(height: 4),
+            Tooltip(
+              message: selected == 0
+                  ? 'Settings'
+                  : '$selected clip${selected == 1 ? '' : 's'} selected',
+              child: Badge(
+                isLabelVisible: selected > 0,
+                label: Text('$selected'),
+                child: Icon(Icons.tune, color: theme.hintColor),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return SizedBox(
+      key: const Key('settings-sidebar'),
+      width: _settingsWidth,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 4, 0),
+            child: Row(
+              children: [
+                const Icon(Icons.tune, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Settings', style: theme.textTheme.titleSmall),
+                ),
+                IconButton(
+                  key: const Key('settings-collapse'),
+                  tooltip: 'Hide the settings',
+                  onPressed: () => setState(() => _settingsOpen = false),
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView(
+              key: const Key('montage-panels'),
+              padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
+              children: _settingsChildren(dockMoments: false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _sidebar() => DefaultTabController(
     length: 4,
     child: Column(
@@ -2613,10 +2698,223 @@ class _TimelineScreenState extends State<TimelineScreen> {
     onAdd: _add,
   );
 
-  Widget _main({required bool dockMoments}) {
+  /// The settings: the selected clip, the mix, the beat grid, the export and
+  /// the render. Under the ruler on a narrow screen, in the right-hand
+  /// sidebar on a wide one.
+  List<Widget> _settingsChildren({required bool dockMoments}) {
     final theme = Theme.of(context);
     final durationValue = videoDuration(_state.clips);
     final blackS = blackDuration(_state.clips);
+    final selectionIds = _state.selectionIds;
+    return <Widget>[
+      if (selectionIds.length == 1) ...[
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _SelectedBlock(
+            cut: _state.clipItem(selectionIds.first)!,
+            mediaItem: _blockMedia(selectionIds.first),
+            onSpeed: (v) => _effect(selectionIds.first, speed: v),
+            onColor: (v) => _effect(selectionIds.first, color: v),
+            onFade: (v) => _effect(selectionIds.first, fade: v),
+            onZoom: (v) => _effect(selectionIds.first, zoom: v),
+            onFreeze: (v) => _effect(selectionIds.first, freeze: v),
+            onReverse: (v) => _effect(selectionIds.first, reverse: v),
+            onStyle: (v) =>
+                _edit(changeText(_state, selectionIds.first, styleSpec: v)),
+            onTypeOnFrame: () => _typeOnFrame(selectionIds.first),
+            onDurationChange: (d) => _stretch(selectionIds.first, d),
+            onShift: (d) => _shift(selectionIds.first, d),
+            onToCursor: () => _move(selectionIds.first, _cursor),
+            onMomentAtCursor: () => _alignMomentToCursor(selectionIds.first),
+            onDelete: _deleteSelection,
+            onSplit: _splitAtCursor,
+            onDuplicate: _duplicate,
+            motion: _picturePanels(selectionIds.first),
+            fonts: _fonts,
+            onRamp: () => _rampIntoMoment(selectionIds.first),
+          ),
+        ),
+      ] else if (selectionIds.length > 1) ...[
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _MultiSelection(
+            count: selectionIds.length,
+            onDelete: _deleteSelection,
+            onDuplicate: _duplicate,
+            onClearSelection: () => _select(null),
+            onRippleDelete: _rippleDeleteSelection,
+            onPasteEffects: _effectsFrom == null ? null : _pasteEffects,
+          ),
+        ),
+      ],
+
+      if (_hasMusic) ...[
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _Mix(
+            musicVolume: _state.musicVolume,
+            gameVolume: _state.gameVolume,
+            hasMusic: true,
+            onChange: (music, game) => _edit(
+              _state.copyWith(musicVolume: music, gameVolume: game),
+            ),
+            duckPlays: _state.duckPlays,
+            duckLevel: _state.duckLevel,
+            plays: playTimes(_state.layers).length,
+            onDuck: (on, level) =>
+                _edit(_state.copyWith(duckPlays: on, duckLevel: level)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _BeatGrid(
+            offsetS: _state.beatOffsetS,
+            multiplier: _state.beatMultiplier,
+            bar: _state.beatBar,
+            howMany: _beats.length,
+            onChange: (offset, mult, bar) => _edit(
+              _state.copyWith(
+                beatOffsetS: offset,
+                beatMultiplier: mult,
+                beatBar: bar,
+              ),
+            ),
+          ),
+        ),
+      ],
+
+      if (dockMoments) ...[
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _moments(docked: true),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _recordingPanel(),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _libraryPanel(docked: true),
+        ),
+        const SizedBox(height: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _transitions(docked: true),
+        ),
+      ],
+
+      const SizedBox(height: 14),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _ExportPanel(
+          spec: _state.export,
+          durationSecs: durationValue,
+          widthPx: widget.job.width,
+          heightPx: widget.job.height,
+          hasSelection: selectionIds.isNotEmpty,
+          pictures: [
+            for (final m in _library)
+              if (m.kind == 'image' && m.isReady) m,
+          ],
+          enabled: !_sending,
+          onChange: (e) => _edit(_state.copyWith(export: e)),
+          onExportSelection: () => _edit(exportSelection(_state)),
+          onExportAll: () => _edit(exportAll(_state)),
+        ),
+      ),
+
+      const SizedBox(height: 20),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _title,
+              enabled: !_sending,
+              // Tapping outside gives the focus back to the montage, and the
+              // shortcuts with it. Nothing takes the focus away from a
+              // `TextField` on its own: without this, one tap here killed "S"
+              // and Delete for good.
+              onTapOutside: (_) => _restoreFocus(),
+              onChanged: (v) => _withoutHistory(_state.copyWith(title: v)),
+              decoration: const InputDecoration(
+                labelText: 'Video name',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _state.isBlank
+                  ? 'Pick a moment to place the first cut where the '
+                        'playhead is.'
+                  // a music block is not a cut: whoever counts cuts wants to
+                  // know how many scenes the video has
+                  // a clip covered in the middle becomes two pieces on the
+                  // monitor, but it is still one cut
+                  : '${{for (final c in _state.visibleClips) c.id}.length} cut(s)'
+                        '${_hasMusic ? '  ·  with music' : ''}'
+                        '  ·  ${formatDuration(durationValue)} video'
+                        '${blackS > 0.05 ? '  ·  ${formatDuration(blackS)} of black screen' : ''}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
+            ),
+            if (blackS > 0.05)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Empty gaps between blocks stay black, with the '
+                  'music playing.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.hintColor,
+                  ),
+                ),
+              ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.error.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (_sending)
+              const Center(child: CircularProgressIndicator())
+            else
+              FilledButton.icon(
+                onPressed: _state.isBlank ? null : _render,
+                icon: const Icon(Icons.movie_creation_outlined),
+                label: Text(
+                  _state.isBlank
+                      ? 'Add at least one cut'
+                      : 'Render this video',
+                ),
+              ),
+          ],
+        ),
+      ),
+    ];
+
+  }
+
+  Widget _main({required bool dockMoments, bool settingsAside = false}) {
+    final theme = Theme.of(context);
     final selectionIds = _state.selectionIds;
 
     // The monitor, transport and ruler stay pinned at the top; only the panels
@@ -2889,210 +3187,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SizedBox(height: 4),
     ];
 
-    final scrolling = <Widget>[
-      if (selectionIds.length == 1) ...[
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _SelectedBlock(
-            cut: _state.clipItem(selectionIds.first)!,
-            mediaItem: _blockMedia(selectionIds.first),
-            onSpeed: (v) => _effect(selectionIds.first, speed: v),
-            onColor: (v) => _effect(selectionIds.first, color: v),
-            onFade: (v) => _effect(selectionIds.first, fade: v),
-            onZoom: (v) => _effect(selectionIds.first, zoom: v),
-            onFreeze: (v) => _effect(selectionIds.first, freeze: v),
-            onReverse: (v) => _effect(selectionIds.first, reverse: v),
-            onStyle: (v) =>
-                _edit(changeText(_state, selectionIds.first, styleSpec: v)),
-            onTypeOnFrame: () => _typeOnFrame(selectionIds.first),
-            onDurationChange: (d) => _stretch(selectionIds.first, d),
-            onShift: (d) => _shift(selectionIds.first, d),
-            onToCursor: () => _move(selectionIds.first, _cursor),
-            onMomentAtCursor: () => _alignMomentToCursor(selectionIds.first),
-            onDelete: _deleteSelection,
-            onSplit: _splitAtCursor,
-            onDuplicate: _duplicate,
-            motion: _picturePanels(selectionIds.first),
-            fonts: _fonts,
-            onRamp: () => _rampIntoMoment(selectionIds.first),
-          ),
-        ),
-      ] else if (selectionIds.length > 1) ...[
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _MultiSelection(
-            count: selectionIds.length,
-            onDelete: _deleteSelection,
-            onDuplicate: _duplicate,
-            onClearSelection: () => _select(null),
-            onRippleDelete: _rippleDeleteSelection,
-            onPasteEffects: _effectsFrom == null ? null : _pasteEffects,
-          ),
-        ),
-      ],
+    final scrolling = _settingsChildren(dockMoments: dockMoments);
 
-      if (_hasMusic) ...[
-        const SizedBox(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _Mix(
-            musicVolume: _state.musicVolume,
-            gameVolume: _state.gameVolume,
-            hasMusic: true,
-            onChange: (music, game) => _edit(
-              _state.copyWith(musicVolume: music, gameVolume: game),
-            ),
-            duckPlays: _state.duckPlays,
-            duckLevel: _state.duckLevel,
-            plays: playTimes(_state.layers).length,
-            onDuck: (on, level) =>
-                _edit(_state.copyWith(duckPlays: on, duckLevel: level)),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _BeatGrid(
-            offsetS: _state.beatOffsetS,
-            multiplier: _state.beatMultiplier,
-            bar: _state.beatBar,
-            howMany: _beats.length,
-            onChange: (offset, mult, bar) => _edit(
-              _state.copyWith(
-                beatOffsetS: offset,
-                beatMultiplier: mult,
-                beatBar: bar,
-              ),
-            ),
-          ),
-        ),
-      ],
-
-      if (dockMoments) ...[
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _moments(docked: true),
-        ),
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _recordingPanel(),
-        ),
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _libraryPanel(docked: true),
-        ),
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _transitions(docked: true),
-        ),
-      ],
-
-      const SizedBox(height: 14),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: _ExportPanel(
-          spec: _state.export,
-          durationSecs: durationValue,
-          widthPx: widget.job.width,
-          heightPx: widget.job.height,
-          hasSelection: selectionIds.isNotEmpty,
-          pictures: [
-            for (final m in _library)
-              if (m.kind == 'image' && m.isReady) m,
-          ],
-          enabled: !_sending,
-          onChange: (e) => _edit(_state.copyWith(export: e)),
-          onExportSelection: () => _edit(exportSelection(_state)),
-          onExportAll: () => _edit(exportAll(_state)),
-        ),
-      ),
-
-      const SizedBox(height: 20),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+    // wide: the settings live in the sidebar on the right, and the monitor,
+    // transport and ruler have the whole height
+    if (settingsAside) {
+      return SingleChildScrollView(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _title,
-              enabled: !_sending,
-              // Tapping outside gives the focus back to the montage, and the
-              // shortcuts with it. Nothing takes the focus away from a
-              // `TextField` on its own: without this, one tap here killed "S"
-              // and Delete for good.
-              onTapOutside: (_) => _restoreFocus(),
-              onChanged: (v) => _withoutHistory(_state.copyWith(title: v)),
-              decoration: const InputDecoration(
-                labelText: 'Video name',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _state.isBlank
-                  ? 'Pick a moment to place the first cut where the '
-                        'playhead is.'
-                  // a music block is not a cut: whoever counts cuts wants to
-                  // know how many scenes the video has
-                  // a clip covered in the middle becomes two pieces on the
-                  // monitor, but it is still one cut
-                  : '${{for (final c in _state.visibleClips) c.id}.length} cut(s)'
-                        '${_hasMusic ? '  ·  with music' : ''}'
-                        '  ·  ${formatDuration(durationValue)} video'
-                        '${blackS > 0.05 ? '  ·  ${formatDuration(blackS)} of black screen' : ''}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.hintColor,
-              ),
-            ),
-            if (blackS > 0.05)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Empty gaps between blocks stay black, with the '
-                  'music playing.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.hintColor,
-                  ),
-                ),
-              ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.error.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            if (_sending)
-              const Center(child: CircularProgressIndicator())
-            else
-              FilledButton.icon(
-                onPressed: _state.isBlank ? null : _render,
-                icon: const Icon(Icons.movie_creation_outlined),
-                label: Text(
-                  _state.isBlank
-                      ? 'Add at least one cut'
-                      : 'Render this video',
-                ),
-              ),
-          ],
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: pinned,
         ),
-      ),
-    ];
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, box) => Column(

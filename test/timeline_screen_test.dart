@@ -3565,6 +3565,82 @@ void main() {
     });
   });
 
+  group('settings sidebar on a wide screen', () {
+    Future<void> openWide(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(home: TimelineScreen(job: jobWithMoments())),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('the settings sit on the right, not under the ruler', (
+      tester,
+    ) async {
+      await openWide(tester);
+      final sidebar = find.byKey(const Key('settings-sidebar'));
+      expect(sidebar, findsOneWidget);
+      expect(
+        find.descendant(of: sidebar, matching: find.byType(TextField)),
+        findsWidgets,
+        reason: 'the video name and the export settings are there',
+      );
+      // to the right of the ruler
+      expect(
+        tester.getTopLeft(sidebar).dx,
+        greaterThanOrEqualTo(tester.getRect(find.byType(MusicTimeline)).right),
+      );
+
+      // the selected clip's panel opens in it
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byKey(ValueKey('block-${cutList(tester).single.id}')));
+      await tester.pump();
+      expect(
+        find.descendant(of: sidebar, matching: find.byKey(const Key('crop-panel'))),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('at the narrowest width that has it, nothing overflows', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(home: TimelineScreen(job: jobWithMoments(withMusic: true))),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('settings-sidebar')), findsOneWidget);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(find.byKey(ValueKey('block-${cutList(tester).first.id}')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('it collapses to a strip and the ruler takes the room', (
+      tester,
+    ) async {
+      await openWide(tester);
+      final wide = tester.getSize(find.byType(MusicTimeline)).width;
+
+      await tester.tap(find.byKey(const Key('settings-collapse')));
+      await tester.pump();
+      expect(find.byKey(const Key('settings-sidebar')), findsNothing);
+      expect(find.byKey(const Key('settings-collapsed')), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(MusicTimeline)).width,
+        greaterThan(wide + 300),
+      );
+
+      await tester.tap(find.byKey(const Key('settings-expand')));
+      await tester.pump();
+      expect(find.byKey(const Key('settings-sidebar')), findsOneWidget);
+    });
+  });
+
   group('moment hover preview', () {
     Future<TestGesture> mouse(WidgetTester tester) async {
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
