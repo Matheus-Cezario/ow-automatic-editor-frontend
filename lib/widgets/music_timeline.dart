@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../api.dart';
 import '../montage.dart';
 import 'highlight_style.dart';
+import 'volume_curve.dart';
 
 /// What is being dragged onto the ruler.
 ///
@@ -96,6 +97,9 @@ class MusicTimeline extends StatefulWidget {
     this.onTrackHeight,
     this.range,
     this.onRange,
+    this.onVolume,
+    this.volumeEditing = false,
+    this.onVolumeMode,
     this.markers = const [],
     this.onMoveMarker,
     this.onRenameMarker,
@@ -114,6 +118,16 @@ class MusicTimeline extends StatefulWidget {
   /// ends are dragged.
   final (double, double)? range;
   final void Function(double fromS, double toS)? onRange;
+
+  /// A clip's volume from its line on the ruler: a [level] for the whole clip,
+  /// or its volume [keys].
+  final void Function(String id, {double? level, List<ClipKey>? keys})?
+  onVolume;
+
+  /// Volume mode: the selected clip's line takes the pointer. Off, lines are
+  /// only drawn, so grabbing a block still moves it.
+  final bool volumeEditing;
+  final VoidCallback? onVolumeMode;
 
   /// The notes on the ruler. A flag on the time ruler: a click goes there,
   /// a drag moves it, a double click names it, a right click offers the rest.
@@ -714,6 +728,8 @@ class _MusicTimelineState extends State<MusicTimeline> {
               rowHeight: _rowHeight,
               trackHeight: widget.trackHeight,
               onTrackHeight: widget.onTrackHeight,
+              volumeEditing: widget.volumeEditing,
+              onVolumeMode: widget.onVolumeMode,
             ),
           ),
           const VerticalDivider(width: 1),
@@ -855,6 +871,16 @@ class _MusicTimelineState extends State<MusicTimeline> {
                               ),
                           onMenu: (global) =>
                               _clipMenu(clip.id, layerIndex, global),
+                          hasSound:
+                              widget.layers[layerIndex].isAudio ||
+                              clip.source == 'recording',
+                          volumeEditing: widget.volumeEditing,
+                          onVolumeLevel: widget.onVolume == null
+                              ? null
+                              : (v) => widget.onVolume!(clip.id, level: v),
+                          onVolumeKeys: widget.onVolume == null
+                              ? null
+                              : (k) => widget.onVolume!(clip.id, keys: k),
                         ),
 
                       // the in/out range: what is outside it dims, and its
@@ -1289,10 +1315,14 @@ class _Headers extends StatefulWidget {
     required this.rowHeight,
     required this.trackHeight,
     this.onTrackHeight,
+    this.volumeEditing = false,
+    this.onVolumeMode,
   });
 
   final double trackHeight;
   final ValueChanged<double>? onTrackHeight;
+  final bool volumeEditing;
+  final VoidCallback? onVolumeMode;
 
   final List<Layer> layers;
   final int active;
@@ -1336,7 +1366,28 @@ class _HeadersState extends State<_Headers> {
           height: MusicTimeline.waveHeight,
           child: Row(
             children: [
-              const SizedBox(width: 24),
+              SizedBox(
+                width: 24,
+                child: widget.onVolumeMode == null
+                    ? null
+                    : Tooltip(
+                        message: widget.volumeEditing
+                            ? 'Volume lines: on — drag the selected clip\'s '
+                                  'line, click it to add a point (V)'
+                            : 'Edit volume lines on the ruler (V)',
+                        child: InkWell(
+                          key: const Key('volume-mode'),
+                          onTap: widget.onVolumeMode,
+                          child: Icon(
+                            Icons.show_chart,
+                            size: 16,
+                            color: widget.volumeEditing
+                                ? theme.colorScheme.tertiary
+                                : theme.hintColor,
+                          ),
+                        ),
+                      ),
+              ),
               Expanded(
                 child: Center(
                   child: Text(
@@ -1736,6 +1787,10 @@ class _Block extends StatefulWidget {
     required this.top,
     required this.height,
     this.stepsFor,
+    this.hasSound = false,
+    this.volumeEditing = false,
+    this.onVolumeLevel,
+    this.onVolumeKeys,
     required this.onSelect,
     required this.onMove,
     required this.onTrim,
@@ -1772,6 +1827,12 @@ class _Block extends StatefulWidget {
   /// How many tracks a vertical drag of this many pixels crossed — down is
   /// positive. Tracks are not all the same height, so the timeline answers.
   final int Function(double rose)? stepsFor;
+
+  /// Does the clip carry sound? Then its volume line is drawn over it.
+  final bool hasSound;
+  final bool volumeEditing;
+  final ValueChanged<double>? onVolumeLevel;
+  final ValueChanged<List<ClipKey>>? onVolumeKeys;
   final void Function({bool toggle}) onSelect;
   final ValueChanged<double> onMove;
   final ValueChanged<double> onTrim;
@@ -2145,6 +2206,29 @@ class _BlockState extends State<_Block> {
                         ),
                       ),
                     ),
+                // ── the volume line: editable on the chosen block, drawn on
+                // the others only when it is not plain 100%
+                if (widget.hasSound &&
+                    widget.height >= 40 &&
+                    widget.onVolumeLevel != null &&
+                    ((widget.selected && widget.volumeEditing) ||
+                        widget.cut.audio.volume != 1 ||
+                        widget.cut.keysFor(KeyProp.volume).isNotEmpty))
+                  Positioned.fill(
+                    child: VolumeCurve(
+                      clip: widget.cut,
+                      colour: theme.colorScheme.tertiary,
+                      editable:
+                          widget.selected &&
+                          widget.volumeEditing &&
+                          !widget.isLocked,
+                      onLevel: widget.onVolumeLevel!,
+                      onKeys: widget.onVolumeKeys!,
+                      onLabel: widget.onDragLabel,
+                      onStart: widget.onDragStart,
+                      onEnd: widget.onDragEnd,
+                    ),
+                  ),
                 if (widget.selected && !widget.isLocked) ...[
                   _handle(_Gesture.trimLeft, fillColour, leftEdge: true),
                   _handle(_Gesture.stretchRight, fillColour, leftEdge: false),

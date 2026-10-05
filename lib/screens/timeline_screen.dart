@@ -155,6 +155,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// The monitor over the whole window (and the screen, if the browser lets).
   bool _fullscreen = false;
 
+  /// Volume mode: the selected clip's volume line is edited on the ruler.
+  bool _volumeMode = false;
+
   /// Is the right-hand settings sidebar open (on a wide screen)?
   bool _settingsOpen = true;
 
@@ -1632,7 +1635,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       final duck = _state.duckPlays
           ? duckAt(playTimes(_state.layers), _cursor) * (1 - _state.duckLevel)
           : 0.0;
-      final volume = (_state.musicVolume * (1 - duck)).clamp(0.0, 1.0);
+      // and the block's own volume — its line on the ruler — and fades; the
+      // player cannot go above full, so a boost past 100% is only heard in
+      // the render
+      final own = gainAt(here.block, _cursor - here.block.atS);
+      final volume = (_state.musicVolume * own * (1 - duck)).clamp(0.0, 1.0);
       if ((c.value.volume - volume).abs() > 0.01) await c.setVolume(volume);
       if ((nowS - location).abs() > 0.2) {
         await c.seekTo(Duration(milliseconds: (location * 1000).round()));
@@ -2256,6 +2263,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _splitAtCursor(everyLayer: true),
       const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
       const SingleActivator(LogicalKeyboardKey.keyN): _toggleMarker,
+      const SingleActivator(LogicalKeyboardKey.keyV): () =>
+          setState(() => _volumeMode = !_volumeMode),
       const SingleActivator(LogicalKeyboardKey.keyI): _markIn,
       const SingleActivator(LogicalKeyboardKey.keyO): _markOut,
       const SingleActivator(LogicalKeyboardKey.keyX, alt: true): _clearRange,
@@ -2503,6 +2512,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _Shortcut('[ / ]', 'trim the start / end to the cursor'),
               _Shortcut('N / Shift + N', 'marker at the playhead / next marker'),
               _Shortcut('I / O', 'in / out point at the playhead'),
+              _Shortcut('V', 'volume lines: drag, click to add a point'),
               _Shortcut('F', 'monitor full screen (Esc leaves)'),
               _Shortcut('Alt + X', 'clear the in and out points'),
               _Shortcut('Shift + L', 'loop playback (the in/out range, or all)'),
@@ -3209,6 +3219,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           final r? => (r.from, r.to),
           null => null,
         },
+        onVolume: (id, {level, keys}) =>
+            _edit(setVolumeCurve(_state, id, level: level, keys: keys)),
+        volumeEditing: _volumeMode,
+        onVolumeMode: () => setState(() => _volumeMode = !_volumeMode),
         onRange: (from, to) => _edit(
           _state.copyWith(
             export: _state.export.copyWith(fromS: from, toS: to),

@@ -373,6 +373,47 @@ MontageState setBlendKey(
   );
 }
 
+/// A clip's volume from its line on the ruler: [level] sets the whole clip,
+/// [keys] replaces its volume keyframes (the other properties' stay).
+MontageState setVolumeCurve(
+  MontageState s,
+  String id, {
+  double? level,
+  List<ClipKey>? keys,
+}) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final c = s.layers[layerIndex].clips[i];
+  return s.withClip(
+    layerIndex,
+    i,
+    c.copyWith(
+      audio: level == null ? null : c.audio.copyWith(volume: level),
+      keys: keys == null
+          ? null
+          : [
+              for (final k in c.keys)
+                if (k.prop != KeyProp.volume) k,
+              ...keys,
+            ],
+    ),
+  );
+}
+
+/// How loud a clip is at [localS] from its first frame: its volume (curve
+/// included) and its audio fades — 0 when muted.
+double gainAt(TimelineClip c, double localS) {
+  final a = c.audio;
+  if (a.mute) return 0;
+  var g = valueAt(c, KeyProp.volume, localS);
+  if (a.fadeInS > 0) g *= (localS / a.fadeInS).clamp(0.0, 1.0);
+  if (a.fadeOutS > 0) {
+    g *= ((c.durationS - localS) / a.fadeOutS).clamp(0.0, 1.0);
+  }
+  return g;
+}
+
 /// The clip's visual effects, whole.
 MontageState setFx(MontageState s, String id, ClipFx fx) {
   final location = s.locate(id);

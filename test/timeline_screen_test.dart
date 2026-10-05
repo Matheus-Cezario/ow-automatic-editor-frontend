@@ -3592,6 +3592,51 @@ void main() {
     });
   });
 
+  group('volume line', () {
+    testWidgets('in volume mode the selected clip\'s line drags its volume', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      final id = firstCut(tester).id;
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(
+        find.byKey(ValueKey('volume-line-$id')),
+        findsNothing,
+        reason: 'at 100% and not selected, no line',
+      );
+
+      await tester.tap(block(tester, 0));
+      await tester.pump();
+      final line = find.byKey(ValueKey('volume-line-$id'));
+      expect(line, findsNothing, reason: 'grabbing the block still moves it');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.pump();
+      expect(line, findsOneWidget);
+
+      final box = tester.getRect(line);
+      final before = firstCut(tester);
+      // 100% sits half-way up; up by 45% of the height is +90%
+      await tester.dragFrom(
+        Offset(box.center.dx, box.center.dy),
+        Offset(0, -box.height * 0.45),
+      );
+      await settle(tester);
+      final after = firstCut(tester);
+      expect(after.audio.volume, closeTo(1.9, 0.05));
+      expect((after.atS, cutList(tester).length), (before.atS, 1));
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(firstCut(tester).audio.volume, 1);
+    });
+  });
+
   group('blend and key', () {
     testWidgets('a blend mode on a picture clip is undoable', (tester) async {
       await open(tester);
