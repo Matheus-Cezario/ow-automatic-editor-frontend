@@ -210,6 +210,13 @@ class _Slot {
       ..setProperty('transform-origin', '0 0');
     wrapper.appendChild(media);
 
+    vignette.style
+      ..setProperty('position', 'absolute')
+      ..setProperty('inset', '0')
+      ..setProperty('pointer-events', 'none')
+      ..setProperty('display', 'none');
+    wrapper.appendChild(vignette);
+
     veil.style
       ..setProperty('position', 'absolute')
       ..setProperty('inset', '0')
@@ -240,6 +247,7 @@ class _Slot {
   final String filterId;
   final web.HTMLDivElement wrapper = web.HTMLDivElement();
   final web.HTMLDivElement veil = web.HTMLDivElement();
+  final web.HTMLDivElement vignette = web.HTMLDivElement();
   late final web.HTMLElement media;
   web.HTMLVideoElement? _video;
   late final web.Element _filter;
@@ -289,16 +297,42 @@ class _Slot {
                   '${p.crop.cropBottom * 100}% ${p.crop.cropLeft * 100}%)'
             : 'none',
       );
+    // the shake moves an enlarged picture under the frame, around its centre;
+    // the zoom window works inside that (its origin is the top-left corner)
+    final shaking = p.shakeZoom != 1;
+    final shake = shaking
+        ? 'translate(${-p.shakeX * 100}%, ${-p.shakeY * 100}%) '
+              'translate(50%, 50%) scale(${p.shakeZoom}) translate(-50%, -50%) '
+        : '';
+    final zoom = p.zoom == 1
+        ? ''
+        : 'translate(${-p.zoomLeft * p.zoom * 100}%, '
+              '${-p.zoomTop * p.zoom * 100}%) scale(${p.zoom})';
+    // the server's blur is up to a 12 px sigma on a 1080p frame
+    final blurPx = p.fx.blur * 12 * wrapper.clientHeight / 1080;
+    final filters = [
+      if (p.hasColor) 'url(#$filterId)',
+      ?lookCss(p.fx.look),
+      if (blurPx > 0) 'blur(${blurPx.toStringAsFixed(2)}px)',
+    ];
     media.style
       ..setProperty('object-fit', p.fit == 'contain' ? 'contain' : 'cover')
       ..setProperty(
         'transform',
-        p.zoom == 1
-            ? 'none'
-            : 'translate(${-p.zoomLeft * p.zoom * 100}%, '
-                  '${-p.zoomTop * p.zoom * 100}%) scale(${p.zoom})',
+        shake.isEmpty && zoom.isEmpty ? 'none' : '$shake$zoom',
       )
-      ..setProperty('filter', p.hasColor ? 'url(#$filterId)' : 'none');
+      ..setProperty('filter', filters.isEmpty ? 'none' : filters.join(' '));
+    if (p.fx.vignette > 0) {
+      vignette.style
+        ..setProperty('display', 'block')
+        ..setProperty(
+          'background',
+          'radial-gradient(ellipse at center, transparent 45%, '
+              'rgba(0,0,0,${(p.fx.vignette * 0.85).toStringAsFixed(3)}) 100%)',
+        );
+    } else {
+      vignette.style.setProperty('display', 'none');
+    }
     if (p.hasColor) {
       final intercept = 0.5 * (1 - p.contrast) + p.brightness;
       for (final f in _channels) {

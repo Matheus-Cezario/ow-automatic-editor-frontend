@@ -324,6 +324,18 @@ List<double> magnetPoints(
   ?playheadS,
 ];
 
+/// The clip's visual effects, whole.
+MontageState setFx(MontageState s, String id, ClipFx fx) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  return s.withClip(
+    layerIndex,
+    i,
+    s.layers[layerIndex].clips[i].copyWith(fx: fx),
+  );
+}
+
 /// The clip's transform, whole — crop, rotation and mirroring included.
 MontageState setTransform(MontageState s, String id, ClipTransform t) {
   final location = s.locate(id);
@@ -1232,6 +1244,7 @@ MontageState pasteEffects(MontageState s, Set<String> ids, TimelineClip from) {
       final tr = from.transition;
       next = c.copyWith(
         color: from.color,
+        fx: from.fx,
         fade: fade,
         zoom: from.zoom,
         transform: from.transform,

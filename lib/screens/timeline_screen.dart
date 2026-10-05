@@ -23,6 +23,7 @@ import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
 import '../widgets/crop_panel.dart';
+import '../widgets/fx_panel.dart';
 import '../widgets/source_cutter.dart';
 import '../zoom.dart';
 
@@ -637,10 +638,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// Motion, and crop & rotate for a picture: the panels that act on how the
   /// clip sits in the frame.
   Widget? _picturePanels(String id) {
-    final motion = _motionPanel(id);
-    final crop = _cropPanel(id);
-    if (motion == null || crop == null) return motion ?? crop;
-    return Column(mainAxisSize: MainAxisSize.min, children: [motion, crop]);
+    final panels = [?_motionPanel(id), ?_cropPanel(id), ?_fxPanel(id)];
+    if (panels.isEmpty) return null;
+    if (panels.length == 1) return panels.single;
+    return Column(mainAxisSize: MainAxisSize.min, children: panels);
+  }
+
+  /// Look & FX — pictures only, like crop & rotate.
+  Widget? _fxPanel(String id) {
+    final clip = _state.clipItem(id);
+    if (clip == null || clip.isText || _isAudioClip(id)) return null;
+    return FxPanel(
+      fx: clip.fx,
+      hasPlay: momentInVideo(clip) != null,
+      onChanged: (fx) => _edit(setFx(_state, id, fx)),
+      onGestureStart: _history.startGesture,
+      onGestureEnd: _history.endGesture,
+    );
   }
 
   /// Crop & rotate — only for pictures: text is placed by its own style and a

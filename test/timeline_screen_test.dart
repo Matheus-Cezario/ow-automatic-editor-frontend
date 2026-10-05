@@ -3539,6 +3539,29 @@ void main() {
     });
   });
 
+  group('look and fx', () {
+    testWidgets('a look on a picture clip is undoable', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(block(tester, 0));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('fx-panel')));
+      await tester.tap(find.text('Look & FX'));
+      await settle(tester);
+      await tester.ensureVisible(find.byKey(const ValueKey('look-vivid')));
+      await tester.tap(find.byKey(const ValueKey('look-vivid')));
+      await tester.pump();
+      expect(firstCut(tester).fx.look, Look.vivid);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(firstCut(tester).fx.look, Look.none);
+    });
+  });
+
   group('crop and rotate', () {
     testWidgets('a picture clip gets the panel, and turning it is undoable', (
       tester,

@@ -364,6 +364,96 @@ class Layer {
 ///
 /// The three that fix almost everything in a gameplay montage: dark footage,
 /// washed-out footage, colourless footage.
+/// A colour grade in one click — a LUT's job, built from the server's own
+/// filters.
+enum Look {
+  none('None'),
+  noir('Noir'),
+  tealOrange('Teal & orange'),
+  warm('Warm'),
+  cold('Cold'),
+  vivid('Vivid'),
+  faded('Faded');
+
+  const Look(this.label);
+  final String label;
+
+  /// The name on the wire: `teal_orange`, not `tealOrange`.
+  String get wire => this == tealOrange ? 'teal_orange' : name;
+
+  static Look fromWire(String? v) => Look.values.firstWhere(
+    (l) => l.wire == v,
+    orElse: () => Look.none,
+  );
+}
+
+/// The clip's visual effects; each is 0 (off) to 1 (full).
+///
+/// [impact] is the punch of a play: a white flash and a burst of shake at the
+/// clip's play — or at its first frame, when it has none.
+class ClipFx {
+  const ClipFx({
+    this.look = Look.none,
+    this.blur = 0,
+    this.sharpen = 0,
+    this.vignette = 0,
+    this.shake = 0,
+    this.impact = 0,
+  });
+
+  factory ClipFx.fromJson(Map<String, dynamic> j) {
+    double n(String k) => (j[k] as num?)?.toDouble() ?? 0;
+    return ClipFx(
+      look: Look.fromWire(j['look'] as String?),
+      blur: n('blur'),
+      sharpen: n('sharpen'),
+      vignette: n('vignette'),
+      shake: n('shake'),
+      impact: n('impact'),
+    );
+  }
+
+  final Look look;
+  final double blur;
+  final double sharpen;
+  final double vignette;
+  final double shake;
+  final double impact;
+
+  bool get isNeutral =>
+      look == Look.none &&
+      blur == 0 &&
+      sharpen == 0 &&
+      vignette == 0 &&
+      shake == 0 &&
+      impact == 0;
+
+  ClipFx copyWith({
+    Look? look,
+    double? blur,
+    double? sharpen,
+    double? vignette,
+    double? shake,
+    double? impact,
+  }) => ClipFx(
+    look: look ?? this.look,
+    blur: blur ?? this.blur,
+    sharpen: sharpen ?? this.sharpen,
+    vignette: vignette ?? this.vignette,
+    shake: shake ?? this.shake,
+    impact: impact ?? this.impact,
+  );
+
+  Map<String, dynamic> toJson() => {
+    if (look != Look.none) 'look': look.wire,
+    if (blur != 0) 'blur': blur,
+    if (sharpen != 0) 'sharpen': sharpen,
+    if (vignette != 0) 'vignette': vignette,
+    if (shake != 0) 'shake': shake,
+    if (impact != 0) 'impact': impact,
+  };
+}
+
 class ClipColor {
   const ClipColor({
     this.brightness = 0,
@@ -848,6 +938,7 @@ class TimelineClip {
     this.transform = const ClipTransform(),
     this.audio = const ClipAudio(),
     this.color = const ClipColor(),
+    this.fx = const ClipFx(),
     this.fade = const ClipFade(),
     this.speed = 1,
     this.zoom = const [],
@@ -885,6 +976,9 @@ class TimelineClip {
   final ClipTransform transform;
   final ClipAudio audio;
   final ClipColor color;
+
+  /// Look, blur, sharpen, vignette, shake and impact.
+  final ClipFx fx;
   final ClipFade fade;
 
   /// How much faster the clip runs. 2 = double, 0.5 = slow motion.
@@ -1012,6 +1106,7 @@ class TimelineClip {
     ClipTransform? transform,
     ClipAudio? audio,
     ClipColor? color,
+    ClipFx? fx,
     ClipFade? fade,
     double? speed,
     List<ZoomKey>? zoom,
@@ -1035,6 +1130,7 @@ class TimelineClip {
     transform: transform ?? this.transform,
     audio: audio ?? this.audio,
     color: color ?? this.color,
+    fx: fx ?? this.fx,
     fade: fade ?? this.fade,
     speed: speed ?? this.speed,
     zoom: zoom ?? this.zoom,
@@ -1066,6 +1162,9 @@ class TimelineClip {
     ),
     color: ClipColor.fromJson(
       (j['color'] as Map?)?.cast<String, dynamic>() ?? const {},
+    ),
+    fx: ClipFx.fromJson(
+      (j['fx'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
     fade: ClipFade.fromJson(
       (j['fade'] as Map?)?.cast<String, dynamic>() ?? const {},
@@ -1102,6 +1201,7 @@ class TimelineClip {
     if (!transform.isNeutral) 'transform': transform.toJson(),
     if (!audio.isNeutral) 'audio': audio.toJson(),
     if (!color.isNeutral) 'color': color.toJson(),
+    if (!fx.isNeutral) 'fx': fx.toJson(),
     if (!fade.isNeutral) 'fade': fade.toJson(),
     if (speed != 1) 'speed': speed,
     if (zoom.isNotEmpty) 'zoom': [for (final k in zoom) k.toJson()],

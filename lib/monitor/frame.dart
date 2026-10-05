@@ -39,6 +39,9 @@ class FramePiece {
     required this.saturation,
     required this.fit,
     this.crop = const ClipTransform(),
+    this.fx = const ClipFx(),
+    this.shakeX = 0,
+    this.shakeY = 0,
     this.veil,
     this.veilOpacity = 0,
   });
@@ -85,6 +88,19 @@ class FramePiece {
   /// The crop, rotation and mirroring — only those fields are read; the place,
   /// size and alpha above are already resolved for this instant.
   final ClipTransform crop;
+
+  /// Look, blur and vignette are drawn from here; sharpen has no CSS
+  /// equivalent and shows only in the exact preview and the render.
+  final ClipFx fx;
+
+  /// Where the shake has moved the picture this instant, in frame widths and
+  /// heights — 0 when the clip does not shake.
+  final double shakeX;
+  final double shakeY;
+
+  /// The picture is enlarged a little while it shakes, so the edges never
+  /// show — the server's margin.
+  double get shakeZoom => fx.shake > 0 || fx.impact > 0 ? 1 + 2 * kShakeMargin : 1;
 
   /// A dip's colour over the clip (`#000000` / `#ffffff`), if one is on.
   final String? veil;
@@ -297,6 +313,31 @@ FramePiece? _piece(
   }
   final window = 1 - 1 / zoom;
 
+  // ── shake and the impact's flash, on the server's formulas ──
+  final fx = clip.fx;
+  var shakeX = 0.0, shakeY = 0.0;
+  if (fx.shake > 0 || fx.impact > 0) {
+    final hit = impactAt(clip);
+    final burst = local >= hit
+        ? fx.impact * math.exp(-kImpactDecay * (local - hit))
+        : 0.0;
+    final amount = math.min(1.0, fx.shake * 0.5 + burst);
+    shakeX = kShakeMargin * amount *
+        (0.6 * math.sin(local * 41.3) + 0.4 * math.sin(local * 23.1 + 1.7));
+    shakeY = kShakeMargin * amount *
+        (0.6 * math.sin(local * 37.9 + 0.6) + 0.4 * math.sin(local * 19.7 + 2.3));
+  }
+  if (fx.impact > 0) {
+    // the flash brightens towards white: on the monitor, a white veil
+    final flash = fx.impact *
+        0.6 *
+        math.max(0.0, 1 - (local - impactAt(clip)).abs() / kFlashS);
+    if (flash > veilOpacity) {
+      veil = '#ffffff';
+      veilOpacity = flash;
+    }
+  }
+
   // ── the place ──
   var ox = valueAt(clip, KeyProp.x, local) / 2;
   var oy = valueAt(clip, KeyProp.y, local) / 2;
@@ -326,10 +367,37 @@ FramePiece? _piece(
     saturation: clip.color.saturation,
     fit: fit,
     crop: clip.transform,
+    fx: fx,
+    shakeX: shakeX,
+    shakeY: shakeY,
     veil: veilOpacity > 0 ? veil : null,
     veilOpacity: veilOpacity,
   );
 }
+
+/// The shake's margin on each side, as a fraction of the frame (the server's
+/// `_shake_chain`), how fast an impact's burst dies away, and how long its
+/// flash lasts each side of the play.
+const kShakeMargin = 0.03;
+const kImpactDecay = 7.0;
+const kFlashS = 0.18;
+
+/// Where a clip's impact hits, from its first frame: its play, or its start.
+double impactAt(TimelineClip clip) {
+  final play = momentInVideo(clip);
+  return play == null ? 0 : play - clip.atS;
+}
+
+/// A look as CSS filters — close to the server's grade, not identical.
+String? lookCss(Look look) => switch (look) {
+  Look.none => null,
+  Look.noir => 'grayscale(1) contrast(1.25) brightness(0.98)',
+  Look.tealOrange => 'sepia(0.2) hue-rotate(-12deg) saturate(1.25) contrast(1.05)',
+  Look.warm => 'sepia(0.25) saturate(1.1)',
+  Look.cold => 'hue-rotate(12deg) saturate(0.9) brightness(1.02)',
+  Look.vivid => 'saturate(1.45) contrast(1.12)',
+  Look.faded => 'contrast(0.82) brightness(1.06) saturate(0.75)',
+};
 
 /// The frame's aspect ratio: the export size when one was asked for,
 /// otherwise the recording's.
