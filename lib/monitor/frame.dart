@@ -40,6 +40,8 @@ class FramePiece {
     required this.fit,
     this.crop = const ClipTransform(),
     this.fx = const ClipFx(),
+    this.blend = ClipBlend.normal,
+    this.chroma,
     this.shakeX = 0,
     this.shakeY = 0,
     this.veil,
@@ -92,6 +94,10 @@ class FramePiece {
   /// Look, blur and vignette are drawn from here; sharpen has no CSS
   /// equivalent and shows only in the exact preview and the render.
   final ClipFx fx;
+
+  /// How it mixes with the pieces under it, and the colour keyed out.
+  final ClipBlend blend;
+  final ChromaKey? chroma;
 
   /// Where the shake has moved the picture this instant, in frame widths and
   /// heights — 0 when the clip does not shake.
@@ -368,6 +374,8 @@ FramePiece? _piece(
     fit: fit,
     crop: clip.transform,
     fx: fx,
+    blend: clip.blend,
+    chroma: clip.chroma,
     shakeX: shakeX,
     shakeY: shakeY,
     veil: veilOpacity > 0 ? veil : null,
@@ -386,6 +394,32 @@ const kFlashS = 0.18;
 double impactAt(TimelineClip clip) {
   final play = momentInVideo(clip);
   return play == null ? 0 : play - clip.atS;
+}
+
+/// A chroma key as an SVG `feColorMatrix` (its 20 values), or `null` for a
+/// grey key, which has no hue to find.
+///
+/// A matrix is linear, so this is the server's `colorkey` approximated: each
+/// pixel is scored by how far it leans the key colour's way (1 on the key
+/// colour, 0 on any grey), and alpha falls from 1 to 0 across the softness
+/// band that ends where the similarity starts.
+String? chromaMatrix(ChromaKey key) {
+  final hex = key.color.replaceFirst('#', '');
+  if (hex.length != 6) return null;
+  final c = [
+    for (var i = 0; i < 6; i += 2) int.parse(hex.substring(i, i + 2), radix: 16) / 255,
+  ];
+  final mean = (c[0] + c[1] + c[2]) / 3;
+  final d = [for (final v in c) v - mean];
+  final norm = d.fold(0.0, (a, v) => a + v * v);
+  if (norm < 1e-4) return null;
+  final soft = math.max(0.05, key.softness);
+  final threshold = 1 - key.similarity;
+  // alpha = (threshold - d·p / |d|²) / soft
+  final a = [for (final v in d) -v / (norm * soft)];
+  String f(double v) => v.toStringAsFixed(4);
+  return '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  '
+      '${f(a[0])} ${f(a[1])} ${f(a[2])} 0 ${f(threshold / soft)}';
 }
 
 /// A look as CSS filters — close to the server's grade, not identical.

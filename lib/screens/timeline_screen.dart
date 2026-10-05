@@ -22,6 +22,7 @@ import '../widgets/motion_panel.dart';
 import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
+import '../widgets/blend_panel.dart';
 import '../widgets/crop_panel.dart';
 import '../widgets/fx_panel.dart';
 import '../widgets/source_cutter.dart';
@@ -638,10 +639,38 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// Motion, and crop & rotate for a picture: the panels that act on how the
   /// clip sits in the frame.
   Widget? _picturePanels(String id) {
-    final panels = [?_motionPanel(id), ?_cropPanel(id), ?_fxPanel(id)];
+    final panels = [
+      ?_motionPanel(id),
+      ?_cropPanel(id),
+      ?_fxPanel(id),
+      ?_blendPanel(id),
+    ];
     if (panels.isEmpty) return null;
     if (panels.length == 1) return panels.single;
     return Column(mainAxisSize: MainAxisSize.min, children: panels);
+  }
+
+  /// Blend & key — pictures only.
+  Widget? _blendPanel(String id) {
+    final clip = _state.clipItem(id);
+    final at = _state.locate(id);
+    if (clip == null || at == null || clip.isText || _isAudioClip(id)) {
+      return null;
+    }
+    // is there a visible picture layer under this one?
+    final overSomething = [
+      for (var i = 0; i < at.$1; i++) _state.layers[i],
+    ].any((l) => !l.isAudio && !l.hidden && l.clips.isNotEmpty);
+    return BlendPanel(
+      blend: clip.blend,
+      chroma: clip.chroma,
+      overSomething: overSomething,
+      onChanged: (blend, chroma) => _edit(
+        setBlendKey(_state, id, blend: blend, chroma: chroma),
+      ),
+      onGestureStart: _history.startGesture,
+      onGestureEnd: _history.endGesture,
+    );
   }
 
   /// Look & FX — pictures only, like crop & rotate.

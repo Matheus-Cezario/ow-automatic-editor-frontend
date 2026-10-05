@@ -454,6 +454,66 @@ class ClipFx {
   };
 }
 
+/// How a clip mixes with the layers under it. [normal] covers them.
+enum ClipBlend {
+  normal('Normal', 'normal'),
+  screen('Screen', 'screen'),
+  multiply('Multiply', 'multiply'),
+  overlay('Overlay', 'overlay'),
+  add('Add', 'plus-lighter'),
+  lighten('Lighten', 'lighten'),
+  darken('Darken', 'darken'),
+  difference('Difference', 'difference');
+
+  const ClipBlend(this.label, this.css);
+  final String label;
+
+  /// The CSS `mix-blend-mode` the live monitor uses for it.
+  final String css;
+
+  static ClipBlend fromWire(String? v) => ClipBlend.values.firstWhere(
+    (m) => m.name == v,
+    orElse: () => ClipBlend.normal,
+  );
+}
+
+/// A colour made transparent — a green screen.
+class ChromaKey {
+  const ChromaKey({
+    this.color = '#00ff00',
+    this.similarity = 0.3,
+    this.softness = 0.1,
+  });
+
+  factory ChromaKey.fromJson(Map<String, dynamic> j) => ChromaKey(
+    color: j['color'] as String? ?? '#00ff00',
+    similarity: (j['similarity'] as num?)?.toDouble() ?? 0.3,
+    softness: (j['softness'] as num?)?.toDouble() ?? 0.1,
+  );
+
+  /// `#rrggbb`.
+  final String color;
+
+  /// How far from the colour still counts as it, 0.01 to 1.
+  final double similarity;
+
+  /// How gradually the edge goes from transparent to solid, 0 to 1.
+  final double softness;
+
+  ChromaKey copyWith({String? color, double? similarity, double? softness}) =>
+      ChromaKey(
+        color: color ?? this.color,
+        similarity: similarity ?? this.similarity,
+        softness: softness ?? this.softness,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'color': color,
+    'similarity': similarity,
+    'softness': softness,
+  };
+}
+
 class ClipColor {
   const ClipColor({
     this.brightness = 0,
@@ -939,6 +999,8 @@ class TimelineClip {
     this.audio = const ClipAudio(),
     this.color = const ClipColor(),
     this.fx = const ClipFx(),
+    this.blend = ClipBlend.normal,
+    this.chroma,
     this.fade = const ClipFade(),
     this.speed = 1,
     this.zoom = const [],
@@ -979,6 +1041,12 @@ class TimelineClip {
 
   /// Look, blur, sharpen, vignette, shake and impact.
   final ClipFx fx;
+
+  /// How the clip mixes with the layers below it.
+  final ClipBlend blend;
+
+  /// A colour made transparent; `null` keys nothing.
+  final ChromaKey? chroma;
   final ClipFade fade;
 
   /// How much faster the clip runs. 2 = double, 0.5 = slow motion.
@@ -1107,6 +1175,9 @@ class TimelineClip {
     ClipAudio? audio,
     ClipColor? color,
     ClipFx? fx,
+    ClipBlend? blend,
+    ChromaKey? chroma,
+    bool clearChroma = false,
     ClipFade? fade,
     double? speed,
     List<ZoomKey>? zoom,
@@ -1131,6 +1202,8 @@ class TimelineClip {
     audio: audio ?? this.audio,
     color: color ?? this.color,
     fx: fx ?? this.fx,
+    blend: blend ?? this.blend,
+    chroma: clearChroma ? null : (chroma ?? this.chroma),
     fade: fade ?? this.fade,
     speed: speed ?? this.speed,
     zoom: zoom ?? this.zoom,
@@ -1166,6 +1239,10 @@ class TimelineClip {
     fx: ClipFx.fromJson(
       (j['fx'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
+    blend: ClipBlend.fromWire(j['blend'] as String?),
+    chroma: j['chroma'] is Map
+        ? ChromaKey.fromJson((j['chroma'] as Map).cast<String, dynamic>())
+        : null,
     fade: ClipFade.fromJson(
       (j['fade'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
@@ -1202,6 +1279,8 @@ class TimelineClip {
     if (!audio.isNeutral) 'audio': audio.toJson(),
     if (!color.isNeutral) 'color': color.toJson(),
     if (!fx.isNeutral) 'fx': fx.toJson(),
+    if (blend != ClipBlend.normal) 'blend': blend.name,
+    if (chroma != null) 'chroma': chroma!.toJson(),
     if (!fade.isNeutral) 'fade': fade.toJson(),
     if (speed != 1) 'speed': speed,
     if (zoom.isNotEmpty) 'zoom': [for (final k in zoom) k.toJson()],

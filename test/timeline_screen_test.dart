@@ -3562,6 +3562,29 @@ void main() {
     });
   });
 
+  group('blend and key', () {
+    testWidgets('a blend mode on a picture clip is undoable', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tester.tap(block(tester, 0));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('blend-panel')));
+      await tester.tap(find.text('Blend & key'));
+      await settle(tester);
+      await tester.ensureVisible(find.byKey(const ValueKey('blend-multiply')));
+      await tester.tap(find.byKey(const ValueKey('blend-multiply')));
+      await tester.pump();
+      expect(firstCut(tester).blend, ClipBlend.multiply);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(firstCut(tester).blend, ClipBlend.normal);
+    });
+  });
+
   group('crop and rotate', () {
     testWidgets('a picture clip gets the panel, and turning it is undoable', (
       tester,

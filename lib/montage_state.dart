@@ -324,6 +324,27 @@ List<double> magnetPoints(
   ?playheadS,
 ];
 
+/// How the clip mixes with the layers below, and its chroma key.
+MontageState setBlendKey(
+  MontageState s,
+  String id, {
+  required ClipBlend blend,
+  required ChromaKey? chroma,
+}) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  return s.withClip(
+    layerIndex,
+    i,
+    s.layers[layerIndex].clips[i].copyWith(
+      blend: blend,
+      chroma: chroma,
+      clearChroma: chroma == null,
+    ),
+  );
+}
+
 /// The clip's visual effects, whole.
 MontageState setFx(MontageState s, String id, ClipFx fx) {
   final location = s.locate(id);
@@ -1245,6 +1266,9 @@ MontageState pasteEffects(MontageState s, Set<String> ids, TimelineClip from) {
       next = c.copyWith(
         color: from.color,
         fx: from.fx,
+        blend: from.blend,
+        chroma: from.chroma,
+        clearChroma: from.chroma == null,
         fade: fade,
         zoom: from.zoom,
         transform: from.transform,

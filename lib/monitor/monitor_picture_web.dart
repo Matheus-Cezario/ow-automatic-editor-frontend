@@ -240,6 +240,15 @@ class _Slot {
     _saturate.setAttribute('type', 'saturate');
     _filter.appendChild(transfer);
     _filter.appendChild(_saturate);
+
+    // the chroma key, last as on the server, in a filter of its own
+    _keyFilter = web.document.createElementNS(_svgNs, 'filter');
+    _keyFilter.setAttribute('id', '$filterId-key');
+    _keyFilter.setAttribute('color-interpolation-filters', 'sRGB');
+    _keyMatrix = web.document.createElementNS(_svgNs, 'feColorMatrix');
+    _keyMatrix.setAttribute('type', 'matrix');
+    _keyFilter.appendChild(_keyMatrix);
+    defs.appendChild(_keyFilter);
     defs.appendChild(_filter);
   }
 
@@ -252,6 +261,8 @@ class _Slot {
   web.HTMLVideoElement? _video;
   late final web.Element _filter;
   late final web.Element _saturate;
+  late final web.Element _keyFilter;
+  late final web.Element _keyMatrix;
   final List<web.Element> _channels = [];
 
   String? _url;
@@ -315,6 +326,12 @@ class _Slot {
       ?lookCss(p.fx.look),
       if (blurPx > 0) 'blur(${blurPx.toStringAsFixed(2)}px)',
     ];
+    final key = p.chroma == null ? null : chromaMatrix(p.chroma!);
+    if (key != null) {
+      _keyMatrix.setAttribute('values', key);
+      filters.add('url(#$filterId-key)');
+    }
+    wrapper.style.setProperty('mix-blend-mode', p.blend.css);
     media.style
       ..setProperty('object-fit', p.fit == 'contain' ? 'contain' : 'cover')
       ..setProperty(
