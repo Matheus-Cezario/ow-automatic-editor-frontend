@@ -324,6 +324,34 @@ List<double> magnetPoints(
   ?playheadS,
 ];
 
+/// Each of [ids] moved so its entrance lands on the nearest beat — where
+/// the cut is felt. A clip with no room there stays put; the count says how
+/// many moved.
+(MontageState, int) landOnBeats(
+  MontageState s,
+  Set<String> ids,
+  List<double> beats,
+) {
+  if (beats.isEmpty) return (s, 0);
+  var out = s;
+  var moved = 0;
+  for (final id in ids) {
+    final location = out.locate(id);
+    if (location == null) continue;
+    final (layerIndex, i) = location;
+    final clips = out.layers[layerIndex].clips;
+    final c = clips[i];
+    final beat = beats.reduce(
+      (a, b) => (a - c.atS).abs() <= (b - c.atS).abs() ? a : b,
+    );
+    if ((beat - c.atS).abs() < 1e-6) continue;
+    if (!fits(clips, beat, c.durationS, ignore: i)) continue;
+    out = out.withClip(layerIndex, i, c.copyWith(atS: beat));
+    moved++;
+  }
+  return (out, moved);
+}
+
 /// How the clip mixes with the layers below, and its chroma key.
 MontageState setBlendKey(
   MontageState s,

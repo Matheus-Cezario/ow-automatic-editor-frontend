@@ -39,6 +39,8 @@ class FramePiece {
     required this.saturation,
     required this.fit,
     this.crop = const ClipTransform(),
+    this.turn = 0,
+    this.wipe = (left: 0.0, top: 0.0, right: 0.0, bottom: 0.0),
     this.fx = const ClipFx(),
     this.blend = ClipBlend.normal,
     this.chroma,
@@ -90,6 +92,12 @@ class FramePiece {
   /// The crop, rotation and mirroring — only those fields are read; the place,
   /// size and alpha above are already resolved for this instant.
   final ClipTransform crop;
+
+  /// A spin's turn this instant, degrees clockwise — on top of the clip's own.
+  final double turn;
+
+  /// What a wipe still covers of each edge, as fractions of the frame.
+  final ({double left, double top, double right, double bottom}) wipe;
 
   /// Look, blur and vignette are drawn from here; sharpen has no CSS
   /// equivalent and shows only in the exact preview and the render.
@@ -150,6 +158,12 @@ const _overlapping = {
   'slide_right',
   'slide_up',
   'slide_down',
+  'wipe_left',
+  'wipe_right',
+  'wipe_up',
+  'wipe_down',
+  'zoom',
+  'spin',
 };
 
 /// Dips and the colour they go through.
@@ -354,6 +368,35 @@ FramePiece? _piece(
     oy += from.$2 * remaining;
   }
 
+  // ── wipes, zoom, spin and glitch, on the server's `_entrance_chain` ──
+  var scale = valueAt(clip, KeyProp.scale, local);
+  var turn = 0.0;
+  var wipe = (left: 0.0, top: 0.0, right: 0.0, bottom: 0.0);
+  if (tr != null && tr.durationS > 0 && local < tr.durationS) {
+    final p = (local / tr.durationS).clamp(0.0, 1.0);
+    final q = 1 - p;
+    switch (tr.kind) {
+      case 'wipe_left':
+        wipe = (left: q, top: 0, right: 0, bottom: 0);
+      case 'wipe_right':
+        wipe = (left: 0, top: 0, right: q, bottom: 0);
+      case 'wipe_up':
+        wipe = (left: 0, top: q, right: 0, bottom: 0);
+      case 'wipe_down':
+        wipe = (left: 0, top: 0, right: 0, bottom: q);
+      case 'zoom':
+        scale *= 1 + 0.5 * q * q;
+        opacity *= p;
+      case 'spin':
+        scale *= 1 - 0.7 * q * q;
+        turn = -180 * q * q;
+        opacity *= p;
+      case 'glitch':
+        // the monitor cannot tear the picture apart: it jolts it sideways
+        ox += 0.04 * q * math.sin(local * 91);
+    }
+  }
+
   return FramePiece(
     clipId: clip.id,
     kind: kind,
@@ -365,7 +408,9 @@ FramePiece? _piece(
     zoom: zoom,
     zoomLeft: window * (0.5 + zx / 2),
     zoomTop: window * (0.5 + zy / 2),
-    scale: valueAt(clip, KeyProp.scale, local),
+    scale: scale,
+    turn: turn,
+    wipe: wipe,
     offsetX: ox,
     offsetY: oy,
     brightness: clip.color.brightness,

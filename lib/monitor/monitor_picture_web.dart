@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:js_interop';
 import 'dart:ui_web' as ui_web;
 
@@ -298,16 +299,11 @@ class _Slot {
       ..setProperty(
         'transform',
         'translate(${p.offsetX * 100}%, ${p.offsetY * 100}%) scale(${p.scale})'
-            '${p.crop.rotation % 360 != 0 ? ' rotate(${p.crop.rotation}deg)' : ''}'
+            '${(p.crop.rotation + p.turn) % 360 != 0 ? ' rotate(${p.crop.rotation + p.turn}deg)' : ''}'
             '${p.crop.flipH || p.crop.flipV ? ' scale(${p.crop.flipH ? -1 : 1}, ${p.crop.flipV ? -1 : 1})' : ''}',
       )
-      ..setProperty(
-        'clip-path',
-        p.crop.hasCrop
-            ? 'inset(${p.crop.cropTop * 100}% ${p.crop.cropRight * 100}% '
-                  '${p.crop.cropBottom * 100}% ${p.crop.cropLeft * 100}%)'
-            : 'none',
-      );
+      // the crop and a wipe both cover edges: the larger of the two wins
+      ..setProperty('clip-path', _inset(p));
     // the shake moves an enlarged picture under the frame, around its centre;
     // the zoom window works inside that (its origin is the top-left corner)
     final shaking = p.shakeZoom != 1;
@@ -367,6 +363,17 @@ class _Slot {
       veil.style.setProperty('display', 'none');
     }
     _sync(p, playing: playing && !p.seekEachFrame);
+  }
+
+  static String _inset(FramePiece p) {
+    final c = p.crop;
+    final w = p.wipe;
+    final top = math.max(c.cropTop, w.top);
+    final right = math.max(c.cropRight, w.right);
+    final bottom = math.max(c.cropBottom, w.bottom);
+    final left = math.max(c.cropLeft, w.left);
+    if (top == 0 && right == 0 && bottom == 0 && left == 0) return 'none';
+    return 'inset(${top * 100}% ${right * 100}% ${bottom * 100}% ${left * 100}%)';
   }
 
   /// Loads the clip and puts it on the frame it will open with, out of sight.

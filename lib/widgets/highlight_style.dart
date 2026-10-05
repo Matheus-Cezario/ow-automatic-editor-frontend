@@ -133,6 +133,48 @@ class TransitionType {
       'comes in from above',
       Icons.south,
     ),
+    TransitionType(
+      'wipe_left',
+      'Wipe left',
+      'an edge sweeps right to left, uncovering it',
+      Icons.keyboard_double_arrow_left,
+    ),
+    TransitionType(
+      'wipe_right',
+      'Wipe right',
+      'an edge sweeps left to right, uncovering it',
+      Icons.keyboard_double_arrow_right,
+    ),
+    TransitionType(
+      'wipe_up',
+      'Wipe up',
+      'an edge sweeps upwards, uncovering it',
+      Icons.keyboard_double_arrow_up,
+    ),
+    TransitionType(
+      'wipe_down',
+      'Wipe down',
+      'an edge sweeps downwards, uncovering it',
+      Icons.keyboard_double_arrow_down,
+    ),
+    TransitionType(
+      'zoom',
+      'Zoom',
+      'arrives enlarged and settles as it appears',
+      Icons.zoom_out_map,
+    ),
+    TransitionType(
+      'spin',
+      'Spin',
+      'turns and grows into place',
+      Icons.rotate_right,
+    ),
+    TransitionType(
+      'glitch',
+      'Glitch',
+      'a torn hard cut — split colours, jumping bands',
+      Icons.broken_image_outlined,
+    ),
   ];
 
   static TransitionType? of(String kind) =>

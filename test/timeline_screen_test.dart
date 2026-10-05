@@ -2709,6 +2709,36 @@ void main() {
       expect(find.byKey(ValueKey('transition-on-clip-$id')), findsNothing);
     });
 
+    testWidgets('the new kinds apply like the others', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tab(tester, 'Transitions');
+      for (final kind in ['wipe_up', 'zoom', 'spin', 'glitch']) {
+        await tester.ensureVisible(find.byKey(ValueKey('transition-$kind')));
+        await tester.tap(find.byKey(ValueKey('transition-$kind')));
+        await tester.pump();
+        expect(firstCut(tester).transition?.kind, kind);
+      }
+    });
+
+    testWidgets('land on the beat waits for music to have beats', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      await tab(tester, 'Transitions');
+      await tester.ensureVisible(find.byKey(const Key('land-on-beat')));
+      expect(
+        tester
+            .widget<ButtonStyleButton>(find.byKey(const Key('land-on-beat')))
+            .onPressed,
+        isNull,
+        reason: 'no music, no beats — the moving itself is unit-tested',
+      );
+    });
+
     testWidgets('setting a transition can be undone', (tester) async {
       await open(tester);
       await tester.tap(moment(30.0));

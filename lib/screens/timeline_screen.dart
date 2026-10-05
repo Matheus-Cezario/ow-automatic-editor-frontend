@@ -2694,6 +2694,24 @@ class _TimelineScreenState extends State<TimelineScreen> {
       onClear: () => _edit(
         applyTransition(_state, [for (final c in selected) c.id], null),
       ),
+      onBeat: _beats.isEmpty || selected.isEmpty
+          ? null
+          : () {
+              final (s, moved) = landOnBeats(
+                _state,
+                {for (final c in selected) c.id},
+                _beats,
+              );
+              _edit(s);
+              _notify(
+                moved == selected.length
+                    ? 'On the beat.'
+                    : moved == 0
+                    ? 'Already on the beat, or no room to move there.'
+                    : '$moved of ${selected.length} moved; the others had '
+                          'no room at their beat.',
+              );
+            },
       onDuration: (d) {
         setState(() => _transitionDuration = d);
         // clips that already have a transition follow the adjustment: it is
@@ -3849,6 +3867,7 @@ class _Transitions extends StatelessWidget {
     required this.onApply,
     required this.onClear,
     required this.onDuration,
+    this.onBeat,
     required this.onGestureStart,
     required this.onGestureEnd,
   });
@@ -3864,6 +3883,10 @@ class _Transitions extends StatelessWidget {
   final ValueChanged<String> onApply;
   final VoidCallback onClear;
   final ValueChanged<double> onDuration;
+
+  /// Moves the selected clips' entrances onto the nearest beat; `null` when
+  /// there is no music grid or nothing selected.
+  final VoidCallback? onBeat;
   final VoidCallback onGestureStart;
   final VoidCallback onGestureEnd;
 
@@ -3935,11 +3958,28 @@ class _Transitions extends StatelessWidget {
         ),
       Padding(
         padding: EdgeInsets.fromLTRB(docked ? 0 : 8, 4, 8, 12),
-        child: TextButton.icon(
-          key: const Key('no-transition'),
-          onPressed: canApply && anyHasOne ? onClear : null,
-          icon: const Icon(Icons.content_cut, size: 18),
-          label: const Text('Hard cut (no transition)'),
+        child: Wrap(
+          spacing: 4,
+          children: [
+            TextButton.icon(
+              key: const Key('no-transition'),
+              onPressed: canApply && anyHasOne ? onClear : null,
+              icon: const Icon(Icons.content_cut, size: 18),
+              label: const Text('Hard cut (no transition)'),
+            ),
+            Tooltip(
+              message: onBeat == null
+                  ? 'Needs music on the timeline and a selected clip'
+                  : 'Move the selected clips so their entrance lands on the '
+                        'nearest beat',
+              child: TextButton.icon(
+                key: const Key('land-on-beat'),
+                onPressed: enabled ? onBeat : null,
+                icon: const Icon(Icons.graphic_eq, size: 18),
+                label: const Text('Land on the beat'),
+              ),
+            ),
+          ],
         ),
       ),
     ];
