@@ -1766,9 +1766,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
     });
     try {
       await _save();
+      // the montage as set up, and one copy per extra format, in one render
       await _api.createRender(
         jobId: widget.job.id,
-        montages: [_state.toPayload()],
+        montages: renderVariants(
+          _state,
+          widthPx: widget.job.width,
+          heightPx: widget.job.height,
+        ),
       );
       // what came out was *this*: keeping the snapshot here is what makes the
       // history useful without filling the database on every autosave
@@ -2974,7 +2979,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 label: Text(
                   _state.isBlank
                       ? 'Add at least one cut'
-                      : 'Render this video',
+                      : switch (renderVariants(
+                          _state,
+                          widthPx: widget.job.width,
+                          heightPx: widget.job.height,
+                        ).length) {
+                          1 => 'Render this video',
+                          final n => 'Render $n videos',
+                        },
                 ),
               ),
           ],
@@ -5067,6 +5079,9 @@ class _ExportPanel extends StatelessWidget {
   final VoidCallback onExportSelection;
   final VoidCallback onExportAll;
 
+  double get _ratio =>
+      outputRatio(spec, widthPx: widthPx, heightPx: heightPx);
+
   /// Does the output require cropping or bars? Only then does choosing between them matter.
   bool get _changesAspect {
     if (spec.width == 0 || widthPx == 0 || heightPx == 0) return false;
@@ -5152,6 +5167,96 @@ class _ExportPanel extends StatelessWidget {
                         ? (_) => onChange(spec.copyWith(fit: 'contain'))
                         : null,
                   ),
+                  ChoiceChip(
+                    key: const Key('fit-blur'),
+                    label: const Text('Blur behind'),
+                    tooltip:
+                        'the whole frame over a blurred copy of itself — '
+                        'the monitor shows it with bars',
+                    selected: spec.fit == 'blur',
+                    onSelected: enabled
+                        ? (_) => onChange(spec.copyWith(fit: 'blur'))
+                        : null,
+                  ),
+                ],
+              ),
+            if (_changesAspect && spec.fit == 'cover' && spec.height > spec.width)
+              _OptionRow(
+                textClip: 'Killfeed',
+                children: [
+                  FilterChip(
+                    key: const Key('killfeed-inset'),
+                    label: const Text('Keep it, at the top'),
+                    tooltip:
+                        'the centre crop cuts the top-right corner away; this '
+                        'brings the killfeed back over the top (render only)',
+                    selected: spec.killfeedInset,
+                    onSelected: enabled
+                        ? (v) => onChange(spec.copyWith(killfeedInset: v))
+                        : null,
+                  ),
+                ],
+              ),
+
+            _OptionRow(
+              textClip: 'Also',
+              children: [
+                for (final (aspect, w, h, note) in extraFormatList)
+                  FilterChip(
+                    key: ValueKey('extra-$aspect'),
+                    label: Text(aspect),
+                    tooltip: (w / h - _ratio).abs() < 0.01
+                        ? 'this is the main output already'
+                        : '$w×$h · $note — rendered together',
+                    selected: spec.extraFormats.contains(aspect),
+                    onSelected: enabled && (w / h - _ratio).abs() >= 0.01
+                        ? (on) => onChange(
+                            spec.copyWith(
+                              extraFormats: [
+                                for (final (a, _, _, _) in extraFormatList)
+                                  if (a == aspect
+                                      ? on
+                                      : spec.extraFormats.contains(a))
+                                    a,
+                              ],
+                            ),
+                          )
+                        : null,
+                  ),
+              ],
+            ),
+            if (spec.extraFormats.isNotEmpty)
+              _OptionRow(
+                textClip: 'Their fit',
+                children: [
+                  ChoiceChip(
+                    key: const Key('extra-fit-cover'),
+                    label: const Text('Crop to the centre'),
+                    tooltip:
+                        'the crosshair is in the middle: so is the action',
+                    selected: spec.extraFit == 'cover',
+                    onSelected: enabled
+                        ? (_) => onChange(spec.copyWith(extraFit: 'cover'))
+                        : null,
+                  ),
+                  ChoiceChip(
+                    key: const Key('extra-fit-blur'),
+                    label: const Text('Blur behind'),
+                    selected: spec.extraFit == 'blur',
+                    onSelected: enabled
+                        ? (_) => onChange(spec.copyWith(extraFit: 'blur'))
+                        : null,
+                  ),
+                  if (spec.extraFit == 'cover')
+                    FilterChip(
+                      key: const Key('extra-killfeed'),
+                      label: const Text('Keep the killfeed'),
+                      tooltip: 'on the portrait ones, over the top',
+                      selected: spec.extraKillfeed,
+                      onSelected: enabled
+                          ? (v) => onChange(spec.copyWith(extraKillfeed: v))
+                          : null,
+                    ),
                 ],
               ),
 

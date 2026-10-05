@@ -1313,6 +1313,10 @@ class ExportSpec {
     this.watermarkX = 0.82,
     this.watermarkY = -0.82,
     this.watermarkOpacity = 0.65,
+    this.killfeedInset = false,
+    this.extraFormats = const [],
+    this.extraFit = 'cover',
+    this.extraKillfeed = false,
   });
 
   factory ExportSpec.fromJson(Map<String, dynamic> j) => ExportSpec(
@@ -1328,6 +1332,12 @@ class ExportSpec {
     watermarkX: (j['watermark_x'] as num?)?.toDouble() ?? 0.82,
     watermarkY: (j['watermark_y'] as num?)?.toDouble() ?? -0.82,
     watermarkOpacity: (j['watermark_opacity'] as num?)?.toDouble() ?? 0.65,
+    killfeedInset: j['killfeed_inset'] as bool? ?? false,
+    extraFormats: [
+      for (final f in (j['extra_formats'] as List?) ?? const []) f as String,
+    ],
+    extraFit: j['extra_fit'] as String? ?? 'cover',
+    extraKillfeed: j['extra_killfeed'] as bool? ?? false,
   );
 
   /// `0` on both = the recording size.
@@ -1338,8 +1348,19 @@ class ExportSpec {
   /// H.264 quality: lower is better.
   final int crf;
 
-  /// `cover` fills and crops the excess; `contain` shows everything with bars.
+  /// `cover` fills and crops the excess; `contain` shows everything with bars;
+  /// `blur` shows everything over a blurred copy of itself.
   final String fit;
+
+  /// In a portrait output, the recording's killfeed brought back at the top
+  /// — a centre crop cuts it away.
+  final bool killfeedInset;
+
+  /// Other aspects rendered with this one (`9:16`, `1:1`, ...), and how they
+  /// are framed — see `renderVariants`.
+  final List<String> extraFormats;
+  final String extraFit;
+  final bool extraKillfeed;
 
   final double fromS;
   final double? toS;
@@ -1361,7 +1382,8 @@ class ExportSpec {
       fit == 'cover' &&
       fromS == 0 &&
       toS == null &&
-      watermarkId == null;
+      watermarkId == null &&
+      !killfeedInset;
 
   ExportSpec copyWith({
     int? width,
@@ -1378,6 +1400,10 @@ class ExportSpec {
     double? watermarkX,
     double? watermarkY,
     double? watermarkOpacity,
+    bool? killfeedInset,
+    List<String>? extraFormats,
+    String? extraFit,
+    bool? extraKillfeed,
   }) => ExportSpec(
     width: width ?? this.width,
     height: height ?? this.height,
@@ -1391,6 +1417,10 @@ class ExportSpec {
     watermarkX: watermarkX ?? this.watermarkX,
     watermarkY: watermarkY ?? this.watermarkY,
     watermarkOpacity: watermarkOpacity ?? this.watermarkOpacity,
+    killfeedInset: killfeedInset ?? this.killfeedInset,
+    extraFormats: extraFormats ?? this.extraFormats,
+    extraFit: extraFit ?? this.extraFit,
+    extraKillfeed: extraKillfeed ?? this.extraKillfeed,
   );
 
   Map<String, dynamic> toJson() => {
@@ -1406,6 +1436,10 @@ class ExportSpec {
     'watermark_x': watermarkX,
     'watermark_y': watermarkY,
     'watermark_opacity': watermarkOpacity,
+    if (killfeedInset) 'killfeed_inset': true,
+    if (extraFormats.isNotEmpty) 'extra_formats': extraFormats,
+    if (extraFit != 'cover') 'extra_fit': extraFit,
+    if (extraKillfeed) 'extra_killfeed': true,
   };
 }
 

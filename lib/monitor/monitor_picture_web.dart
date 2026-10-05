@@ -329,7 +329,8 @@ class _Slot {
     }
     wrapper.style.setProperty('mix-blend-mode', p.blend.css);
     media.style
-      ..setProperty('object-fit', p.fit == 'contain' ? 'contain' : 'cover')
+      // the blurred fill behind is the render's: here the whole frame shows
+      ..setProperty('object-fit', p.fit == 'cover' ? 'cover' : 'contain')
       ..setProperty(
         'transform',
         shake.isEmpty && zoom.isEmpty ? 'none' : '$shake$zoom',

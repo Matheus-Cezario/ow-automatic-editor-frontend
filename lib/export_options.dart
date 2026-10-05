@@ -40,6 +40,58 @@ const outputFormats = [
   OutputFormat('Square', 1080, 1080, note: 'feed'),
 ];
 
+/// The formats a montage can also come out in, rendered together with the
+/// main one: (aspect, width, height, where it goes).
+const extraFormatList = [
+  ('16:9', 1920, 1080, 'YouTube'),
+  ('9:16', 1080, 1920, 'Shorts, Reels, TikTok'),
+  ('1:1', 1080, 1080, 'feed'),
+  ('4:5', 1080, 1350, 'Instagram feed'),
+];
+
+/// The main output's aspect, as a width/height ratio — the recording's when
+/// the output keeps its size.
+double outputRatio(ExportSpec e, {required int widthPx, required int heightPx}) {
+  if (e.width > 0 && e.height > 0) return e.width / e.height;
+  if (widthPx > 0 && heightPx > 0) return widthPx / heightPx;
+  return 16 / 9;
+}
+
+/// Everything one render makes: the montage as set up, and one copy per
+/// extra format — same cuts, another window. Each extra takes the extras'
+/// framing, the killfeed only where it is portrait, and its aspect in the
+/// title so the files tell themselves apart. An extra in the main output's
+/// own aspect would be a duplicate, and is left out.
+List<Montage> renderVariants(
+  MontageState s, {
+  required int widthPx,
+  required int heightPx,
+}) {
+  final main = s.toPayload();
+  final ratio = outputRatio(s.export, widthPx: widthPx, heightPx: heightPx);
+  final out = [main];
+  for (final (aspect, w, h, _) in extraFormatList) {
+    if (!s.export.extraFormats.contains(aspect)) continue;
+    if ((w / h - ratio).abs() < 0.01) continue;
+    final title = main.title.isEmpty ? aspect : '${main.title} ($aspect)';
+    out.add(
+      s
+          .copyWith(
+            title: title,
+            export: s.export.copyWith(
+              width: w,
+              height: h,
+              fit: s.export.extraFit,
+              killfeedInset: s.export.extraKillfeed && h > w,
+              extraFormats: const [],
+            ),
+          )
+          .toPayload(),
+    );
+  }
+  return out;
+}
+
 /// Quality, in three steps.
 ///
 /// The number is H.264's CRF, where lower is better and each +6 roughly halves

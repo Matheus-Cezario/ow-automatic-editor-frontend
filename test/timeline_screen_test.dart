@@ -3569,6 +3569,27 @@ void main() {
     });
   });
 
+  group('several formats', () {
+    testWidgets('ticking extra formats renders them together', (tester) async {
+      await open(tester);
+      await tester.tap(moment(30.0));
+      await tester.pump();
+      expect(find.text('Render this video'), findsOneWidget);
+
+      for (final aspect in ['9:16', '1:1']) {
+        await tester.ensureVisible(find.byKey(ValueKey('extra-$aspect')));
+        await tester.tap(find.byKey(ValueKey('extra-$aspect')));
+        await tester.pump();
+      }
+      expect(find.text('Render 3 videos'), findsOneWidget);
+      // their framing shows once there are extras
+      await tester.ensureVisible(find.byKey(const Key('extra-fit-blur')));
+      await tester.tap(find.byKey(const Key('extra-fit-blur')));
+      await tester.pump();
+      expect(find.byKey(const Key('extra-killfeed')), findsNothing);
+    });
+  });
+
   group('look and fx', () {
     testWidgets('a look on a picture clip is undoable', (tester) async {
       await open(tester);
