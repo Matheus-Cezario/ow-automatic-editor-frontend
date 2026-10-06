@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'api.dart';
@@ -20,6 +21,16 @@ import 'montage.dart';
 /// be unique within an editing session, and they never leave the app.
 int _nextId = 0;
 String newCutId() => 'c${_nextId++}';
+
+/// Moves the counter past ids that came from elsewhere — a history brought
+/// back after a reload carries the ids of the session that wrote it, and a
+/// new clip must not be born with the id of one that is already there.
+void _reserveCutIds(Iterable<String> ids) {
+  for (final id in ids) {
+    final n = id.startsWith('c') ? int.tryParse(id.substring(1)) : null;
+    if (n != null && n >= _nextId) _nextId = n + 1;
+  }
+}
 
 /// The montage at one instant in time.
 class MontageState {
@@ -1812,5 +1823,137 @@ class MontageHistory {
     _past.add(_current);
     _current = _future.removeLast();
     return _current;
+  }
+
+  // ── surviving a reload ──
+  //
+  // The montage itself already survives an F5: it is on the server. The
+  // history was the part that died with the page, and with it the way back
+  // from a mistake made just before reloading. It is kept in the browser,
+  // never on the server: it is the memory of whoever is editing, not part of
+  // the montage.
+
+  /// How many steps on each side go to storage. Fewer than in memory: the
+  /// browser gives a few megabytes per site, and a long montage times two
+  /// hundred does not fit.
+  static const int persistedSteps = 100;
+
+  /// The history as text, with at most [steps] steps on each side — the ones
+  /// closest to the present.
+  String encode({int steps = persistedSteps}) {
+    final past = _past.length > steps
+        ? _past.sublist(_past.length - steps)
+        : _past;
+    final future = _future.length > steps
+        ? _future.sublist(_future.length - steps)
+        : _future;
+    // assembled by hand so that each state, immutable, is encoded only once
+    // in its life: this runs on every autosave
+    return '{"v":1,"present":${_encoded(_current)},'
+        '"past":[${past.map(_encoded).join(',')}],'
+        '"future":[${future.map(_encoded).join(',')}]}';
+  }
+
+  /// Puts back a history saved by [encode] — but only if its present is the
+  /// montage that is open, [opened]. Otherwise it is the memory of something
+  /// else (an older save, an edit from another tab, a version restored), and
+  /// undoing into it would bring back a montage nobody is looking at.
+  ///
+  /// Returns whether it was put back. Anything unreadable counts as no.
+  bool restore(String raw, {required MontageState opened}) {
+    try {
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      if (j['v'] != 1) return false;
+      final present = j['present'] as Map<String, dynamic>;
+      if (jsonEncode(present['m']) != _payloadOf(opened)) return false;
+      final now = _decodeState(present);
+      final past = [
+        for (final e in j['past'] as List)
+          _decodeState(e as Map<String, dynamic>),
+      ];
+      final future = [
+        for (final e in j['future'] as List)
+          _decodeState(e as Map<String, dynamic>),
+      ];
+      _current = now;
+      _past
+        ..clear()
+        ..addAll(past);
+      _future
+        ..clear()
+        ..addAll(future);
+      _inGesture = false;
+      _changedInGesture = false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The montage of the present as the server receives it — what [restore]
+  /// compares against.
+  String get presentPayload => _payloadOf(_current);
+
+  static final _payloads = Expando<String>();
+  static final _states = Expando<String>();
+
+  static String _payloadOf(MontageState s) =>
+      _payloads[s] ??= jsonEncode(s.toPayload().toJson());
+
+  /// One state: the montage as the server knows it, plus what only the
+  /// editor knows — the clips' ids, so the selection and the steps on either
+  /// side keep pointing at the same clips.
+  static String _encoded(MontageState s) => _states[s] ??=
+      '{"m":${_payloadOf(s)},'
+      '"ids":${jsonEncode([
+        for (final l in s.layers) [for (final c in l.clips) c.id],
+      ])},'
+      '"sel":${jsonEncode(s.selectionIds.toList())},'
+      '"active":${s.activeLayer}}';
+
+  static MontageState _decodeState(Map<String, dynamic> j) {
+    final m = Montage.fromJson(j['m'] as Map<String, dynamic>);
+    final ids = [
+      for (final l in j['ids'] as List)
+        [for (final id in l as List) id as String],
+    ];
+    if (ids.length != m.layers.length) {
+      throw const FormatException('layers and ids do not match');
+    }
+    final layers = <Layer>[];
+    for (var i = 0; i < m.layers.length; i++) {
+      final clips = m.layers[i].clips;
+      if (ids[i].length != clips.length) {
+        throw const FormatException('clips and ids do not match');
+      }
+      _reserveCutIds(ids[i]);
+      layers.add(
+        m.layers[i].copyWith(
+          clips: [
+            for (var k = 0; k < clips.length; k++)
+              clips[k].copyWith(id: ids[i][k]),
+          ],
+        ),
+      );
+    }
+    final state = MontageState(
+      layers: layers,
+      selectionIds: {for (final id in j['sel'] as List) id as String},
+      activeLayer: ((j['active'] as num?)?.toInt() ?? 0).clamp(
+        0,
+        math.max(0, layers.length - 1),
+      ),
+      title: m.title,
+      beatOffsetS: m.beatOffsetS,
+      beatMultiplier: m.beatMultiplier,
+      beatBar: m.beatBar,
+      musicVolume: m.musicVolume,
+      gameVolume: m.gameVolume,
+      duckPlays: m.duckPlays,
+      duckLevel: m.duckLevel,
+      export: m.export,
+      markers: m.markers,
+    );
+    return state;
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ow_editor/api.dart';
 import 'package:ow_editor/montage.dart';
@@ -625,6 +627,131 @@ void main() {
         steps++;
       }
       expect(steps, MontageHistory.maxSteps);
+    });
+  });
+
+  group('history across a reload', () {
+    /// What an F5 does: the montage goes to the server as JSON, comes back as
+    /// JSON and is opened again, with fresh ids.
+    MontageState reopened(MontageState saved) => montageFromDraft(
+      Montage.fromJson(
+        jsonDecode(jsonEncode(saved.toPayload().toJson()))
+            as Map<String, dynamic>,
+      ),
+    );
+
+    /// A history with a bit of everything: two layers, a transition, a
+    /// marker, a move and a split.
+    MontageHistory edited() {
+      final h = MontageHistory(layeredState([cut(0, 4)], [cut(5, 2, t: 40)]));
+      final id = h.present.clips.first.id;
+      h.apply(moveBlock(h.present, id, 1, beats: const [], snap: false));
+      h.apply(
+        applyTransition(h.present, [
+          id,
+        ], const ClipTransition(kind: 'dissolve', durationS: 0.5)),
+      );
+      h.apply(toggleMarker(h.present, 3));
+      h.apply(split(h.present, id, 2));
+      return h;
+    }
+
+    test('undo and redo still work after reopening', () {
+      final h = edited();
+      h.undo(); // something to redo, too
+      final raw = h.encode();
+
+      final after = MontageHistory(reopened(h.present));
+      expect(after.restore(raw, opened: after.present), isTrue);
+
+      expect(after.canUndo, isTrue);
+      expect(after.canRedo, isTrue);
+      var steps = 0;
+      while (after.canUndo) {
+        after.undo();
+        steps++;
+      }
+      expect(steps, 3);
+      expect(after.present.clips.first.atS, 0);
+      expect(after.present.markers, isEmpty);
+      while (after.canRedo) {
+        after.redo();
+      }
+      expect(after.present.clips, hasLength(3), reason: 'the split is back');
+      expect(after.present.markers, hasLength(1));
+    });
+
+    test('the clips keep their ids, so the selection survives', () {
+      final h = edited();
+      final id = h.present.clips.last.id;
+      h.replace(h.present.copyWith(selectionIds: {id}));
+
+      final after = MontageHistory(reopened(h.present));
+      after.restore(h.encode(), opened: after.present);
+
+      expect(after.present.selectionIds, {id});
+      expect(after.present.clipItem(id), isNotNull);
+      expect(after.undo().clipItem(id), isNotNull);
+    });
+
+    test('a clip made after reopening does not take an id already in use', () {
+      final h = edited();
+      final after = MontageHistory(reopened(h.present));
+      after.restore(h.encode(), opened: after.present);
+
+      final ids = {
+        for (final s in [after.present, after.undo(), after.undo()])
+          for (final c in s.clips) c.id,
+      };
+      expect(ids, isNot(contains(newCutId())));
+    });
+
+    test('a history of another montage is not brought back', () {
+      // saved somewhere else, or a version restored: undoing into it would
+      // bring back a montage nobody is looking at
+      final h = edited();
+      final other = reopened(
+        moveBlock(
+          h.present,
+          h.present.clips.first.id,
+          9,
+          beats: const [],
+          snap: false,
+        ),
+      );
+
+      final after = MontageHistory(other);
+      expect(after.restore(h.encode(), opened: other), isFalse);
+      expect(after.canUndo, isFalse);
+      expect(after.present, same(other));
+    });
+
+    test('anything unreadable counts as no history', () {
+      final h = MontageHistory(MontageState.blank());
+      for (final raw in ['', 'not json', '{}', '{"v":2}', '[]']) {
+        expect(h.restore(raw, opened: h.present), isFalse, reason: raw);
+      }
+    });
+
+    test('only the steps closest to now are kept', () {
+      final h = MontageHistory(stateWith([cut(0, 1)]));
+      final id = h.present.clips.first.id;
+      for (var i = 1; i <= 10; i++) {
+        h.apply(
+          moveBlock(h.present, id, i.toDouble(), beats: const [], snap: false),
+        );
+      }
+
+      final after = MontageHistory(reopened(h.present));
+      after.restore(h.encode(steps: 3), opened: after.present);
+
+      var steps = 0;
+      while (after.canUndo) {
+        after.undo();
+        steps++;
+      }
+      expect(steps, 3);
+      expect(after.present.clips.first.atS, 7);
     });
   });
 
