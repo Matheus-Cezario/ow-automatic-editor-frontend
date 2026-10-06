@@ -15,6 +15,7 @@ import '../fullscreen.dart';
 import '../fonts.dart';
 import '../montage_state.dart';
 import '../recipe.dart';
+import '../undo_store.dart';
 import '../labels.dart';
 import '../widgets/exact_preview.dart';
 import '../widgets/highlight_style.dart';
@@ -221,6 +222,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       // there was a montage in progress: pick up where it stopped. The song,
       // if any, is in its blocks -- there is no track to resume
       _history.replace(montageFromDraft(draft));
+      _bringBackHistory();
       if (draft.title.isNotEmpty) _title.text = draft.title;
     } else {
       _history.replace(_state.copyWith(title: _title.text));
@@ -1100,6 +1102,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       } else {
         await _api.saveMontage(widget.job.id, id, montage: thisMontage);
       }
+      _keepHistory(id, thisMontage);
       if (mounted) {
         setState(() {
           _savedAt = DateTime.now();
@@ -1114,6 +1117,37 @@ class _TimelineScreenState extends State<TimelineScreen> {
         });
       }
     }
+  }
+
+  /// Where this montage's undo history waits out a reload.
+  String _historyKey(String montageId) => '${widget.job.id}.$montageId';
+
+  /// Keeps the history next to what the server just stored, so an F5 does
+  /// not take the way back with it.
+  ///
+  /// Only when the present is exactly what was saved: an edit made while the
+  /// save was on its way is not on the server yet, and a history ahead of the
+  /// montage would not match it on reopening. The save that edit scheduled
+  /// writes it.
+  void _keepHistory(String montageId, Montage saved) {
+    if (_montageId != montageId) return;
+    if (_history.presentPayload != jsonEncode(saved.toJson())) return;
+    // too big for the browser: fewer steps, the ones closest to now
+    for (var steps = MontageHistory.persistedSteps; ; steps ~/= 2) {
+      if (writeUndo(_historyKey(montageId), _history.encode(steps: steps))) {
+        return;
+      }
+      if (steps == 0) return;
+    }
+  }
+
+  /// Picks the history back up after a reload, when the montage that opened
+  /// is the one it was the memory of.
+  void _bringBackHistory() {
+    final id = _montageId;
+    if (id == null) return;
+    final raw = readUndo(_historyKey(id));
+    if (raw != null) _history.restore(raw, opened: _state);
   }
 
   // ── music ─────────────────────────────────────────────────────────────────
@@ -1807,7 +1841,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   ///
   /// The undo history does **not** cross the switch: it is the memory of a
   /// work session on one montage, and undoing into another would erase what
-  /// was just opened.
+  /// was just opened. Coming back to a montage brings back its own.
   Future<void> _open(SavedMontage m) async {
     if (m.id == _montageId) return;
     _debounce?.cancel();
@@ -1820,6 +1854,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     });
     _history.reset();
     _history.replace(montageFromDraft(m.montage));
+    _bringBackHistory();
     // the other montage has its own music, in its own blocks
     _blockInPlayer = null;
     await _syncMusic();
