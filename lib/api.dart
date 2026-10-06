@@ -891,6 +891,7 @@ class Media {
     this.beats = const [],
     this.peaks = const [],
     this.audioUrl = '',
+    this.sfxId,
   });
 
   factory Media.fromJson(Map<String, dynamic> j) => Media(
@@ -922,6 +923,7 @@ class Media {
     audioUrl: j['audio_url'] == null
         ? ''
         : absoluteUrl('$kApiBase${j['audio_url']}'),
+    sfxId: j['sfx_id'] as String?,
   );
 
   final String id;
@@ -950,11 +952,18 @@ class Media {
   final List<double> peaks;
   final String audioUrl;
 
+  /// The library effect this item was made from, when it was not uploaded.
+  final String? sfxId;
+
   bool get isReady => status == 'ready';
   bool get isFailed => status == 'failed';
   bool get isPending => status == 'pending';
   bool get isAudio => kind == 'audio';
   bool get isImage => kind == 'image';
+
+  /// A sound effect, not a song: it goes over the music instead of after it,
+  /// and has no beat for the magnet.
+  bool get isSoundEffect => sfxId != null && sfxId!.isNotEmpty;
 
   /// The same song, seen as a track.
   ///
@@ -1089,6 +1098,9 @@ class TimelineClip {
   final ClipTransition? transition;
 
   bool get isText => source == 'text';
+
+  /// A block made from the sound library: on a sound layer, but not music.
+  bool get isSoundEffect => kind == 'sfx';
 
   /// How much of the recording this clip eats. At 2×, two seconds of video eat
   /// four of recording — and a frozen one eats a single frame.
@@ -1452,6 +1464,61 @@ class ExportSpec {
     if (extraFit != 'cover') 'extra_fit': extraFit,
     if (extraKillfeed) 'extra_killfeed': true,
   };
+}
+
+/// An effect of the server's sound library — a whoosh, a hit, a riser.
+///
+/// It is not in the match yet: browsing costs nothing, and adding it to the
+/// montage is what turns it into a library item ([Media]) the ruler can use.
+class SoundEffect {
+  const SoundEffect({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.durationS,
+    required this.audioUrl,
+    this.peaks = const [],
+  });
+
+  factory SoundEffect.fromJson(Map<String, dynamic> j) => SoundEffect(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? j['id'] as String,
+    category: j['category'] as String? ?? '',
+    durationS: (j['duration_s'] as num?)?.toDouble() ?? 0,
+    audioUrl: absoluteUrl('$kApiBase${j['audio_url']}'),
+    peaks: ((j['peaks'] as List?) ?? const [])
+        .map((e) => (e as num).toDouble())
+        .toList(),
+  );
+
+  final String id;
+  final String name;
+
+  /// transition / impact / ui / meme — how the shelf groups them.
+  final String category;
+  final double durationS;
+
+  /// Where to listen to it before adding it.
+  final String audioUrl;
+  final List<double> peaks;
+}
+
+/// The whole sound library: the effects, and the order of their groups.
+class SoundLibrary {
+  const SoundLibrary({required this.categories, required this.effects});
+
+  factory SoundLibrary.fromJson(Map<String, dynamic> j) => SoundLibrary(
+    categories: [
+      for (final c in (j['categories'] as List?) ?? const []) c as String,
+    ],
+    effects: [
+      for (final e in (j['effects'] as List?) ?? const [])
+        SoundEffect.fromJson(e as Map<String, dynamic>),
+    ],
+  );
+
+  final List<String> categories;
+  final List<SoundEffect> effects;
 }
 
 /// A font the server can draw text with.
@@ -2766,6 +2833,29 @@ class ApiClient {
     );
     _check(r);
     return ExactPreview.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// The sound effects on offer.
+  Future<SoundLibrary> listSoundEffects() async {
+    final r = await http.get(Uri.parse('$baseUrl/api/sfx'));
+    _check(r);
+    return SoundLibrary.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// Brings an effect into the match library. It comes back ready — the
+  /// server made the sound, there is nothing to analyse — and adding the same
+  /// effect again returns the item already there.
+  Future<Media> addSoundEffect({
+    required String jobId,
+    required String sfxId,
+  }) async {
+    final r = await http.post(
+      Uri.parse('$baseUrl/api/jobs/$jobId/sfx'),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({'sfx_id': sfxId}),
+    );
+    _check(r);
+    return Media.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
   }
 
   /// The fonts a text can use.

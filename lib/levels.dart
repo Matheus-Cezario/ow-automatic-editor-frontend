@@ -20,7 +20,10 @@ double mixLevelAt(
   required double matchDurationS,
   double windowS = 0.1,
 }) {
-  final hasMusic = s.layers.any((l) => l.isAudio && l.clips.isNotEmpty);
+  // an effect is not music: it does not turn the game down
+  final hasMusic = s.layers.any(
+    (l) => l.isAudio && l.clips.any((c) => !c.isSoundEffect),
+  );
   final duck = s.duckPlays
       ? duckAt(playTimes(s.layers), t) * (1 - s.duckLevel)
       : 0.0;
@@ -42,8 +45,9 @@ double mixLevelAt(
         final song = tracks[c.mediaId];
         if (song == null) continue;
         final at = c.startS + local;
-        level += s.musicVolume *
-            (1 - duck) *
+        // an effect has its own level; the music volume and the dip at the
+        // plays are the song's
+        level += (c.isSoundEffect ? 1.0 : s.musicVolume * (1 - duck)) *
             own *
             _peak(song.peaks, song.durationS, at, windowS);
       } else if (c.source == 'recording' && gameGain > 0) {

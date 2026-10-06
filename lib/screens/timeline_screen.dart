@@ -28,6 +28,7 @@ import '../widgets/blend_panel.dart';
 import '../widgets/crop_panel.dart';
 import '../widgets/fx_panel.dart';
 import '../widgets/level_meter.dart';
+import '../widgets/sound_shelf.dart';
 import '../widgets/source_cutter.dart';
 import '../zoom.dart';
 
@@ -46,9 +47,12 @@ import '../zoom.dart';
 /// instant the playhead asks for, so you can see the cut before rendering.
 /// Nothing is rendered while editing.
 class TimelineScreen extends StatefulWidget {
-  const TimelineScreen({super.key, required this.job});
+  const TimelineScreen({super.key, required this.job, this.api});
 
   final Job job;
+
+  /// The server. Left out, the real one; tests hand in their own.
+  final ApiClient? api;
 
   @override
   State<TimelineScreen> createState() => _TimelineScreenState();
@@ -78,7 +82,7 @@ const _usefulMoments = {
 };
 
 class _TimelineScreenState extends State<TimelineScreen> {
-  final _api = ApiClient();
+  late final ApiClient _api = widget.api ?? ApiClient();
 
   /// The server's text fonts, loaded as they are needed.
   late final FontLibrary _fonts = FontLibrary(_api)
@@ -121,6 +125,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
   late List<Media> _library = [...widget.job.media];
   bool _importing = false;
   String? _importError;
+
+  /// The server's sound effects, once loaded, and the one being added.
+  SoundLibrary? _sounds;
+  String? _soundsError;
+  String? _addingSound;
+
+  /// One player per effect in the montage, so effects sound over the music
+  /// while editing — the song's player plays one block at a time.
+  final Map<String, VideoPlayerController> _effectPlayers = {};
+
+  /// The effect blocks under the playhead, already started.
+  final Set<String> _effectsSounding = {};
 
   /// The player of the song playing right now — the one of the block under the
   /// playhead, and no other. Switching tracks costs network, so it only
@@ -214,6 +230,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   void initState() {
     super.initState();
     unawaited(_fonts.start());
+    unawaited(_loadSounds());
     // the most recent one is the one being edited -- and the one you want back
     final present = _montages.firstOrNull;
     final draft = present?.montage ?? widget.job.draft;
@@ -263,6 +280,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _clock?.cancel();
     _exactPoll?.cancel();
     _audio?.dispose();
+    for (final p in _effectPlayers.values) {
+      p.dispose();
+    }
     _scroll.dispose();
     _title.dispose();
     super.dispose();
@@ -851,6 +871,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// and images: the library is the entry door for everything from outside.
   void _useMedia(Media item, {double? atS, int? layerIndex}) {
     final location = atS ?? _cursor;
+    if (item.isSoundEffect) {
+      _putEffectOnRuler(item, atS: location, layerIndex: layerIndex);
+      return;
+    }
     if (item.isAudio) {
       _putMusicOnRuler(item, atS: location, layerIndex: layerIndex);
       return;
@@ -876,6 +900,49 @@ class _TimelineScreenState extends State<TimelineScreen> {
         insert: _insert,
       ),
     );
+  }
+
+  Future<void> _loadSounds() async {
+    if (mounted) setState(() => _soundsError = null);
+    try {
+      final sounds = await _api.listSoundEffects();
+      if (mounted) setState(() => _sounds = sounds);
+    } catch (e) {
+      if (mounted) setState(() => _soundsError = '$e');
+    }
+  }
+
+  /// Brings an effect into the match and puts it on the ruler.
+  ///
+  /// The instant is taken now, not when the server answers: whoever clicked
+  /// meant the playhead as it was at the click.
+  Future<void> _addSound(
+    SoundEffect effect, {
+    double? atS,
+    int? layerIndex,
+  }) async {
+    if (_addingSound != null) return;
+    final location = atS ?? _cursor;
+    setState(() => _addingSound = effect.id);
+    try {
+      final item = await _api.addSoundEffect(
+        jobId: widget.job.id,
+        sfxId: effect.id,
+      );
+      if (!mounted) return;
+      setState(
+        () => _library = [
+          for (final m in _library)
+            if (m.id != item.id) m,
+          item,
+        ],
+      );
+      _putEffectOnRuler(item, atS: location, layerIndex: layerIndex);
+    } catch (e) {
+      if (mounted) _notify('Could not add "${effect.name}": $e');
+    } finally {
+      if (mounted) setState(() => _addingSound = null);
+    }
   }
 
   Future<void> _removeFromLibrary(Media item) async {
@@ -1201,6 +1268,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
       if (!layerIndex.isAudio || layerIndex.muted) continue;
       for (final c in layerIndex.clips) {
         if (t < c.atS - 1e-6 || t >= c.untilS - 1e-6) continue;
+        // an effect is not the song: it has no beat for the magnet, and it
+        // plays in its own player, over the music
+        if (c.isSoundEffect) continue;
         final m = _tracks[c.mediaId];
         if (m != null) return (block: c, music: m);
       }
@@ -1360,14 +1430,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
   ];
 
   /// Does the montage have music? It decides whether the mix has anything to balance.
-  bool get _hasMusic =>
-      _state.layers.any((l) => l.isAudio && l.clips.isNotEmpty);
+  bool get _hasMusic => _state.layers.any(
+    (l) => l.isAudio && l.clips.any((c) => !c.isSoundEffect),
+  );
 
   /// What was dropped on the timeline, and where.
   ///
   /// Dragging is the path for whoever already knows where they want the thing;
   /// clicking still places at the playhead. Both doors lead to the same operation.
   void _dropOnRuler(RulerDrop o, double atS, int layerIndex) {
+    final effect = o.effect;
+    if (effect != null) {
+      _addSound(effect, atS: atS, layerIndex: layerIndex);
+      return;
+    }
     final media = o.media;
     if (media != null) {
       _useMedia(media, atS: atS, layerIndex: layerIndex);
@@ -1465,6 +1541,29 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
   }
 
+  /// Puts a sound effect on the ruler, exactly where it was asked — over the
+  /// music, on an effects layer when the chosen one is taken.
+  void _putEffectOnRuler(Media item, {double? atS, int? layerIndex}) {
+    final sound = _tracks[item.id];
+    if (sound == null) {
+      _notify('This effect is not ready yet.');
+      return;
+    }
+    var base = _state;
+    if (layerIndex != null &&
+        layerIndex >= 0 &&
+        layerIndex < base.layers.length &&
+        base.layers[layerIndex].isAudio) {
+      base = base.copyWith(activeLayer: layerIndex);
+    }
+    final updated = putSoundEffect(base, sound, atS: atS ?? _cursor);
+    if (identical(updated, base)) {
+      _notify('The effect did not fit there.');
+      return;
+    }
+    _edit(updated);
+  }
+
   // ── transport ─────────────────────────────────────────────────────────────
   //
   // The clock is the **video**, not the song. While the track was continuous
@@ -1498,11 +1597,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _clock = Timer.periodic(_clockStep, (_) => _tick());
     });
     _syncMusic();
+    _syncEffects();
   }
 
   void _pause() {
     _clock?.cancel();
     _audio?.pause();
+    _stopEffects();
     if (mounted) setState(() => _clock = null);
   }
 
@@ -1627,7 +1728,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
       // round again: the music follows the jump on the next sync
       setState(() => _cursor = loop.from);
       _followCursor(loop.from);
+      _stopEffects();
       _syncMusic();
+      _syncEffects();
       return;
     }
     if (t >= endTime) {
@@ -1638,6 +1741,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     setState(() => _cursor = t);
     _followCursor(t);
     _syncMusic();
+    _syncEffects();
   }
 
   /// Puts the player at the point of the song matching the cursor.
@@ -1687,6 +1791,70 @@ class _TimelineScreenState extends State<TimelineScreen> {
       }
     } finally {
       _adjustingAudio = false;
+    }
+  }
+
+  /// Starts the effects the playhead just entered and stops the ones it left.
+  ///
+  /// An effect lasts a second or two: it is started once, at the point the
+  /// playhead entered it, and left to play — chasing drift on something that
+  /// short would only make it stutter.
+  void _syncEffects() {
+    if (!_playing) return;
+    final here = <String, TimelineClip>{};
+    for (final l in _state.layers) {
+      if (!l.isAudio || l.muted) continue;
+      for (final c in l.clips) {
+        if (!c.isSoundEffect || c.mediaId == null) continue;
+        if (_cursor >= c.atS - 1e-6 && _cursor < c.untilS - 1e-6) {
+          here[c.id] = c;
+        }
+      }
+    }
+    _effectsSounding.removeWhere((id) => !here.containsKey(id));
+    // a player whose effect the playhead has left stops, even mid-sound: the
+    // block was trimmed there on purpose
+    final heard = {for (final c in here.values) c.mediaId};
+    for (final MapEntry(key: id, value: player) in _effectPlayers.entries) {
+      if (!heard.contains(id) && player.value.isPlaying) player.pause();
+    }
+    for (final c in here.values) {
+      if (_effectsSounding.contains(c.id)) continue;
+      _effectsSounding.add(c.id);
+      unawaited(_startEffect(c));
+    }
+  }
+
+  Future<void> _startEffect(TimelineClip c) async {
+    final sound = _tracks[c.mediaId];
+    if (sound == null) return;
+    var player = _effectPlayers[sound.id];
+    if (player == null) {
+      player = VideoPlayerController.networkUrl(Uri.parse(sound.audioUrl));
+      _effectPlayers[sound.id] = player;
+      try {
+        await player.initialize();
+      } catch (_) {
+        // without a player the effect is still in the video; the editor just
+        // cannot let you hear it here
+        _effectPlayers.remove(sound.id);
+        await player.dispose();
+        return;
+      }
+    }
+    if (!mounted || !_playing || !_effectsSounding.contains(c.id)) return;
+    final local = (_cursor - c.atS).clamp(0.0, c.durationS);
+    await player.setVolume(gainAt(c, local).clamp(0.0, 1.0));
+    await player.seekTo(
+      Duration(milliseconds: ((c.startS + local) * 1000).round()),
+    );
+    await player.play();
+  }
+
+  void _stopEffects() {
+    _effectsSounding.clear();
+    for (final p in _effectPlayers.values) {
+      if (p.value.isPlaying) p.pause();
     }
   }
 
@@ -2798,6 +2966,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
     onImport: _import,
     onUse: _useMedia,
     onRemove: _removeFromLibrary,
+    sounds: SoundShelf(
+      library: _sounds,
+      error: _soundsError,
+      enabled: !_sending,
+      adding: _addingSound,
+      onAdd: _addSound,
+      onRetry: _loadSounds,
+    ),
   );
 
   Widget _moments({required bool docked}) => _Moments(
@@ -3828,7 +4004,7 @@ class _SelectedBlock extends StatelessWidget {
               '${cut.durationS.toStringAsFixed(2)}s'
               // which point of the track this piece came from: it tells whether
               // the block took the chorus or the intro
-              '${sound ? '  ·  from ${formatClock(cut.startS)} of the song' : ''}',
+              '${sound ? '  ·  from ${formatClock(cut.startS)} of the ${cut.isSoundEffect ? 'effect' : 'song'}' : ''}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -3846,7 +4022,11 @@ class _SelectedBlock extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(sound ? 'Song span' : 'Framing'),
+                  child: Text(
+                    sound
+                        ? (cut.isSoundEffect ? 'Effect span' : 'Song span')
+                        : 'Framing',
+                  ),
                 ),
                 _Step(
                   onLess: () => onShift(-0.2),
@@ -4475,6 +4655,7 @@ class _Library extends StatelessWidget {
     required this.onImport,
     required this.onUse,
     required this.onRemove,
+    this.sounds,
   });
 
   final List<Media> itemList;
@@ -4485,6 +4666,9 @@ class _Library extends StatelessWidget {
   final VoidCallback onImport;
   final ValueChanged<Media> onUse;
   final ValueChanged<Media> onRemove;
+
+  /// The sound effects shelf, under what the user brought.
+  final Widget? sounds;
 
   @override
   Widget build(BuildContext context) {
@@ -4563,7 +4747,7 @@ class _Library extends StatelessWidget {
     if (docked) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [headerWidget, ...list],
+        children: [headerWidget, ...list, ?sounds],
       );
     }
     return Column(
@@ -4573,7 +4757,7 @@ class _Library extends StatelessWidget {
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
-            children: list,
+            children: [...list, ?sounds],
           ),
         ),
       ],
@@ -4636,7 +4820,9 @@ class _LibraryItem extends StatelessWidget {
                             alpha: 0.15,
                           ),
                           child: Icon(
-                            item.isAudio
+                            item.isSoundEffect
+                                ? Icons.graphic_eq
+                                : item.isAudio
                                 ? Icons.music_note
                                 : item.isImage
                                 ? Icons.image_outlined
@@ -4670,8 +4856,11 @@ class _LibraryItem extends StatelessWidget {
                           : item.isPending
                           ? 'analysing…'
                           : [
+                              if (item.isSoundEffect) 'sound effect',
                               item.isImage
                                   ? 'image'
+                                  : item.isSoundEffect
+                                  ? '${item.durationS.toStringAsFixed(1)} s'
                                   : formatDuration(item.durationS),
                               if (item.width > 0)
                                 '${item.width}×${item.height}',

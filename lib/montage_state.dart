@@ -1742,6 +1742,85 @@ MontageState putMusic(
       .copyWith(selectionIds: {block.id}, activeLayer: destination);
 }
 
+/// The name a layer opened for sound effects gets — and how one is found
+/// again when the next effect arrives.
+const kEffectsLayerName = 'Effects';
+
+/// The `kind` of a block made from a sound effect — the server's `SFX_KIND`.
+const kSoundEffectKind = 'sfx';
+
+/// Puts a sound effect on the ruler, exactly at [atS].
+///
+/// It is not [putMusic]: a song that does not fit goes after the one already
+/// there, because two songs at once is noise. An effect is meant to go *over*
+/// the music — a whoosh on the cut, a hit on the kill — and an effect moved to
+/// the end of the song would be in the wrong place, which is worse than not
+/// being there. So it never moves: it goes on the chosen sound layer when
+/// that is free at that instant, otherwise on an effects layer that is, and
+/// otherwise a new effects layer opens for it.
+MontageState putSoundEffect(
+  MontageState s,
+  Track sound, {
+  required double atS,
+}) {
+  if (!sound.isReady) return s;
+  final lasts = sound.durationS;
+  if (lasts < kMinCutS || atS < 0) return s;
+
+  bool freeAt(int i) =>
+      i >= 0 &&
+      i < s.layers.length &&
+      s.layers[i].isAudio &&
+      !s.layers[i].locked &&
+      fits(s.layers[i].clips, atS, lasts);
+
+  var base = s;
+  var destination = -1;
+  if (freeAt(s.activeLayer)) {
+    destination = s.activeLayer;
+  } else {
+    for (var i = 0; i < s.layers.length; i++) {
+      if (s.layers[i].name.startsWith(kEffectsLayerName) && freeAt(i)) {
+        destination = i;
+        break;
+      }
+    }
+  }
+  if (destination < 0) {
+    final taken = s.layers
+        .where((l) => l.name.startsWith(kEffectsLayerName))
+        .length;
+    base = addMusicLayer(
+      s,
+      displayName: taken == 0
+          ? kEffectsLayerName
+          : '$kEffectsLayerName ${taken + 1}',
+    );
+    destination = base.layers.length - 1;
+  }
+
+  final block = TimelineClip(
+    id: newCutId(),
+    atS: atS,
+    durationS: lasts,
+    startS: 0,
+    source: 'media',
+    mediaId: sound.id,
+    // the server mixes an effect on its own: it is not music, and does not
+    // take the game sound away
+    kind: kSoundEffectKind,
+  );
+  return base
+      .withLayer(
+        destination,
+        base.layers[destination].copyWith(
+          clips: [...base.layers[destination].clips, block]
+            ..sort((a, b) => a.atS.compareTo(b.atS)),
+        ),
+      )
+      .copyWith(selectionIds: {block.id}, activeLayer: destination);
+}
+
 // ──────────────────────────────── history ───────────────────────────────────
 
 /// The undo stack, with grouping by gesture.

@@ -18,27 +18,45 @@ import 'volume_curve.dart';
 /// to do with each; it says **where** it landed and the screen sorts out the
 /// rest.
 class RulerDrop {
-  const RulerDrop.moment(DetectionEvent this.event) : media = null, span = null;
-  const RulerDrop.mediaItem(Media this.media) : event = null, span = null;
+  const RulerDrop.moment(DetectionEvent this.event)
+    : media = null,
+      span = null,
+      effect = null;
+  const RulerDrop.mediaItem(Media this.media)
+    : event = null,
+      span = null,
+      effect = null;
 
   /// A stretch marked by hand on the recording.
-  const RulerDrop.span(SourceSpan this.span) : event = null, media = null;
+  const RulerDrop.span(SourceSpan this.span)
+    : event = null,
+      media = null,
+      effect = null;
+
+  /// An effect from the sound library, not yet in the match.
+  const RulerDrop.effect(SoundEffect this.effect)
+    : event = null,
+      media = null,
+      span = null;
 
   final DetectionEvent? event;
   final Media? media;
   final SourceSpan? span;
+  final SoundEffect? effect;
 
   /// How long the block will last — it is what the drag ghost draws, so the
   /// size under the finger is the size on the ruler.
   double get durationSecs =>
-      span?.lengthS ?? media?.suggestedDuration ?? kDefaultCutS;
+      span?.lengthS ??
+      effect?.durationS ??
+      media?.suggestedDuration ??
+      kDefaultCutS;
 
-  String get blockLabel =>
-      span != null
-          ? 'Cut'
-          : media?.name ?? EventStyle.of(event!.kind).label;
+  String get blockLabel => span != null
+      ? 'Cut'
+      : effect?.name ?? media?.name ?? EventStyle.of(event!.kind).label;
 
-  bool get isSound => media?.isAudio ?? false;
+  bool get isSound => effect != null || (media?.isAudio ?? false);
 }
 
 /// The video ruler with the layers on top — the heart of the manual montage.
