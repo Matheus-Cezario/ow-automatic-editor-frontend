@@ -74,3 +74,24 @@ TextMotion textMotion(TimelineClip clip, double localS) {
   }
   return TextMotion(alpha: alpha, size: size, drop: drop, text: text);
 }
+
+/// The lines as the typewriter shows them [localS] seconds in — the server's
+/// steps (`_typing` in `owcore/textfx.py`), counted across lines already
+/// broken, so a line never re-breaks as it fills. Without the typewriter, the
+/// lines whole.
+List<String> typedLines(TimelineClip clip, List<String> lines, double localS) {
+  final style = clip.textStyle;
+  final n = lines.fold<int>(0, (sum, l) => sum + l.length);
+  if (style.animIn != TextAnim.typewriter || n == 0) return lines;
+  final d = math.min(style.animS, clip.durationS / 2);
+  final typing = math.min(math.max(d, n / kTypeRate), clip.durationS);
+  final steps = math.min(n, kTypeMaxSteps);
+  final k = math.min(steps, (localS / typing * steps).floor() + 1);
+  var left = (n * k / steps).ceil();
+  final shown = <String>[];
+  for (final line in lines) {
+    shown.add(line.substring(0, math.min(left, line.length)));
+    left = math.max(0, left - line.length);
+  }
+  return shown;
+}

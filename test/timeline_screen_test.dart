@@ -3114,6 +3114,35 @@ void main() {
       expect(find.byKey(const ValueKey('text-out-typewriter')), findsNothing);
       expect(find.text('Animation'), findsOneWidget, reason: 'its duration');
     });
+
+    testWidgets('the text panel sets alignment, box and shadow', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Write on screen'));
+      await settle(tester);
+      await tester.tap(find.text('Free text'));
+      await settle(tester);
+
+      for (final key in ['text-align-left', 'text-box-black', 'text-shadow-red']) {
+        await tester.ensureVisible(find.byKey(ValueKey(key)));
+        await tester.tap(find.byKey(ValueKey(key)));
+        await tester.pump();
+      }
+      var style = cutList(tester).firstWhere((c) => c.isText).textStyle;
+      expect(style.align, TextLineAlign.left);
+      expect(style.box, 'black');
+      expect(style.shadow, 'red');
+      expect(find.text('Box opacity'), findsOneWidget);
+
+      // the crossed-out dot turns them off again
+      await tester.ensureVisible(find.byKey(const ValueKey('text-box-none')));
+      await tester.tap(find.byKey(const ValueKey('text-box-none')));
+      await tester.pump();
+      style = cutList(tester).firstWhere((c) => c.isText).textStyle;
+      expect(style.box, '');
+      expect(find.text('Box opacity'), findsNothing);
+    });
   });
 
   group('ducking', () {

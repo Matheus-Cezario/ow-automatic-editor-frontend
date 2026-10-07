@@ -641,6 +641,21 @@ enum TextAnim {
       values.firstWhere((a) => a.wire == wire, orElse: () => none);
 }
 
+/// How the lines of a text line up with each other.
+enum TextLineAlign {
+  left('left', 'Left'),
+  center('center', 'Centre'),
+  right('right', 'Right');
+
+  const TextLineAlign(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static TextLineAlign of(String? wire) =>
+      values.firstWhere((a) => a.wire == wire, orElse: () => center);
+}
+
 class ClipTextStyle {
   const ClipTextStyle({
     this.size = 0.08,
@@ -651,6 +666,11 @@ class ClipTextStyle {
     this.animIn = TextAnim.none,
     this.animOut = TextAnim.none,
     this.animS = 0.35,
+    this.align = TextLineAlign.center,
+    this.width = 0,
+    this.box = '',
+    this.boxOpacity = 0.6,
+    this.shadow = '',
   });
 
   factory ClipTextStyle.fromJson(Map<String, dynamic> j) => ClipTextStyle(
@@ -662,6 +682,11 @@ class ClipTextStyle {
     animIn: TextAnim.of(j['anim_in'] as String?),
     animOut: TextAnim.of(j['anim_out'] as String?),
     animS: (j['anim_s'] as num?)?.toDouble() ?? 0.35,
+    align: TextLineAlign.of(j['align'] as String?),
+    width: (j['width'] as num?)?.toDouble() ?? 0,
+    box: j['box'] as String? ?? '',
+    boxOpacity: (j['box_opacity'] as num?)?.toDouble() ?? 0.6,
+    shadow: j['shadow'] as String? ?? '',
   );
 
   /// A font id from the server's catalogue; empty is the default face.
@@ -679,6 +704,20 @@ class ClipTextStyle {
   final double outline;
   final String outlineColor;
 
+  /// How the lines line up; the block stays centred on the clip's position.
+  final TextLineAlign align;
+
+  /// The box the words break inside, as a fraction of the frame **width**.
+  /// 0 is no box: lines break only where they were typed.
+  final double width;
+
+  /// A colour behind the text, or empty for none, and how much it covers.
+  final String box;
+  final double boxOpacity;
+
+  /// A drop shadow's colour, or empty for none.
+  final String shadow;
+
   ClipTextStyle copyWith({
     double? size,
     String? color,
@@ -688,6 +727,11 @@ class ClipTextStyle {
     TextAnim? animIn,
     TextAnim? animOut,
     double? animS,
+    TextLineAlign? align,
+    double? width,
+    String? box,
+    double? boxOpacity,
+    String? shadow,
   }) => ClipTextStyle(
     size: size ?? this.size,
     color: color ?? this.color,
@@ -697,6 +741,11 @@ class ClipTextStyle {
     animIn: animIn ?? this.animIn,
     animOut: animOut ?? this.animOut,
     animS: animS ?? this.animS,
+    align: align ?? this.align,
+    width: width ?? this.width,
+    box: box ?? this.box,
+    boxOpacity: boxOpacity ?? this.boxOpacity,
+    shadow: shadow ?? this.shadow,
   );
 
   Map<String, dynamic> toJson() => {
@@ -708,6 +757,10 @@ class ClipTextStyle {
     if (animIn != TextAnim.none) 'anim_in': animIn.wire,
     if (animOut != TextAnim.none) 'anim_out': animOut.wire,
     if (animIn != TextAnim.none || animOut != TextAnim.none) 'anim_s': animS,
+    if (align != TextLineAlign.center) 'align': align.wire,
+    if (width > 0) 'width': width,
+    if (box.isNotEmpty) ...{'box': box, 'box_opacity': boxOpacity},
+    if (shadow.isNotEmpty) 'shadow': shadow,
   };
 }
 

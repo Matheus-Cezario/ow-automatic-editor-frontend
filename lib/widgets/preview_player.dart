@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +9,7 @@ import '../monitor/frame.dart';
 import '../monitor/monitor_picture.dart';
 import '../montage.dart';
 import '../text_anim.dart';
+import '../text_layout.dart';
 import 'highlight_style.dart';
 
 /// The montage's monitor: shows what the video will be, before asking for it.
@@ -384,7 +387,8 @@ class _TextOnFrameState extends State<_TextOnFrame> {
         final motion = widget.editing
             ? TextMotion(text: widget.clip.text)
             : textMotion(widget.clip, widget.localS);
-        final body = styleSpec.size * box.maxHeight * motion.size;
+        final letter = styleSpec.size * box.maxHeight;
+        final body = letter * motion.size;
         final outlineSize = styleSpec.outline * styleSpec.size * box.maxHeight;
         final fillColour = _colours[styleSpec.color] ?? Colors.white;
         final outlineColour = _colours[styleSpec.outlineColor] ?? Colors.black;
@@ -392,6 +396,33 @@ class _TextOnFrameState extends State<_TextOnFrame> {
         // the default face is the server's DejaVu Sans **Bold**; a catalogue
         // font carries its own weight
         final weight = family == null ? FontWeight.bold : FontWeight.normal;
+
+        // the lines are broken at the letter's full size and the whole block
+        // then scales with the animation, as the server does
+        final boxWidth = styleSpec.width > 0
+            ? styleSpec.width * box.maxWidth
+            : null;
+        final measure = TextStyle(
+          fontSize: letter,
+          fontFamily: family,
+          fontWeight: weight,
+        );
+        final lines = breakTextLines(widget.clip.text, measure, boxWidth);
+        final blockWidth =
+            boxWidth ??
+            lines.fold<double>(0, (w, l) => math.max(w, lineWidth(l, measure)));
+        final shown = widget.editing
+            ? lines
+            : typedLines(widget.clip, lines, widget.localS);
+        final align = switch (styleSpec.align) {
+          TextLineAlign.left => TextAlign.left,
+          TextLineAlign.right => TextAlign.right,
+          TextLineAlign.center => TextAlign.center,
+        };
+        final boxColour = _colours[styleSpec.box];
+        final shadowColour = _colours[styleSpec.shadow];
+        final shadowOffset = math.max(1.0, kTextShadowOffset * letter);
+        final pad = kTextBoxPad * body;
 
         return CustomSingleChildLayout(
           // the same computation as `drawtext`: the line's centre lands `x`
@@ -461,77 +492,124 @@ class _TextOnFrameState extends State<_TextOnFrame> {
                     )
                   : null,
               child: widget.editing
-                  ? IntrinsicWidth(
-                      child: TextField(
-                        key: ValueKey('typing-${widget.clip.id}'),
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        textAlign: TextAlign.center,
-                        cursorColor: fillColour,
-                        onChanged: widget.onTextChanged,
-                        onSubmitted: (_) => _finish(),
-                        onTapOutside: (_) => _finish(),
-                        decoration: const InputDecoration.collapsed(
-                          hintText: '',
-                        ),
-                        style: TextStyle(
-                          fontSize: body,
-                          fontFamily: family,
-                          fontWeight: weight,
-                          height: 1.1,
-                          color: fillColour,
-                          // the real outline is a second text underneath, and a
-                          // field cannot draw two; the shadow imitates it well
-                          // enough to read what is being typed
-                          shadows: outlineSize > 0
-                              ? [
-                                  for (final d in const [
-                                    Offset(1, 1),
-                                    Offset(-1, 1),
-                                    Offset(1, -1),
-                                    Offset(-1, -1),
-                                  ])
-                                    Shadow(
-                                      color: outlineColour,
-                                      offset: d * (outlineSize / 2),
-                                    ),
-                                ]
-                              : null,
-                        ),
-                      ),
-                    )
-                  : Stack(
-                      children: [
-                        // the outline is what makes white text survive a bright
-                        // scene; without it the preview would lie about
-                        // legibility
-                        if (outlineSize > 0)
-                          Text(
-                            motion.text,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: body,
-                              fontFamily: family,
-                              fontWeight: weight,
-                              height: 1.1,
-                              foreground: Paint()
-                                ..style = PaintingStyle.stroke
-                                ..strokeWidth = outlineSize
-                                ..color = outlineColour,
-                            ),
+                  ? SizedBox(
+                      width: boxWidth,
+                      child: IntrinsicWidth(
+                        stepWidth: boxWidth,
+                        child: TextField(
+                          key: ValueKey('typing-${widget.clip.id}'),
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          textAlign: align,
+                          // Enter breaks the line; leaving the field ends
+                          // editing
+                          maxLines: null,
+                          keyboardType: TextInputType.multiline,
+                          cursorColor: fillColour,
+                          onChanged: widget.onTextChanged,
+                          onTapOutside: (_) => _finish(),
+                          decoration: const InputDecoration.collapsed(
+                            hintText: '',
                           ),
-                        Text(
-                          motion.text,
-                          textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: body,
                             fontFamily: family,
                             fontWeight: weight,
-                            height: 1.1,
+                            height: kTextLineHeight,
                             color: fillColour,
+                            // the real outline is a second text underneath,
+                            // and a field cannot draw two; the shadow imitates
+                            // it well enough to read what is being typed
+                            shadows: outlineSize > 0
+                                ? [
+                                    for (final d in const [
+                                      Offset(1, 1),
+                                      Offset(-1, 1),
+                                      Offset(1, -1),
+                                      Offset(-1, -1),
+                                    ])
+                                      Shadow(
+                                        color: outlineColour,
+                                        offset: d * (outlineSize / 2),
+                                      ),
+                                  ]
+                                : null,
                           ),
                         ),
-                      ],
+                      ),
+                    )
+                  : Container(
+                      key: ValueKey('text-box-${widget.clip.id}'),
+                      padding: boxColour == null ? null : EdgeInsets.all(pad),
+                      color: boxColour?.withValues(
+                        alpha: styleSpec.boxOpacity.clamp(0.0, 1.0),
+                      ),
+                      child: SizedBox(
+                        // a pixel of slack: the block is measured at the full
+                        // letter and drawn scaled, and rounding must not wrap it
+                        width: blockWidth * motion.size + 1,
+                        child: Stack(
+                          children: [
+                            // the outline is what makes white text survive a
+                            // bright scene; without it the preview would lie
+                            // about legibility
+                            if (outlineSize > 0)
+                              Text(
+                                shown.join('\n'),
+                                textAlign: align,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontSize: body,
+                                  fontFamily: family,
+                                  fontWeight: weight,
+                                  height: kTextLineHeight,
+                                  foreground: Paint()
+                                    ..style = PaintingStyle.stroke
+                                    ..strokeWidth = outlineSize
+                                    ..color = outlineColour,
+                                  shadows: shadowColour == null
+                                      ? null
+                                      : [
+                                          Shadow(
+                                            color: shadowColour.withValues(
+                                              alpha: kTextShadowOpacity,
+                                            ),
+                                            offset: Offset(
+                                              shadowOffset,
+                                              shadowOffset,
+                                            ),
+                                          ),
+                                        ],
+                                ),
+                              ),
+                            Text(
+                              shown.join('\n'),
+                              textAlign: align,
+                              softWrap: false,
+                              style: TextStyle(
+                                fontSize: body,
+                                fontFamily: family,
+                                fontWeight: weight,
+                                height: kTextLineHeight,
+                                color: fillColour,
+                                shadows: shadowColour == null || outlineSize > 0
+                                    ? null
+                                    : [
+                                        Shadow(
+                                          color: shadowColour.withValues(
+                                            alpha: kTextShadowOpacity,
+                                          ),
+                                          offset: Offset(
+                                            shadowOffset,
+                                            shadowOffset,
+                                          ),
+                                        ),
+                                      ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
             ),
           ),
