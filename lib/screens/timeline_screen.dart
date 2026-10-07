@@ -5717,6 +5717,60 @@ class _ClipText extends StatelessWidget {
     'black': Colors.black,
   };
 
+  /// A row of colour dots; with [allowNone], a crossed-out one first that
+  /// turns the thing off (empty colour).
+  Widget _swatches(
+    BuildContext context,
+    String label,
+    String selected,
+    ValueChanged<String> onPick, {
+    String keyPrefix = 'text-colour',
+    bool allowNone = false,
+  }) {
+    final primary = Theme.of(context).colorScheme.primary;
+    Widget dot(String colour) {
+      final picked = selected == colour;
+      return GestureDetector(
+        key: ValueKey('$keyPrefix-${colour.isEmpty ? 'none' : colour}'),
+        onTap: () => onPick(colour),
+        child: Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: colour.isEmpty ? null : _onScreen[colour],
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: picked ? primary : Colors.white24,
+              width: picked ? 3 : 1,
+            ),
+          ),
+          child: colour.isEmpty
+              ? const Icon(Icons.block, size: 16, color: Colors.white54)
+              : null,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(width: 92, child: Text(label)),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                if (allowNone) dot(''),
+                for (final c in _colours) dot(c),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final styleSpec = cut.textStyle;
@@ -5736,35 +5790,11 @@ class _ClipText extends StatelessWidget {
           ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            const SizedBox(width: 92, child: Text('Colour')),
-            Expanded(
-              child: Wrap(
-                spacing: 6,
-                children: [
-                  for (final fillColour in _colours)
-                    GestureDetector(
-                      onTap: () => onStyle(styleSpec.copyWith(color: fillColour)),
-                      child: Container(
-                        width: 26,
-                        height: 26,
-                        decoration: BoxDecoration(
-                          color: _onScreen[fillColour],
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: styleSpec.color == fillColour
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.white24,
-                            width: styleSpec.color == fillColour ? 3 : 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+        _swatches(
+          context,
+          'Colour',
+          styleSpec.color,
+          (c) => onStyle(styleSpec.copyWith(color: c)),
         ),
         _LabeledSlider(
           textClip: 'Size',
@@ -5789,6 +5819,62 @@ class _ClipText extends StatelessWidget {
           onReset: styleSpec.outline == 0.12
               ? null
               : () => onStyle(styleSpec.copyWith(outline: 0.12)),
+        ),
+        _OptionRow(
+          textClip: 'Lines',
+          children: [
+            for (final a in TextLineAlign.values)
+              ChoiceChip(
+                key: ValueKey('text-align-${a.wire}'),
+                label: Text(a.label),
+                selected: styleSpec.align == a,
+                onSelected: (_) => onStyle(styleSpec.copyWith(align: a)),
+              ),
+          ],
+        ),
+        _LabeledSlider(
+          textClip: 'Box width',
+          amount: styleSpec.width,
+          minimum: 0,
+          maximum: 1,
+          caption: styleSpec.width == 0
+              ? 'off — breaks only where you press Enter'
+              : '${(styleSpec.width * 100).round()}% of the width',
+          // under 5% there is no room for a word: the start of the slider is
+          // "off"
+          onChanged: (v) =>
+              onStyle(styleSpec.copyWith(width: v < 0.05 ? 0 : v)),
+          onReset: styleSpec.width == 0
+              ? null
+              : () => onStyle(styleSpec.copyWith(width: 0)),
+        ),
+        _swatches(
+          context,
+          'Box',
+          styleSpec.box,
+          (c) => onStyle(styleSpec.copyWith(box: c)),
+          keyPrefix: 'text-box',
+          allowNone: true,
+        ),
+        if (styleSpec.box.isNotEmpty)
+          _LabeledSlider(
+            textClip: 'Box opacity',
+            amount: styleSpec.boxOpacity,
+            minimum: 0.1,
+            maximum: 1,
+            caption: '${(styleSpec.boxOpacity * 100).round()}%',
+            onChanged: (v) => onStyle(styleSpec.copyWith(boxOpacity: v)),
+            onReset: styleSpec.boxOpacity == 0.6
+                ? null
+                : () => onStyle(styleSpec.copyWith(boxOpacity: 0.6)),
+          ),
+        _swatches(
+          context,
+          'Shadow',
+          styleSpec.shadow,
+          (c) => onStyle(styleSpec.copyWith(shadow: c)),
+          keyPrefix: 'text-shadow',
+          allowNone: true,
         ),
         if (fonts != null && fonts!.fonts.isNotEmpty)
           Row(
