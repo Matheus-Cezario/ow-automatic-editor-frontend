@@ -109,6 +109,7 @@ class MusicTimeline extends StatefulWidget {
     this.beatTimes = const [],
     this.matchWaveform = const [],
     this.matchDuration = 0,
+    this.otherMatchWaveforms = const {},
     this.tracks = const {},
     this.fallbackDurationS = 60,
     this.trackHeight = blockHeight,
@@ -254,6 +255,9 @@ class MusicTimeline extends StatefulWidget {
   /// The whole match audio's waveform, and how much time it covers.
   final List<double> matchWaveform;
   final double matchDuration;
+
+  /// The same for moments brought from other matches, by job id.
+  final Map<String, (List<double>, double)> otherMatchWaveforms;
 
   /// The library's music tracks, by id. They are where the waveform drawn
   /// inside a music block comes from — each has its own, not the match's.
@@ -870,8 +874,14 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           onTrim: (at) => widget.onTrim(clip.id, at),
                           onStretch: (d) => widget.onStretch(clip.id, d),
                           onDragLabel: widget.onDragLabel,
-                          wave: widget.matchWaveform,
-                          matchDuration: widget.matchDuration,
+                          wave: clip.jobId == null
+                              ? widget.matchWaveform
+                              : widget.otherMatchWaveforms[clip.jobId]?.$1 ??
+                                    const [],
+                          matchDuration: clip.jobId == null
+                              ? widget.matchDuration
+                              : widget.otherMatchWaveforms[clip.jobId]?.$2 ??
+                                    0,
                           onDragStart: widget.onGestureStart,
                           onDragMove: _maybeScroll,
                           onDragEnd: () {

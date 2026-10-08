@@ -1071,6 +1071,7 @@ class TimelineClip {
     this.id = '',
     this.source = 'recording',
     this.mediaId,
+    this.jobId,
     this.transform = const ClipTransform(),
     this.audio = const ClipAudio(),
     this.color = const ClipColor(),
@@ -1112,6 +1113,10 @@ class TimelineClip {
 
   /// Which library item, when [source] is `media`.
   final String? mediaId;
+
+  /// For a `recording` block, the match it is cut from, when it is a moment
+  /// brought from another match; null is this montage's own match.
+  final String? jobId;
   final ClipTransform transform;
   final ClipAudio audio;
   final ClipColor color;
@@ -1265,6 +1270,7 @@ class TimelineClip {
     String? id,
     String? source,
     String? mediaId,
+    String? jobId,
     ClipTransform? transform,
     ClipAudio? audio,
     ClipColor? color,
@@ -1294,6 +1300,7 @@ class TimelineClip {
     id: id ?? this.id,
     source: source ?? this.source,
     mediaId: mediaId ?? this.mediaId,
+    jobId: jobId ?? this.jobId,
     transform: transform ?? this.transform,
     audio: audio ?? this.audio,
     color: color ?? this.color,
@@ -1323,6 +1330,7 @@ class TimelineClip {
     kind: j['kind'] as String? ?? '',
     source: j['source'] as String? ?? 'recording',
     mediaId: j['media_id'] as String?,
+    jobId: j['job_id'] as String?,
     label: j['label'] as String? ?? '',
     fit: j['fit'] as String?,
     transform: ClipTransform.fromJson(
@@ -1373,6 +1381,7 @@ class TimelineClip {
     'kind': kind,
     'source': source,
     if (mediaId != null) 'media_id': mediaId,
+    if (jobId != null) 'job_id': jobId,
     if (!transform.isNeutral) 'transform': transform.toJson(),
     if (!audio.isNeutral) 'audio': audio.toJson(),
     if (!color.isNeutral) 'color': color.toJson(),
@@ -2180,6 +2189,7 @@ class DetectionEvent {
     required this.t,
     required this.confidence,
     this.meta = const {},
+    this.jobId,
   });
 
   factory DetectionEvent.fromJson(Map<String, dynamic> j) => DetectionEvent(
@@ -2197,6 +2207,19 @@ class DetectionEvent {
   /// `ability_kill` carries `ability` (`"orisa/energy_javelin"`), an
   /// `ult_negated` carries whose ultimate it was and how long it took.
   final Map<String, dynamic> meta;
+
+  /// The match it was found in, when it is not the one being edited: a
+  /// moment brought from another match. Set by the app, not the server.
+  final String? jobId;
+
+  /// The same moment, as found in the match [jobId].
+  DetectionEvent inMatch(String jobId) => DetectionEvent(
+    kind: kind,
+    t: t,
+    confidence: confidence,
+    meta: meta,
+    jobId: jobId,
+  );
 
   /// The ability that killed, when the event is an ability one.
   ///

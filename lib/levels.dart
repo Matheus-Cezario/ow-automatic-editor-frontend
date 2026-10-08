@@ -18,6 +18,7 @@ double mixLevelAt(
   required Map<String, Track> tracks,
   required List<double> matchWave,
   required double matchDurationS,
+  Map<String, (List<double>, double)> otherMatches = const {},
   double windowS = 0.1,
 }) {
   // an effect is not music: it does not turn the game down
@@ -55,8 +56,11 @@ double mixLevelAt(
             _peak(song.peaks, song.durationS, at, windowS);
       } else if (c.source == 'recording' && gameGain > 0) {
         final at = c.startS + c.sourceOffsetAt(local);
-        level +=
-            gameGain * own * _peak(matchWave, matchDurationS, at, windowS);
+        // a moment brought from another match sounds like that match
+        final (wave, waveS) = c.jobId == null
+            ? (matchWave, matchDurationS)
+            : otherMatches[c.jobId] ?? (const <double>[], 0.0);
+        level += gameGain * own * _peak(wave, waveS, at, windowS);
       }
     }
   }
