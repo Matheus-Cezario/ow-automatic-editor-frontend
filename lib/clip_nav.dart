@@ -77,7 +77,11 @@ String describeClip(
 }) {
   final parts = [
     clipName(c, track: track),
-    layerName.isEmpty ? 'layer ${layer + 1}' : 'layer "$layerName"',
+    // a new layer is named "Layer 2" already: only a name of the user's own
+    // is worth quoting
+    layerName.isEmpty || layerName == 'Layer ${layer + 1}'
+        ? 'layer ${layer + 1}'
+        : 'layer "$layerName"',
     'from ${formatClock(c.atS)} to ${formatClock(c.untilS)}',
     '${c.durationS.toStringAsFixed(1)} seconds',
     if (locked) 'locked',

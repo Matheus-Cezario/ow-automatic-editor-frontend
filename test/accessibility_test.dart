@@ -71,6 +71,15 @@ void main() {
       'Title, layer 2, from 00:02 to 00:05, 3.0 seconds, locked',
     );
     expect(describeClip(a, layer: 0), startsWith('Event, layer 1'));
+    expect(
+      describeClip(a, layer: 1, layerName: 'Layer 2'),
+      startsWith('Event, layer 2,'),
+      reason: 'the default name is not read out as a name',
+    );
+    expect(
+      describeClip(a, layer: 0, layerName: 'Music'),
+      startsWith('Event, layer "Music",'),
+    );
   });
 
   group('the screen', () {
