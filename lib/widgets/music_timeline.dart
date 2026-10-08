@@ -94,6 +94,7 @@ class MusicTimeline extends StatefulWidget {
     required this.onActiveLayer,
     required this.onAdjustLayer,
     required this.onReorderLayers,
+    this.labelsWidth = headerWidth,
     this.onRenameLayer,
     this.onRemoveLayer,
     this.onDuplicateClip,
@@ -273,6 +274,13 @@ class MusicTimeline extends StatefulWidget {
   static const double blockHeight = 72;
   static const double rulerHeight = 20;
   static const double headerWidth = 148;
+
+  /// The layer names on a phone: the toggles still fit, and the track gets
+  /// the room it needs on a 390px screen.
+  static const double narrowHeaderWidth = 112;
+
+  /// How wide the layer names are; [headerWidth] unless the screen is narrow.
+  final double labelsWidth;
 
   /// A collapsed layer: a strip that shows where its clips are, no more.
   static const double collapsedHeight = 24;
@@ -459,7 +467,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
     final x = box.globalToLocal(global).dx;
     const marginPx = 48.0;
 
-    final direction = x < MusicTimeline.headerWidth + marginPx
+    final direction = x < widget.labelsWidth + marginPx
         ? -1.0
         : x > box.size.width - marginPx
         ? 1.0
@@ -486,7 +494,7 @@ class _MusicTimelineState extends State<MusicTimeline> {
     if (box == null) return null;
     final local = box.globalToLocal(global);
     final x =
-        local.dx - MusicTimeline.headerWidth + widget.scroll.offset;
+        local.dx - widget.labelsWidth + widget.scroll.offset;
     if (x < 0) return null;
     return (math.max(0.0, x / widget.pxPerSecond), _layerAt(local.dy));
   }
@@ -739,8 +747,9 @@ class _MusicTimelineState extends State<MusicTimeline> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: MusicTimeline.headerWidth,
+            width: widget.labelsWidth,
             child: _Headers(
+              width: widget.labelsWidth,
               layers: widget.layers,
               active: widget.activeLayer,
               onActive: widget.onActiveLayer,
@@ -1334,6 +1343,7 @@ class _RenameDialogState extends State<_RenameDialog> {
 /// knowing which layer each track is still holds.
 class _Headers extends StatefulWidget {
   const _Headers({
+    required this.width,
     required this.layers,
     required this.active,
     required this.onActive,
@@ -1347,6 +1357,7 @@ class _Headers extends StatefulWidget {
     this.onVolumeMode,
   });
 
+  final double width;
   final double trackHeight;
   final ValueChanged<double>? onTrackHeight;
   final bool volumeEditing;
@@ -1462,7 +1473,7 @@ class _HeadersState extends State<_Headers> {
                   feedback: Material(
                     color: Colors.transparent,
                     child: SizedBox(
-                      width: MusicTimeline.headerWidth,
+                      width: widget.width,
                       height: widget.rowHeight(i),
                       child: Opacity(
                         opacity: 0.9,
@@ -1784,6 +1795,11 @@ class _Toggle extends StatelessWidget {
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
+      // the same size on a phone, where Material would pad each to 48px and
+      // the three no longer fit beside the layer's name
+      style: const ButtonStyle(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
       constraints: BoxConstraints(minWidth: 26, minHeight: small ? 20 : 24),
       iconSize: small ? 13 : 15,
       icon: Icon(
