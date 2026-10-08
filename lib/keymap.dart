@@ -157,6 +157,23 @@ final List<EditorCommand> kEditorCommands = [
   const EditorCommand('frame-on', 'one frame forward', [
     KeyCombo(LogicalKeyboardKey.period),
   ]),
+  const EditorCommand('prev-clip', 'select the previous cut', [
+    KeyCombo(LogicalKeyboardKey.arrowLeft, alt: true),
+  ]),
+  const EditorCommand('next-clip', 'select the next cut', [
+    KeyCombo(LogicalKeyboardKey.arrowRight, alt: true),
+  ]),
+  const EditorCommand('prev-edit', 'playhead to the previous cut edge', [
+    KeyCombo(LogicalKeyboardKey.arrowUp),
+  ]),
+  const EditorCommand('next-edit', 'playhead to the next cut edge', [
+    KeyCombo(LogicalKeyboardKey.arrowDown),
+  ]),
+  const EditorCommand(
+    'describe',
+    'say where the playhead is and what is selected',
+    [KeyCombo(LogicalKeyboardKey.keyW, alt: true)],
+  ),
   const EditorCommand('nudge-left', 'nudge the selected cuts left', [
     KeyCombo(LogicalKeyboardKey.arrowLeft, shift: true),
   ]),

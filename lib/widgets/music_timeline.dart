@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api.dart';
+import '../clip_nav.dart';
 import '../montage.dart';
 import 'highlight_style.dart';
 import 'volume_curve.dart';
@@ -858,6 +859,13 @@ class _MusicTimelineState extends State<MusicTimeline> {
                           key: ValueKey('block-${clip.id}'),
                           cut: clip,
                           music: widget.tracks[clip.mediaId],
+                          description: describeClip(
+                            clip,
+                            layer: layerIndex,
+                            layerName: widget.layers[layerIndex].name,
+                            track: widget.tracks[clip.mediaId],
+                            locked: widget.layers[layerIndex].locked,
+                          ),
                           selected: widget.selectionIds.contains(clip.id),
                           isLocked: widget.layers[layerIndex].locked,
                           markAtCursor: _playAtCursor(clip),
@@ -1823,6 +1831,7 @@ class _Block extends StatefulWidget {
     super.key,
     required this.cut,
     required this.music,
+    required this.description,
     required this.selected,
     required this.isLocked,
     required this.markAtCursor,
@@ -1850,6 +1859,10 @@ class _Block extends StatefulWidget {
   });
 
   final TimelineClip cut;
+
+  /// What a screen reader says for it: the ruler is drawn, and without this
+  /// the clips in it were silent.
+  final String description;
 
   /// The music of this block, when it is a music block. It is where the drawn
   /// waveform and the written name come from.
@@ -2081,203 +2094,220 @@ class _BlockState extends State<_Block> {
       top: widget.top + _rose,
       width: widthPx,
       height: widget.height,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.grab,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _play,
-          onSecondaryTapUp: (d) => widget.onMenu(d.globalPosition),
-          // Whichever axis the drag starts on, it follows the finger on both:
-          // sideways moves the clip in time, up or down takes it to another
-          // track. Following only the starting axis meant a drag that began
-          // sideways could never change layer. Two recognisers and not one pan
-          // because the ruler scrolls sideways too, and on touch a pan loses
-          // that race.
-          onHorizontalDragStart: widget.isLocked ? null : _grab,
-          onHorizontalDragUpdate: widget.isLocked ? null : _follow,
-          onHorizontalDragEnd: widget.isLocked ? null : (_) => _drop(),
-          onHorizontalDragCancel: widget.isLocked ? null : _drop,
-          onVerticalDragStart: widget.isLocked ? null : _grab,
-          onVerticalDragUpdate: widget.isLocked ? null : _follow,
-          onVerticalDragEnd: widget.isLocked ? null : (_) => _drop(),
-          onVerticalDragCancel: widget.isLocked ? null : _drop,
-          child: Container(
-            margin: EdgeInsets.symmetric(vertical: widget.height < 40 ? 2 : 4),
-            decoration: BoxDecoration(
-              color: fillColour.withValues(alpha: widget.selected ? 0.45 : 0.25),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: widget.selected ? theme.colorScheme.onSurface : fillColour,
-                width: widget.selected ? 2 : 1,
+      child: Semantics(
+        container: true,
+        button: true,
+        selected: widget.selected,
+        // said in words too: the browser does not tell a screen reader that
+        // a button is selected
+        label: widget.selected
+            ? '${widget.description}, selected'
+            : widget.description,
+        onTap: () => widget.onSelect(),
+        onLongPress: () {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box == null) return;
+          widget.onMenu(box.localToGlobal(box.size.center(Offset.zero)));
+        },
+        excludeSemantics: true,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.grab,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _play,
+            onSecondaryTapUp: (d) => widget.onMenu(d.globalPosition),
+            // Whichever axis the drag starts on, it follows the finger on both:
+            // sideways moves the clip in time, up or down takes it to another
+            // track. Following only the starting axis meant a drag that began
+            // sideways could never change layer. Two recognisers and not one pan
+            // because the ruler scrolls sideways too, and on touch a pan loses
+            // that race.
+            onHorizontalDragStart: widget.isLocked ? null : _grab,
+            onHorizontalDragUpdate: widget.isLocked ? null : _follow,
+            onHorizontalDragEnd: widget.isLocked ? null : (_) => _drop(),
+            onHorizontalDragCancel: widget.isLocked ? null : _drop,
+            onVerticalDragStart: widget.isLocked ? null : _grab,
+            onVerticalDragUpdate: widget.isLocked ? null : _follow,
+            onVerticalDragEnd: widget.isLocked ? null : (_) => _drop(),
+            onVerticalDragCancel: widget.isLocked ? null : _drop,
+            child: Container(
+              margin: EdgeInsets.symmetric(vertical: widget.height < 40 ? 2 : 4),
+              decoration: BoxDecoration(
+                color: fillColour.withValues(alpha: widget.selected ? 0.45 : 0.25),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: widget.selected ? theme.colorScheme.onSurface : fillColour,
+                  width: widget.selected ? 2 : 1,
+                ),
               ),
-            ),
-            child: Stack(
-              children: [
-                // ── the game sound inside this cut ──────────────────────────
-                if (_waveform.$1.isNotEmpty && _waveform.$2 > 0)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _CutWaveform(
-                          wave: _waveform.$1,
-                          totalDuration: _waveform.$2,
-                          from: widget.cut.startS,
-                          until: widget.cut.endS,
-                          fillColour: fillColour.withValues(alpha: 0.55),
+              child: Stack(
+                children: [
+                  // ── the game sound inside this cut ──────────────────────────
+                  if (_waveform.$1.isNotEmpty && _waveform.$2 > 0)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: CustomPaint(
+                          painter: _CutWaveform(
+                            wave: _waveform.$1,
+                            totalDuration: _waveform.$2,
+                            from: widget.cut.startS,
+                            until: widget.cut.endS,
+                            fillColour: fillColour.withValues(alpha: 0.55),
+                          ),
                         ),
                       ),
                     ),
-                  ),
 
-                // ── the entrance, when it is not a hard cut ────────────────
-                // As long as it lasts: it is the part of the clip where the
-                // previous one still shows, and fitting it to the beat means
-                // seeing it.
-                if (widget.cut.transition case final tr?)
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: math.min(widthPx, tr.durationS * widget.pxPerSecond),
-                    child: IgnorePointer(
-                      child: Container(
-                        key: ValueKey('transition-on-clip-${widget.cut.id}'),
-                        alignment: Alignment.topLeft,
-                        padding: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          borderRadius: const BorderRadius.horizontal(
-                            left: Radius.circular(6),
-                          ),
-                          gradient: LinearGradient(
-                            colors: [
-                              theme.colorScheme.onSurface.withValues(
-                                alpha: 0.45,
-                              ),
-                              theme.colorScheme.onSurface.withValues(alpha: 0),
-                            ],
-                          ),
-                        ),
-                        child: Icon(
-                          TransitionType.of(tr.kind)?.icon ??
-                              Icons.compare_arrows,
-                          size: 12,
-                          color: theme.colorScheme.surface,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // ── where the play happens ──────────────────────────────────
-                // The block is a stretch; the moment is an instant inside it.
-                // Without this mark, fitting the kill to the beat would be
-                // guessing: what lines up with the percussion is the play, not
-                // the cut's edge.
-                if (_mark != null)
-                  Positioned(
-                    left: _mark! * widthPx - (widget.markAtCursor ? 1.5 : 1),
-                    top: 0,
-                    bottom: 0,
-                    width: widget.markAtCursor ? 3 : 2,
-                    child: IgnorePointer(
-                      child: ColoredBox(
-                        // lit when the play is exactly under the playhead: it
-                        // is the confirmation that the fit took
-                        color: widget.markAtCursor
-                            ? theme.colorScheme.error
-                            : theme.colorScheme.onSurface.withValues(
-                                alpha: 0.85,
-                              ),
-                      ),
-                    ),
-                  ),
-                if (_mark != null)
-                  Positioned(
-                    left: _mark! * widthPx - 4,
-                    top: 0,
-                    child: IgnorePointer(
-                      child: Icon(
-                        Icons.arrow_drop_down,
-                        size: widget.markAtCursor ? 14 : 12,
-                        color: widget.markAtCursor
-                            ? theme.colorScheme.error
-                            : theme.colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                if (textFits)
-                  Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: widget.selected ? _Block.handle : 6,
-                      vertical: 4,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          blockLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.clip,
-                          softWrap: false,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: fillColour,
-                          ),
-                        ),
-                        if (roomForLength)
-                          Text(
-                            '${widget.cut.durationS.toStringAsFixed(1)}s',
-                            maxLines: 1,
-                            softWrap: false,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.hintColor,
+                  // ── the entrance, when it is not a hard cut ────────────────
+                  // As long as it lasts: it is the part of the clip where the
+                  // previous one still shows, and fitting it to the beat means
+                  // seeing it.
+                  if (widget.cut.transition case final tr?)
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: math.min(widthPx, tr.durationS * widget.pxPerSecond),
+                      child: IgnorePointer(
+                        child: Container(
+                          key: ValueKey('transition-on-clip-${widget.cut.id}'),
+                          alignment: Alignment.topLeft,
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            borderRadius: const BorderRadius.horizontal(
+                              left: Radius.circular(6),
+                            ),
+                            gradient: LinearGradient(
+                              colors: [
+                                theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.45,
+                                ),
+                                theme.colorScheme.onSurface.withValues(alpha: 0),
+                              ],
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                // ── keyframes, on the chosen block: where its motion changes
-                if (widget.selected)
-                  for (final t in {for (final k in widget.cut.keys) k.t})
-                    Positioned(
-                      key: ValueKey('keyframe-${widget.cut.id}-$t'),
-                      left: (t * widthPx - 5).clamp(0.0, widthPx - 10),
-                      bottom: 2,
-                      child: IgnorePointer(
-                        child: Icon(
-                          Icons.diamond,
-                          size: 10,
-                          color: theme.colorScheme.onSurface,
+                          child: Icon(
+                            TransitionType.of(tr.kind)?.icon ??
+                                Icons.compare_arrows,
+                            size: 12,
+                            color: theme.colorScheme.surface,
+                          ),
                         ),
                       ),
                     ),
-                // ── the volume line: editable on the chosen block, drawn on
-                // the others only when it is not plain 100%
-                if (widget.hasSound &&
-                    widget.height >= 40 &&
-                    widget.onVolumeLevel != null &&
-                    ((widget.selected && widget.volumeEditing) ||
-                        widget.cut.audio.volume != 1 ||
-                        widget.cut.keysFor(KeyProp.volume).isNotEmpty))
-                  Positioned.fill(
-                    child: VolumeCurve(
-                      clip: widget.cut,
-                      colour: theme.colorScheme.tertiary,
-                      editable:
-                          widget.selected &&
-                          widget.volumeEditing &&
-                          !widget.isLocked,
-                      onLevel: widget.onVolumeLevel!,
-                      onKeys: widget.onVolumeKeys!,
-                      onLabel: widget.onDragLabel,
-                      onStart: widget.onDragStart,
-                      onEnd: widget.onDragEnd,
+
+                  // ── where the play happens ──────────────────────────────────
+                  // The block is a stretch; the moment is an instant inside it.
+                  // Without this mark, fitting the kill to the beat would be
+                  // guessing: what lines up with the percussion is the play, not
+                  // the cut's edge.
+                  if (_mark != null)
+                    Positioned(
+                      left: _mark! * widthPx - (widget.markAtCursor ? 1.5 : 1),
+                      top: 0,
+                      bottom: 0,
+                      width: widget.markAtCursor ? 3 : 2,
+                      child: IgnorePointer(
+                        child: ColoredBox(
+                          // lit when the play is exactly under the playhead: it
+                          // is the confirmation that the fit took
+                          color: widget.markAtCursor
+                              ? theme.colorScheme.error
+                              : theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.85,
+                                ),
+                        ),
+                      ),
                     ),
-                  ),
-                if (widget.selected && !widget.isLocked) ...[
-                  _handle(_Gesture.trimLeft, fillColour, leftEdge: true),
-                  _handle(_Gesture.stretchRight, fillColour, leftEdge: false),
+                  if (_mark != null)
+                    Positioned(
+                      left: _mark! * widthPx - 4,
+                      top: 0,
+                      child: IgnorePointer(
+                        child: Icon(
+                          Icons.arrow_drop_down,
+                          size: widget.markAtCursor ? 14 : 12,
+                          color: widget.markAtCursor
+                              ? theme.colorScheme.error
+                              : theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  if (textFits)
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: widget.selected ? _Block.handle : 6,
+                        vertical: 4,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            blockLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            softWrap: false,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: fillColour,
+                            ),
+                          ),
+                          if (roomForLength)
+                            Text(
+                              '${widget.cut.durationS.toStringAsFixed(1)}s',
+                              maxLines: 1,
+                              softWrap: false,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.hintColor,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  // ── keyframes, on the chosen block: where its motion changes
+                  if (widget.selected)
+                    for (final t in {for (final k in widget.cut.keys) k.t})
+                      Positioned(
+                        key: ValueKey('keyframe-${widget.cut.id}-$t'),
+                        left: (t * widthPx - 5).clamp(0.0, widthPx - 10),
+                        bottom: 2,
+                        child: IgnorePointer(
+                          child: Icon(
+                            Icons.diamond,
+                            size: 10,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                  // ── the volume line: editable on the chosen block, drawn on
+                  // the others only when it is not plain 100%
+                  if (widget.hasSound &&
+                      widget.height >= 40 &&
+                      widget.onVolumeLevel != null &&
+                      ((widget.selected && widget.volumeEditing) ||
+                          widget.cut.audio.volume != 1 ||
+                          widget.cut.keysFor(KeyProp.volume).isNotEmpty))
+                    Positioned.fill(
+                      child: VolumeCurve(
+                        clip: widget.cut,
+                        colour: theme.colorScheme.tertiary,
+                        editable:
+                            widget.selected &&
+                            widget.volumeEditing &&
+                            !widget.isLocked,
+                        onLevel: widget.onVolumeLevel!,
+                        onKeys: widget.onVolumeKeys!,
+                        onLabel: widget.onDragLabel,
+                        onStart: widget.onDragStart,
+                        onEnd: widget.onDragEnd,
+                      ),
+                    ),
+                  if (widget.selected && !widget.isLocked) ...[
+                    _handle(_Gesture.trimLeft, fillColour, leftEdge: true),
+                    _handle(_Gesture.stretchRight, fillColour, leftEdge: false),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

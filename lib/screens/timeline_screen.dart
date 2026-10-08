@@ -4,10 +4,12 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../api.dart';
+import '../clip_nav.dart';
 import '../montage.dart';
 import '../export_options.dart';
 import '../levels.dart';
@@ -2878,6 +2880,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     // the coarse one-second step — both have their use.
     'frame-back': () => _frameStep(-1),
     'frame-on': () => _frameStep(1),
+    'prev-clip': () => _stepClip(forward: false),
+    'next-clip': () => _stepClip(forward: true),
+    'prev-edit': () => _stepEdit(forward: false),
+    'next-edit': () => _stepEdit(forward: true),
+    'describe': () => _announce(_whereAmI()),
     'nudge-left': () => _push(-0.1),
     'nudge-right': () => _push(0.1),
     'layer-up': () => _shiftSelection(1),
@@ -2911,6 +2918,82 @@ class _TimelineScreenState extends State<TimelineScreen>
     'copy-effects': _copyEffects,
     'paste-effects': _pasteEffects,
   };
+
+  // ── moving without a mouse ───────────────────────────────────────────────
+
+  /// Selects the cut after (or before) the selected one — or, with none,
+  /// the first from the playhead — brings the playhead to it and says what
+  /// it is, so the montage can be walked cut by cut and heard.
+  void _stepClip({required bool forward}) {
+    final ids = _state.selectionIds;
+    final found = neighbourClip(
+      _state.layers,
+      fromId: ids.length == 1 ? ids.first : null,
+      cursor: _cursor,
+      forward: forward,
+    );
+    if (found == null) {
+      _announce(forward ? 'No more cuts after this.' : 'No cuts before this.');
+      return;
+    }
+    final (clip, layer) = found;
+    _withoutHistory(
+      _state.copyWith(selectionIds: {clip.id}, activeLayer: layer),
+    );
+    _goTo(clip.atS);
+    _announce(_describe(clip, layer));
+  }
+
+  void _stepEdit({required bool forward}) {
+    final t = nextEdit(_state.layers, _cursor, forward: forward);
+    if (t == null) return;
+    _goTo(t);
+    _announce(formatClock(t));
+  }
+
+  String _describe(TimelineClip clip, int layer) => describeClip(
+    clip,
+    layer: layer,
+    layerName: _state.layers[layer].name,
+    track: _tracks[clip.mediaId],
+    locked: _state.layers[layer].locked,
+  );
+
+  /// The playhead, the montage's length and the selection, in words.
+  String _whereAmI() {
+    final ids = _state.selectionIds;
+    final parts = [
+      'Playhead at ${formatClock(_cursor)} '
+          'of ${formatClock(videoDuration(_state.clips))}',
+    ];
+    if (ids.length == 1) {
+      for (final (c, layer) in clipsInOrder(_state.layers)) {
+        if (c.id == ids.first) parts.add('selected: ${_describe(c, layer)}');
+      }
+    } else if (ids.length > 1) {
+      parts.add('${ids.length} cuts selected');
+    } else {
+      parts.add('nothing selected');
+    }
+    return parts.join('. ');
+  }
+
+  String _rulerSummary() {
+    final cuts = _state.clips.length;
+    final layers = _state.layers.length;
+    return 'Timeline: $cuts cut${cuts == 1 ? '' : 's'} on '
+        '$layers layer${layers == 1 ? '' : 's'}, '
+        'playhead at ${formatClock(_cursor)}. '
+        'Alt + arrows go from cut to cut.';
+  }
+
+  void _announce(String message) {
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      TextDirection.ltr,
+    );
+  }
 
   /// The shortcuts: every command on its keys, with Ctrl and Cmd working the
   /// same. Esc is fixed — it is the way out of full screen.
@@ -3678,7 +3761,12 @@ class _TimelineScreenState extends State<TimelineScreen>
                     borderRadius: BorderRadius.circular(12),
                     child: _fullscreen
                         ? const SizedBox.shrink()
-                        : _monitorView(),
+                        : Semantics(
+                            image: true,
+                            label: 'Monitor: the montage at '
+                                '${formatClock(_cursor)}',
+                            child: _monitorView(),
+                          ),
                   ),
                 ),
               ),
@@ -3701,6 +3789,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             IconButton.filledTonal(
               // depends on there being something to play, not on music: a
               // video with no track at all is still a video to review
+              tooltip: _playing ? 'Pause' : 'Play',
               onPressed: _state.isBlank ? null : _togglePlay,
               icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
             ),
@@ -3890,95 +3979,102 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
 
       // ── the music ruler with the blocks ─────────────────────────────────
-      MusicTimeline(
-        tracks: _tracks,
-        beatTimes: _beats,
-        layers: _state.layers,
-        activeLayer: _state.activeLayer,
-        selectionIds: selectionIds,
-        labelsWidth: _phone
-            ? MusicTimeline.narrowHeaderWidth
-            : MusicTimeline.headerWidth,
-        pxPerSecond: _px,
-        playheadS: _cursor,
-        scroll: _scroll,
-        onSeek: (s) => _goTo(s, reveal: false),
-        onSelect: (id, {bool toggle = false}) {
-          _select(id, toggle: toggle);
-          // in one column the settings are a tab away: a clip tapped on the
-          // ruler is a clip to adjust, so its tab comes forward
-          if (id != null && _panelTabs.index != _settingsTab) {
-            _panelTabs.animateTo(_settingsTab);
-          }
-        },
-        onMove: _move,
-        onTrim: _trim,
-        onStretch: _stretch,
-        onDragLabel: (textValue) => setState(() => _dragLabel = textValue),
-        onGestureStart: _history.startGesture,
-        onGestureEnd: () {
-          _history.endGesture();
-          // the guide only lives while the clip is held
-          if (_snapGuide != null) setState(() => _snapGuide = null);
-        },
-        snapGuideS: _snapGuide,
-        onZoom: (factor, anchorS, anchorDx) =>
-            _setZoom(_px * factor, anchorS: anchorS, anchorDx: anchorDx),
-        onChangeLayer: _changeLayer,
-        onDropClip: _dropClip,
-        onDuplicateClip: (id) => _edit(duplicate(_state, {id})),
-        onDeleteClip: (id) => _edit(removeClips(_state, {id})),
-        onRippleDeleteClip: (id) => _edit(rippleDelete(_state, {id})),
-        onCopyEffects: _copyEffects,
-        onPasteEffects: _effectsFrom == null
-            ? null
-            : (id) => _pasteEffects(
-                // pasting on a clip of the selection pastes on all of it
-                _state.selectionIds.contains(id) ? _state.selectionIds : {id},
-              ),
-        onSelectMany: (ids, {bool add = false}) => _withoutHistory(
-          _state.copyWith(
-            selectionIds: add ? {..._state.selectionIds, ...ids} : ids,
+      // the ruler is drawn: for a screen reader it is this sentence, with
+      // each cut inside it as a button of its own
+      Semantics(
+        container: true,
+        explicitChildNodes: true,
+        label: _rulerSummary(),
+        child: MusicTimeline(
+          tracks: _tracks,
+          beatTimes: _beats,
+          layers: _state.layers,
+          activeLayer: _state.activeLayer,
+          selectionIds: selectionIds,
+          labelsWidth: _phone
+              ? MusicTimeline.narrowHeaderWidth
+              : MusicTimeline.headerWidth,
+          pxPerSecond: _px,
+          playheadS: _cursor,
+          scroll: _scroll,
+          onSeek: (s) => _goTo(s, reveal: false),
+          onSelect: (id, {bool toggle = false}) {
+            _select(id, toggle: toggle);
+            // in one column the settings are a tab away: a clip tapped on the
+            // ruler is a clip to adjust, so its tab comes forward
+            if (id != null && _panelTabs.index != _settingsTab) {
+              _panelTabs.animateTo(_settingsTab);
+            }
+          },
+          onMove: _move,
+          onTrim: _trim,
+          onStretch: _stretch,
+          onDragLabel: (textValue) => setState(() => _dragLabel = textValue),
+          onGestureStart: _history.startGesture,
+          onGestureEnd: () {
+            _history.endGesture();
+            // the guide only lives while the clip is held
+            if (_snapGuide != null) setState(() => _snapGuide = null);
+          },
+          snapGuideS: _snapGuide,
+          onZoom: (factor, anchorS, anchorDx) =>
+              _setZoom(_px * factor, anchorS: anchorS, anchorDx: anchorDx),
+          onChangeLayer: _changeLayer,
+          onDropClip: _dropClip,
+          onDuplicateClip: (id) => _edit(duplicate(_state, {id})),
+          onDeleteClip: (id) => _edit(removeClips(_state, {id})),
+          onRippleDeleteClip: (id) => _edit(rippleDelete(_state, {id})),
+          onCopyEffects: _copyEffects,
+          onPasteEffects: _effectsFrom == null
+              ? null
+              : (id) => _pasteEffects(
+                  // pasting on a clip of the selection pastes on all of it
+                  _state.selectionIds.contains(id) ? _state.selectionIds : {id},
+                ),
+          onSelectMany: (ids, {bool add = false}) => _withoutHistory(
+            _state.copyWith(
+              selectionIds: add ? {..._state.selectionIds, ...ids} : ids,
+            ),
           ),
-        ),
-        onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
-        onReorderLayers: (from, to) =>
-            _edit(reorderLayers(_state, from, to)),
-        onRenameLayer: (i, name) => _edit(adjustLayer(_state, i, name: name)),
-        onRemoveLayer: (i) => _edit(removeLayer(_state, i)),
-        markers: _state.markers,
-        onMoveMarker: (i, t) => _edit(moveMarker(_state, i, t)),
-        onRenameMarker: (i, label) => _edit(renameMarker(_state, i, label)),
-        onRemoveMarker: (i) => _edit(removeMarker(_state, i)),
-        trackHeight: _trackHeight,
-        onTrackHeight: (h) => setState(() => _trackHeight = h),
-        range: switch (_range) {
-          final r? => (r.from, r.to),
-          null => null,
-        },
-        onVolume: (id, {level, keys}) =>
-            _edit(setVolumeCurve(_state, id, level: level, keys: keys)),
-        volumeEditing: _volumeMode,
-        onVolumeMode: () => setState(() => _volumeMode = !_volumeMode),
-        onRange: (from, to) => _edit(
-          _state.copyWith(
-            export: _state.export.copyWith(fromS: from, toS: to),
+          onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
+          onReorderLayers: (from, to) =>
+              _edit(reorderLayers(_state, from, to)),
+          onRenameLayer: (i, name) => _edit(adjustLayer(_state, i, name: name)),
+          onRemoveLayer: (i) => _edit(removeLayer(_state, i)),
+          markers: _state.markers,
+          onMoveMarker: (i, t) => _edit(moveMarker(_state, i, t)),
+          onRenameMarker: (i, label) => _edit(renameMarker(_state, i, label)),
+          onRemoveMarker: (i) => _edit(removeMarker(_state, i)),
+          trackHeight: _trackHeight,
+          onTrackHeight: (h) => setState(() => _trackHeight = h),
+          range: switch (_range) {
+            final r? => (r.from, r.to),
+            null => null,
+          },
+          onVolume: (id, {level, keys}) =>
+              _edit(setVolumeCurve(_state, id, level: level, keys: keys)),
+          volumeEditing: _volumeMode,
+          onVolumeMode: () => setState(() => _volumeMode = !_volumeMode),
+          onRange: (from, to) => _edit(
+            _state.copyWith(
+              export: _state.export.copyWith(fromS: from, toS: to),
+            ),
           ),
-        ),
-        onAdjustLayer: (i, {muted, hidden, locked, collapsed}) => _edit(
-          adjustLayer(
-            _state,
-            i,
-            muted: muted,
-            hidden: hidden,
-            locked: locked,
-            collapsed: collapsed,
+          onAdjustLayer: (i, {muted, hidden, locked, collapsed}) => _edit(
+            adjustLayer(
+              _state,
+              i,
+              muted: muted,
+              hidden: hidden,
+              locked: locked,
+              collapsed: collapsed,
+            ),
           ),
+          matchWaveform: widget.job.waveform,
+          matchDuration: widget.job.durationS,
+          otherMatchWaveforms: _otherWaves,
+          onDrop: _dropOnRuler,
         ),
-        matchWaveform: widget.job.waveform,
-        matchDuration: widget.job.durationS,
-        otherMatchWaveforms: _otherWaves,
-        onDrop: _dropOnRuler,
       ),
 
       Padding(
@@ -4272,6 +4368,8 @@ class _BeatGrid extends StatelessWidget {
                       onChange(offsetS - 0.02, multiplier, bar),
                   onMore: () =>
                       onChange(offsetS + 0.02, multiplier, bar),
+                  less: 'Beat grid earlier',
+                  more: 'Beat grid later',
                 ),
               ],
             ),
@@ -4519,6 +4617,8 @@ class _SelectedBlock extends StatelessWidget {
                 _Step(
                   onLess: () => onDurationChange(cut.durationS - 0.1),
                   onMore: () => onDurationChange(cut.durationS + 0.1),
+                  less: 'Shorter',
+                  more: 'Longer',
                 ),
               ],
             ),
@@ -4538,6 +4638,8 @@ class _SelectedBlock extends StatelessWidget {
                 _Step(
                   onLess: () => onShift(-0.2),
                   onMore: () => onShift(0.2),
+                  less: 'Earlier in the source',
+                  more: 'Later in the source',
                 ),
               ],
             ),
@@ -4609,21 +4711,32 @@ class _SelectedBlock extends StatelessWidget {
 }
 
 class _Step extends StatelessWidget {
-  const _Step({required this.onLess, required this.onMore});
+  const _Step({
+    required this.onLess,
+    required this.onMore,
+    required this.less,
+    required this.more,
+  });
 
   final VoidCallback onLess;
   final VoidCallback onMore;
+
+  /// What each button does, for its tooltip and a screen reader.
+  final String less;
+  final String more;
 
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       IconButton(
+        tooltip: less,
         visualDensity: VisualDensity.compact,
         onPressed: onLess,
         icon: const Icon(Icons.remove_circle_outline),
       ),
       IconButton(
+        tooltip: more,
         visualDensity: VisualDensity.compact,
         onPressed: onMore,
         icon: const Icon(Icons.add_circle_outline),
@@ -5002,58 +5115,72 @@ class _MomentTile extends StatelessWidget {
   }
 
   Widget _card(BuildContext context, ThemeData theme, EventStyle style) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        onTap: enabled ? onAdd : null,
-        onSecondaryTapDown: onMenu == null
-            ? null
-            : (d) => onMenu!(d.globalPosition),
-        onLongPress: onMenu == null
-            ? null
-            : () => onMenu!(_centreOf(context)),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: _Frame(
-                  url: frameUrl(jobId, event.t),
-                  fillColour: style.color,
-                  widthPx: 104,
+    // one sentence for a screen reader: the picture says nothing and the
+    // tick or plus only means something to whoever sees its colour
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: enabled,
+      label:
+          '$_label at ${formatClock(event.t)}, '
+          '${used ? 'already in the montage' : 'not in the montage yet'}',
+      hint: 'places it at the playhead',
+      onTap: enabled ? onAdd : null,
+      onLongPress: onMenu == null ? null : () => onMenu!(_centreOf(context)),
+      excludeSemantics: true,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: InkWell(
+          onTap: enabled ? onAdd : null,
+          onSecondaryTapDown: onMenu == null
+              ? null
+              : (d) => onMenu!(d.globalPosition),
+          onLongPress: onMenu == null
+              ? null
+              : () => onMenu!(_centreOf(context)),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: _Frame(
+                    url: frameUrl(jobId, event.t),
+                    fillColour: style.color,
+                    widthPx: 104,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: style.color,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: style.color,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      formatClock(event.t),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.hintColor,
+                      const SizedBox(height: 2),
+                      Text(
+                        formatClock(event.t),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Icon(
-                used ? Icons.check_circle : Icons.add_circle_outline,
-                size: 20,
-                color: used ? style.color : theme.hintColor,
-              ),
-            ],
+                Icon(
+                  used ? Icons.check_circle : Icons.add_circle_outline,
+                  size: 20,
+                  color: used ? style.color : theme.hintColor,
+                ),
+              ],
+            ),
           ),
         ),
       ),
