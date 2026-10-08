@@ -1776,6 +1776,42 @@ MontageState putSoundEffect(
   MontageState s,
   Track sound, {
   required double atS,
+}) => _putOver(
+  s,
+  sound,
+  atS: atS,
+  kind: kSoundEffectKind,
+  layerName: kEffectsLayerName,
+);
+
+/// The name a layer opened for voice-overs gets.
+const kVoiceLayerName = 'Voice';
+
+/// The `kind` of a voice-over block — the server's `VOICE_KIND`.
+const kVoiceKind = 'voice';
+
+/// Puts a voice-over on the ruler, exactly at [atS] — where the playhead was
+/// when the recording started, so the words land on what was on screen. Like
+/// an effect, it goes over the music and never moves; it opens a Voice layer
+/// when none is free there.
+MontageState putVoice(
+  MontageState s,
+  Track voice, {
+  required double atS,
+}) => _putOver(
+  s,
+  voice,
+  atS: atS,
+  kind: kVoiceKind,
+  layerName: kVoiceLayerName,
+);
+
+MontageState _putOver(
+  MontageState s,
+  Track sound, {
+  required double atS,
+  required String kind,
+  required String layerName,
 }) {
   if (!sound.isReady) return s;
   final lasts = sound.durationS;
@@ -1794,21 +1830,17 @@ MontageState putSoundEffect(
     destination = s.activeLayer;
   } else {
     for (var i = 0; i < s.layers.length; i++) {
-      if (s.layers[i].name.startsWith(kEffectsLayerName) && freeAt(i)) {
+      if (s.layers[i].name.startsWith(layerName) && freeAt(i)) {
         destination = i;
         break;
       }
     }
   }
   if (destination < 0) {
-    final taken = s.layers
-        .where((l) => l.name.startsWith(kEffectsLayerName))
-        .length;
+    final taken = s.layers.where((l) => l.name.startsWith(layerName)).length;
     base = addMusicLayer(
       s,
-      displayName: taken == 0
-          ? kEffectsLayerName
-          : '$kEffectsLayerName ${taken + 1}',
+      displayName: taken == 0 ? layerName : '$layerName ${taken + 1}',
     );
     destination = base.layers.length - 1;
   }
@@ -1820,9 +1852,9 @@ MontageState putSoundEffect(
     startS: 0,
     source: 'media',
     mediaId: sound.id,
-    // the server mixes an effect on its own: it is not music, and does not
-    // take the game sound away
-    kind: kSoundEffectKind,
+    // the server mixes an effect or a voice on its own: it is not music, and
+    // does not take the game sound away
+    kind: kind,
   );
   return base
       .withLayer(

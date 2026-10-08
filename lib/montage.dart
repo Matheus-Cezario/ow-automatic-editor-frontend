@@ -632,6 +632,33 @@ List<double> playTimes(List<Layer> layers) => [
           ?momentInVideo(c),
 ]..sort();
 
+/// How fast the mix steps back when a voice-over starts, and comes back after
+/// it ends — the server's `VOICE_ATTACK` / `VOICE_RELEASE`.
+const kVoiceAttack = 0.12;
+const kVoiceRelease = 0.35;
+
+/// Where a voice-over speaks: (from, until) of every voice block on a sound
+/// layer that is heard — the server's `Timeline.voice_spans`.
+List<(double, double)> voiceSpans(List<Layer> layers) => [
+  for (final l in layers)
+    if (l.isAudio && !l.muted && !l.hidden)
+      for (final c in l.clips)
+        if (c.isVoice && !c.audio.mute) (c.atS, c.untilS),
+]..sort((a, b) => a.$1.compareTo(b.$1));
+
+/// How far the voice-overs have pushed the mix back at [t], 0 to 1.
+double voiceDipAt(List<(double, double)> spans, double t) {
+  var most = 0.0;
+  for (final (a, b) in spans) {
+    final v = math.min(
+      1.0,
+      math.min((t - (a - kVoiceAttack)) / kVoiceAttack, (b + kVoiceRelease - t) / kVoiceRelease),
+    );
+    if (v > most) most = v;
+  }
+  return most;
+}
+
 /// How ducked the mix is at [t], 0 to 1: a trapezoid around each play, the
 /// highest one where they meet.
 double duckAt(List<double> plays, double t) {

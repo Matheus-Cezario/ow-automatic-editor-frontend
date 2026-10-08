@@ -16,6 +16,7 @@ import '../fonts.dart';
 import '../montage_state.dart';
 import '../recipe.dart';
 import '../undo_store.dart';
+import '../voice_recorder.dart';
 import '../labels.dart';
 import '../subtitles.dart';
 import '../widgets/download.dart';
@@ -50,12 +51,20 @@ import '../zoom.dart';
 /// instant the playhead asks for, so you can see the cut before rendering.
 /// Nothing is rendered while editing.
 class TimelineScreen extends StatefulWidget {
-  const TimelineScreen({super.key, required this.job, this.api});
+  const TimelineScreen({
+    super.key,
+    required this.job,
+    this.api,
+    this.voiceRecorder,
+  });
 
   final Job job;
 
   /// The server. Left out, the real one; tests hand in their own.
   final ApiClient? api;
+
+  /// The microphone. Left out, the browser's; tests hand in their own.
+  final VoiceRecorder? voiceRecorder;
 
   @override
   State<TimelineScreen> createState() => _TimelineScreenState();
@@ -134,6 +143,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
   String? _soundsError;
   String? _addingSound;
   StickerLibrary? _stickers;
+  late final VoiceRecorder _recorder = widget.voiceRecorder ?? VoiceRecorder();
+
+  /// Where the playhead was when the recording started — where it goes in.
+  double? _recordingFrom;
+  bool _sendingVoice = false;
   String? _stickersError;
   String? _addingSticker;
 
@@ -280,6 +294,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
+    if (_recordingFrom != null) _recorder.cancel();
     FocusManager.instance.removeListener(_checkFocus);
     _stopFullscreenWatch?.call();
     _focus.dispose();
@@ -932,6 +947,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _putStickerOnFrame(item, atS: location, layerIndex: layerIndex);
       return;
     }
+    if (item.isVoice) {
+      _putVoiceOnRuler(item, atS: location, layerIndex: layerIndex);
+      return;
+    }
     if (item.isAudio) {
       _putMusicOnRuler(item, atS: location, layerIndex: layerIndex);
       return;
@@ -1000,6 +1019,82 @@ class _TimelineScreenState extends State<TimelineScreen> {
     } finally {
       if (mounted) setState(() => _addingSound = null);
     }
+  }
+
+  // ── voice-over ────────────────────────────────────────────────────────────
+
+  /// Starts recording from the playhead, with the montage playing so the
+  /// words can follow the picture; the second press stops, sends it and puts
+  /// it where the recording started.
+  Future<void> _toggleVoice() async {
+    if (_sendingVoice) return;
+    final from = _recordingFrom;
+    if (from == null) {
+      try {
+        await _recorder.start();
+      } catch (e) {
+        _notify('Could not use the microphone: $e');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _recordingFrom = _cursor);
+      if (!_playing) _play();
+      return;
+    }
+
+    if (_playing) _pause();
+    setState(() {
+      _recordingFrom = null;
+      _sendingVoice = true;
+    });
+    try {
+      final voice = await _recorder.stop();
+      final sent = await _api.uploadVoice(
+        jobId: widget.job.id,
+        bytes: voice.bytes,
+        fileName: voice.fileName,
+      );
+      final ready = await _api.waitForMedia(sent.id);
+      if (!mounted) return;
+      setState(
+        () => _library = [
+          for (final m in _library)
+            if (m.id != ready.id) m,
+          ready,
+        ],
+      );
+      if (ready.isFailed) {
+        _notify('The recording could not be read: ${ready.error ?? ''}');
+        return;
+      }
+      _putVoiceOnRuler(ready, atS: from);
+    } catch (e) {
+      if (mounted) _notify('Could not save the recording: $e');
+    } finally {
+      if (mounted) setState(() => _sendingVoice = false);
+    }
+  }
+
+  /// Puts a voice-over on the ruler, exactly where asked, on a Voice layer
+  /// when the chosen sound layer is taken there.
+  void _putVoiceOnRuler(Media item, {double? atS, int? layerIndex}) {
+    if (!item.isReady) {
+      _notify('This recording is not ready yet.');
+      return;
+    }
+    var base = _state;
+    if (layerIndex != null &&
+        layerIndex >= 0 &&
+        layerIndex < base.layers.length &&
+        base.layers[layerIndex].isAudio) {
+      base = base.copyWith(activeLayer: layerIndex);
+    }
+    final updated = putVoice(base, item.asMusic, atS: atS ?? _cursor);
+    if (identical(updated, base)) {
+      _notify('The recording did not fit there.');
+      return;
+    }
+    _edit(updated);
   }
 
   Future<void> _loadStickers() async {
@@ -1395,7 +1490,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         if (t < c.atS - 1e-6 || t >= c.untilS - 1e-6) continue;
         // an effect is not the song: it has no beat for the magnet, and it
         // plays in its own player, over the music
-        if (c.isSoundEffect) continue;
+        if (!c.isMusic) continue;
         final m = _tracks[c.mediaId];
         if (m != null) return (block: c, music: m);
       }
@@ -1556,7 +1651,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// Does the montage have music? It decides whether the mix has anything to balance.
   bool get _hasMusic => _state.layers.any(
-    (l) => l.isAudio && l.clips.any((c) => !c.isSoundEffect),
+    (l) => l.isAudio && l.clips.any((c) => c.isMusic),
   );
 
   /// What was dropped on the timeline, and where.
@@ -1897,9 +1992,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
       final nowS = c.value.position.inMilliseconds / 1000.0;
       // the montage's music volume, and the dip at each play, so ducking is
       // heard while editing — the player cannot go above full
-      final duck = _state.duckPlays
-          ? duckAt(playTimes(_state.layers), _cursor) * (1 - _state.duckLevel)
-          : 0.0;
+      final duck = math.max(
+        _state.duckPlays ? duckAt(playTimes(_state.layers), _cursor) : 0.0,
+        voiceDipAt(voiceSpans(_state.layers), _cursor),
+      ) * (1 - _state.duckLevel);
       // and the block's own volume — its line on the ruler — and fades; the
       // player cannot go above full, so a boost past 100% is only heard in
       // the render
@@ -1930,7 +2026,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     for (final l in _state.layers) {
       if (!l.isAudio || l.muted) continue;
       for (final c in l.clips) {
-        if (!c.isSoundEffect || c.mediaId == null) continue;
+        // effects and voice-overs each play in a player of their own
+        if (c.isMusic || c.mediaId == null) continue;
         if (_cursor >= c.atS - 1e-6 && _cursor < c.untilS - 1e-6) {
           here[c.id] = c;
         }
@@ -3499,6 +3596,33 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       onPressed: () => _edit(addLayer(_state)),
                       icon: const Icon(Icons.layers_outlined),
                     ),
+                    if (_recorder.isSupported)
+                      _sendingVoice
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            )
+                          : IconButton(
+                              key: const Key('record-voice'),
+                              tooltip: _recordingFrom == null
+                                  ? 'Record a voice-over from the playhead'
+                                  : 'Stop recording',
+                              onPressed: _toggleVoice,
+                              icon: Icon(
+                                _recordingFrom == null
+                                    ? Icons.mic_none
+                                    : Icons.stop_circle,
+                                color: _recordingFrom == null
+                                    ? null
+                                    : Theme.of(context).colorScheme.error,
+                              ),
+                            ),
                     IconButton(
                       key: const Key('new-music-layer'),
                       tooltip: 'New music layer',
@@ -4163,7 +4287,7 @@ class _SelectedBlock extends StatelessWidget {
               '${cut.durationS.toStringAsFixed(2)}s'
               // which point of the track this piece came from: it tells whether
               // the block took the chorus or the intro
-              '${sound ? '  ·  from ${formatClock(cut.startS)} of the ${cut.isSoundEffect ? 'effect' : 'song'}' : ''}',
+              '${sound ? '  ·  from ${formatClock(cut.startS)} of the ${cut.isSoundEffect ? 'effect' : cut.isVoice ? 'voice-over' : 'song'}' : ''}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -4183,7 +4307,11 @@ class _SelectedBlock extends StatelessWidget {
                 Expanded(
                   child: Text(
                     sound
-                        ? (cut.isSoundEffect ? 'Effect span' : 'Song span')
+                        ? (cut.isSoundEffect
+                              ? 'Effect span'
+                              : cut.isVoice
+                              ? 'Voice span'
+                              : 'Song span')
                         : 'Framing',
                   ),
                 ),
@@ -5000,6 +5128,8 @@ class _LibraryItem extends StatelessWidget {
                           child: Icon(
                             item.isSoundEffect
                                 ? Icons.graphic_eq
+                                : item.isVoice
+                                ? Icons.mic_none
                                 : item.isAudio
                                 ? Icons.music_note
                                 : item.isImage
@@ -5035,6 +5165,7 @@ class _LibraryItem extends StatelessWidget {
                           ? 'analysing…'
                           : [
                               if (item.isSoundEffect) 'sound effect',
+                              if (item.isVoice) 'voice-over',
                               item.isImage
                                   ? 'image'
                                   : item.isSoundEffect
@@ -5044,7 +5175,7 @@ class _LibraryItem extends StatelessWidget {
                                 '${item.width}×${item.height}',
                               // for music what matters is the tempo: it is
                               // what decides the cut length
-                              if (item.isAudio && item.bpm > 0)
+                              if (item.isAudio && item.bpm > 0 && !item.isVoice)
                                 '${item.bpm.round()} BPM',
                             ].join('  ·  '),
                       maxLines: 1,

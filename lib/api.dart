@@ -946,6 +946,7 @@ class Media {
     this.audioUrl = '',
     this.sfxId,
     this.stickerId,
+    this.isVoice = false,
   });
 
   factory Media.fromJson(Map<String, dynamic> j) => Media(
@@ -979,6 +980,7 @@ class Media {
         : absoluteUrl('$kApiBase${j['audio_url']}'),
     sfxId: j['sfx_id'] as String?,
     stickerId: j['sticker_id'] as String?,
+    isVoice: j['voice'] as bool? ?? false,
   );
 
   final String id;
@@ -1023,6 +1025,9 @@ class Media {
   /// A sound effect, not a song: it goes over the music instead of after it,
   /// and has no beat for the magnet.
   bool get isSoundEffect => sfxId != null && sfxId!.isNotEmpty;
+
+  /// A voice-over recorded in the editor, not a song.
+  final bool isVoice;
 
   /// A sticker: it goes over the picture, small and whole, not in its place.
   bool get isSticker => stickerId != null && stickerId!.isNotEmpty;
@@ -1169,6 +1174,14 @@ class TimelineClip {
 
   /// A block made from the sound library: on a sound layer, but not music.
   bool get isSoundEffect => kind == 'sfx';
+
+  /// A voice-over recorded in the editor: not music either, and the rest of
+  /// the mix steps back while it speaks.
+  bool get isVoice => kind == 'voice';
+
+  /// On a sound layer, a song — what the music volume, the beat grid and the
+  /// music player are about. Effects and voice-overs play on their own.
+  bool get isMusic => !isSoundEffect && !isVoice;
 
   /// How much of the recording this clip eats. At 2×, two seconds of video eat
   /// four of recording — and a frozen one eats a single frame.
@@ -2861,6 +2874,27 @@ class ApiClient {
       fields: {'size': '$total'},
       onProgress: onProgress,
     );
+    _check(r);
+    final id = (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
+    return getMedia(id);
+  }
+
+  /// Sends a voice-over recorded in the editor. It is small — a minute of
+  /// Opus is well under a megabyte — so it goes in one request, and the server
+  /// files it as a voice, not a song.
+  Future<Media> uploadVoice({
+    required String jobId,
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$baseUrl/api/jobs/$jobId/media'))
+          ..fields['size'] = '${bytes.length}'
+          ..fields['voice'] = 'true'
+          ..files.add(
+            http.MultipartFile.fromBytes('file', bytes, filename: fileName),
+          );
+    final r = await http.Response.fromStream(await request.send());
     _check(r);
     final id = (jsonDecode(r.body) as Map<String, dynamic>)['id'] as String;
     return getMedia(id);
