@@ -15,6 +15,20 @@ Future<void> downloadFile(BuildContext context, String url) async {
   }
 }
 
+/// Saves text the app made itself — subtitles, say — as a file.
+Future<void> downloadText(
+  BuildContext context,
+  String name,
+  String text,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await saveTextFile(name, text);
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('Download failed: $e')));
+  }
+}
+
 /// A download button that behaves the same on every screen.
 class DownloadButton extends StatelessWidget {
   const DownloadButton({
