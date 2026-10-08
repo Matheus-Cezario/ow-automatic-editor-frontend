@@ -29,6 +29,7 @@ import '../widgets/crop_panel.dart';
 import '../widgets/fx_panel.dart';
 import '../widgets/level_meter.dart';
 import '../widgets/sound_shelf.dart';
+import '../widgets/sticker_shelf.dart';
 import '../widgets/source_cutter.dart';
 import '../zoom.dart';
 
@@ -130,6 +131,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   SoundLibrary? _sounds;
   String? _soundsError;
   String? _addingSound;
+  StickerLibrary? _stickers;
+  String? _stickersError;
+  String? _addingSticker;
 
   /// One player per effect in the montage, so effects sound over the music
   /// while editing — the song's player plays one block at a time.
@@ -231,6 +235,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     super.initState();
     unawaited(_fonts.start());
     unawaited(_loadSounds());
+    unawaited(_loadStickers());
     // the most recent one is the one being edited -- and the one you want back
     final present = _montages.firstOrNull;
     final draft = present?.montage ?? widget.job.draft;
@@ -875,6 +880,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _putEffectOnRuler(item, atS: location, layerIndex: layerIndex);
       return;
     }
+    if (item.isSticker) {
+      _putStickerOnFrame(item, atS: location, layerIndex: layerIndex);
+      return;
+    }
     if (item.isAudio) {
       _putMusicOnRuler(item, atS: location, layerIndex: layerIndex);
       return;
@@ -943,6 +952,74 @@ class _TimelineScreenState extends State<TimelineScreen> {
     } finally {
       if (mounted) setState(() => _addingSound = null);
     }
+  }
+
+  Future<void> _loadStickers() async {
+    if (mounted) setState(() => _stickersError = null);
+    try {
+      final stickers = await _api.listStickers();
+      if (mounted) setState(() => _stickers = stickers);
+    } catch (e) {
+      if (mounted) setState(() => _stickersError = '$e');
+    }
+  }
+
+  /// Brings a sticker into the match and puts it over the picture, at the
+  /// playhead as it was at the click.
+  Future<void> _addSticker(Sticker sticker, String color) async {
+    if (_addingSticker != null) return;
+    final location = _cursor;
+    setState(() => _addingSticker = sticker.id);
+    try {
+      final item = await _api.addSticker(
+        jobId: widget.job.id,
+        stickerId: sticker.id,
+        color: color,
+      );
+      if (!mounted) return;
+      setState(
+        () => _library = [
+          for (final m in _library)
+            if (m.id != item.id) m,
+          item,
+        ],
+      );
+      _putStickerOnFrame(item, atS: location);
+    } catch (e) {
+      if (mounted) _notify('Could not add "${sticker.name}": $e');
+    } finally {
+      if (mounted) setState(() => _addingSticker = null);
+    }
+  }
+
+  /// Puts a sticker over the picture: never on the bottom picture layer,
+  /// which is the gameplay — on the layer asked for when it is above that,
+  /// else on the top picture layer, else on a new one.
+  void _putStickerOnFrame(Media item, {double? atS, int? layerIndex}) {
+    var base = _state;
+    final pictures = [
+      for (var i = 0; i < base.layers.length; i++)
+        if (!base.layers[i].isAudio) i,
+    ];
+    final int target;
+    if (layerIndex != null &&
+        pictures.contains(layerIndex) &&
+        layerIndex != pictures.first) {
+      target = layerIndex;
+    } else if (pictures.length > 1) {
+      target = pictures.last;
+    } else {
+      base = addLayer(base, displayName: 'Stickers');
+      target = base.layers.length - 1;
+    }
+    _edit(
+      addClip(
+        base.copyWith(activeLayer: target),
+        stickerClip(item, atS: atS ?? _cursor),
+        beats: _beats,
+        snap: _magnet,
+      ),
+    );
   }
 
   Future<void> _removeFromLibrary(Media item) async {
@@ -2966,6 +3043,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
     onImport: _import,
     onUse: _useMedia,
     onRemove: _removeFromLibrary,
+    stickers: StickerShelf(
+      library: _stickers,
+      error: _stickersError,
+      enabled: !_sending,
+      adding: _addingSticker,
+      onAdd: _addSticker,
+      onRetry: _loadStickers,
+    ),
     sounds: SoundShelf(
       library: _sounds,
       error: _soundsError,
@@ -3009,6 +3094,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
             onZoom: (v) => _effect(selectionIds.first, zoom: v),
             onFreeze: (v) => _effect(selectionIds.first, freeze: v),
             onReverse: (v) => _effect(selectionIds.first, reverse: v),
+            onWhole: (v) => _edit(
+              setFit(_state, selectionIds.first, v ? 'contain' : null),
+            ),
             onStyle: (v) =>
                 _edit(changeText(_state, selectionIds.first, styleSpec: v)),
             onTypeOnFrame: () => _typeOnFrame(selectionIds.first),
@@ -3900,10 +3988,14 @@ class _SelectedBlock extends StatelessWidget {
     required this.onTypeOnFrame,
     this.motion,
     this.onRamp,
+    this.onWhole,
     this.fonts,
   });
 
   final TimelineClip cut;
+
+  /// Places the picture whole on the frame instead of filling it.
+  final ValueChanged<bool>? onWhole;
 
   /// Position, scale, opacity and volume — `null` when the clip has none.
   final Widget? motion;
@@ -4064,6 +4156,21 @@ class _SelectedBlock extends StatelessWidget {
                 onStyle: onStyle,
                 onTypeOnFrame: onTypeOnFrame,
                 fonts: fonts,
+              ),
+            // a picture brought from outside may not have the frame's shape:
+            // a sticker or a hero icon is placed whole, transparent around
+            if (m != null && !sound && onWhole != null)
+              SwitchListTile(
+                key: const Key('clip-fit-whole'),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: cut.fit == 'contain',
+                onChanged: onWhole,
+                title: const Text('Whole'),
+                subtitle: const Text(
+                  'all of the picture, transparent around, instead of '
+                  'filling the frame',
+                ),
               ),
             ?motion,
             // a music block draws nothing: zoom, colour and freeze would have
@@ -4655,6 +4762,7 @@ class _Library extends StatelessWidget {
     required this.onImport,
     required this.onUse,
     required this.onRemove,
+    this.stickers,
     this.sounds,
   });
 
@@ -4667,7 +4775,10 @@ class _Library extends StatelessWidget {
   final ValueChanged<Media> onUse;
   final ValueChanged<Media> onRemove;
 
-  /// The sound effects shelf, under what the user brought.
+  /// The stickers shelf, under what the user brought.
+  final Widget? stickers;
+
+  /// The sound effects shelf, under the stickers.
   final Widget? sounds;
 
   @override
@@ -4747,7 +4858,7 @@ class _Library extends StatelessWidget {
     if (docked) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [headerWidget, ...list, ?sounds],
+        children: [headerWidget, ...list, ?stickers, ?sounds],
       );
     }
     return Column(
@@ -4757,7 +4868,7 @@ class _Library extends StatelessWidget {
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
-            children: [...list, ?sounds],
+            children: [...list, ?stickers, ?sounds],
           ),
         ),
       ],

@@ -221,6 +221,23 @@ TimelineClip mediaClip(
   );
 }
 
+/// How big a sticker comes in, as a share of the frame's height: big enough
+/// to read, small enough to point at something.
+const kStickerScale = 0.3;
+
+/// A block of a sticker: whole on the frame (not filling it), small, in the
+/// middle — from there it is dragged to what it points at.
+TimelineClip stickerClip(Media item, {required double atS}) => TimelineClip(
+  atS: math.max(0, atS),
+  durationS: item.suggestedDuration,
+  startS: 0,
+  source: 'media',
+  kind: item.kind,
+  mediaId: item.id,
+  fit: 'contain',
+  transform: const ClipTransform(scale: kStickerScale),
+);
+
 /// Where the cut starts in the recording so the instant lands at
 /// [kMomentAnchor].
 double sourceStartFor(

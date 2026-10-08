@@ -437,6 +437,20 @@ MontageState setFx(MontageState s, String id, ClipFx fx) {
   );
 }
 
+/// How the clip fills the frame: `contain` places it whole, `null` follows
+/// the export.
+MontageState setFit(MontageState s, String id, String? fit) {
+  final location = s.locate(id);
+  if (location == null) return s;
+  final (layerIndex, i) = location;
+  final clip = s.layers[layerIndex].clips[i];
+  return s.withClip(
+    layerIndex,
+    i,
+    fit == null ? clip.copyWith(clearFit: true) : clip.copyWith(fit: fit),
+  );
+}
+
 /// The clip's transform, whole — crop, rotation and mirroring included.
 MontageState setTransform(MontageState s, String id, ClipTransform t) {
   final location = s.locate(id);

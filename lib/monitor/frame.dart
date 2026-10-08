@@ -416,7 +416,7 @@ FramePiece? _piece(
     brightness: clip.color.brightness,
     contrast: clip.color.contrast,
     saturation: clip.color.saturation,
-    fit: fit,
+    fit: clip.fit ?? fit,
     crop: clip.transform,
     fx: fx,
     blend: clip.blend,

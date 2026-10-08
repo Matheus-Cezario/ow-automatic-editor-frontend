@@ -945,6 +945,7 @@ class Media {
     this.peaks = const [],
     this.audioUrl = '',
     this.sfxId,
+    this.stickerId,
   });
 
   factory Media.fromJson(Map<String, dynamic> j) => Media(
@@ -977,6 +978,7 @@ class Media {
         ? ''
         : absoluteUrl('$kApiBase${j['audio_url']}'),
     sfxId: j['sfx_id'] as String?,
+    stickerId: j['sticker_id'] as String?,
   );
 
   final String id;
@@ -1008,6 +1010,10 @@ class Media {
   /// The library effect this item was made from, when it was not uploaded.
   final String? sfxId;
 
+  /// The sticker and colour this picture was drawn from (`arrow:red`), when
+  /// it was not uploaded.
+  final String? stickerId;
+
   bool get isReady => status == 'ready';
   bool get isFailed => status == 'failed';
   bool get isPending => status == 'pending';
@@ -1017,6 +1023,9 @@ class Media {
   /// A sound effect, not a song: it goes over the music instead of after it,
   /// and has no beat for the magnet.
   bool get isSoundEffect => sfxId != null && sfxId!.isNotEmpty;
+
+  /// A sticker: it goes over the picture, small and whole, not in its place.
+  bool get isSticker => stickerId != null && stickerId!.isNotEmpty;
 
   /// The same song, seen as a track.
   ///
@@ -1073,6 +1082,7 @@ class TimelineClip {
     this.textStyle = const ClipTextStyle(),
     this.transition,
     this.label = '',
+    this.fit,
   });
 
   /// Identity of the block **inside the editor**. It does not go to the server
@@ -1150,6 +1160,11 @@ class TimelineClip {
   /// How it enters over the previous clip. `null` = a hard cut.
   final ClipTransition? transition;
 
+  /// How this clip fills the frame when not the export's way: `contain`
+  /// places it whole, transparent around (a sticker, a hero icon), so its
+  /// size and place are the transform's. `null` follows the export.
+  final String? fit;
+
   bool get isText => source == 'text';
 
   /// A block made from the sound library: on a sound layer, but not music.
@@ -1215,6 +1230,7 @@ class TimelineClip {
       color.isNeutral &&
       fade.isNeutral &&
       transition == null &&
+      fit == null &&
       speed == 1 &&
       zoom.isEmpty &&
       keys.isEmpty &&
@@ -1254,6 +1270,8 @@ class TimelineClip {
     ClipTransition? transition,
     bool clearTransition = false,
     String? label,
+    String? fit,
+    bool clearFit = false,
   }) => TimelineClip(
     sourceT: sourceT ?? this.sourceT,
     startS: startS ?? this.startS,
@@ -1279,6 +1297,7 @@ class TimelineClip {
     textStyle: textStyle ?? this.textStyle,
     transition: clearTransition ? null : transition ?? this.transition,
     label: label ?? this.label,
+    fit: clearFit ? null : (fit ?? this.fit),
   );
 
   /// The `id` does not come from the server: it is assigned on load, by
@@ -1292,6 +1311,7 @@ class TimelineClip {
     source: j['source'] as String? ?? 'recording',
     mediaId: j['media_id'] as String?,
     label: j['label'] as String? ?? '',
+    fit: j['fit'] as String?,
     transform: ClipTransform.fromJson(
       (j['transform'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
@@ -1356,6 +1376,7 @@ class TimelineClip {
     if (isText) 'text_style': textStyle.toJson(),
     if (transition != null) 'transition': transition!.toJsonFor(durationS),
     if (label.isNotEmpty) 'label': label,
+    if (fit != null) 'fit': fit,
   };
 }
 
@@ -1572,6 +1593,73 @@ class SoundLibrary {
 
   final List<String> categories;
   final List<SoundEffect> effects;
+}
+
+/// A sticker the server draws: arrows, rings, skulls, stars.
+class Sticker {
+  const Sticker({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.previewUrl,
+  });
+
+  factory Sticker.fromJson(Map<String, dynamic> j) => Sticker(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? j['id'] as String,
+    category: j['category'] as String? ?? '',
+    previewUrl: absoluteUrl('$kApiBase${j['preview_url']}'),
+  );
+
+  final String id;
+  final String name;
+
+  /// point / mark / game / fun — how the shelf groups them.
+  final String category;
+
+  /// A small copy, without the colour: [previewIn] adds it.
+  final String previewUrl;
+
+  String previewIn(String color) => '$previewUrl?color=$color';
+}
+
+/// A colour a sticker comes in.
+class StickerColor {
+  const StickerColor({required this.id, required this.hex});
+
+  factory StickerColor.fromJson(Map<String, dynamic> j) =>
+      StickerColor(id: j['id'] as String, hex: j['hex'] as String? ?? '#ffffff');
+
+  final String id;
+  final String hex;
+}
+
+/// The whole sticker library: the stickers, their colours, the order of
+/// their groups.
+class StickerLibrary {
+  const StickerLibrary({
+    required this.categories,
+    required this.colors,
+    required this.stickers,
+  });
+
+  factory StickerLibrary.fromJson(Map<String, dynamic> j) => StickerLibrary(
+    categories: [
+      for (final c in (j['categories'] as List?) ?? const []) c as String,
+    ],
+    colors: [
+      for (final c in (j['colors'] as List?) ?? const [])
+        StickerColor.fromJson(c as Map<String, dynamic>),
+    ],
+    stickers: [
+      for (final s in (j['stickers'] as List?) ?? const [])
+        Sticker.fromJson(s as Map<String, dynamic>),
+    ],
+  );
+
+  final List<String> categories;
+  final List<StickerColor> colors;
+  final List<Sticker> stickers;
 }
 
 /// A font the server can draw text with.
@@ -2906,6 +2994,30 @@ class ApiClient {
       Uri.parse('$baseUrl/api/jobs/$jobId/sfx'),
       headers: {'content-type': 'application/json'},
       body: jsonEncode({'sfx_id': sfxId}),
+    );
+    _check(r);
+    return Media.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// The stickers on offer, and the colours they come in.
+  Future<StickerLibrary> listStickers() async {
+    final r = await http.get(Uri.parse('$baseUrl/api/stickers'));
+    _check(r);
+    return StickerLibrary.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// Brings a sticker, in one colour, into the match library. It comes back
+  /// ready — the server drew it — and the same sticker in the same colour
+  /// again returns the item already there.
+  Future<Media> addSticker({
+    required String jobId,
+    required String stickerId,
+    required String color,
+  }) async {
+    final r = await http.post(
+      Uri.parse('$baseUrl/api/jobs/$jobId/stickers'),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({'sticker_id': stickerId, 'color': color}),
     );
     _check(r);
     return Media.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
