@@ -96,7 +96,8 @@ const _usefulMoments = {
   'escape',
 };
 
-class _TimelineScreenState extends State<TimelineScreen> {
+class _TimelineScreenState extends State<TimelineScreen>
+    with SingleTickerProviderStateMixin {
   late final ApiClient _api = widget.api ?? ApiClient();
 
   /// The server's text fonts, loaded as they are needed.
@@ -298,6 +299,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
+    _panelTabs.dispose();
     if (_recordingFrom != null) _recorder.cancel();
     FocusManager.instance.removeListener(_checkFocus);
     _stopFullscreenWatch?.call();
@@ -2938,6 +2940,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
   static const double _settingsAsideWidth = 1200;
   static const double _settingsWidth = 360;
 
+  /// Below this width it is a phone: the less used buttons of the top bar go
+  /// into its menu, and the layer names on the ruler get narrower.
+  static const double _phoneWidth = 600;
+
+  bool get _phone => MediaQuery.sizeOf(context).width < _phoneWidth;
+
+  /// The panels under the ruler in one column, as tabs: one long page of
+  /// every panel was scrolling past the library to reach a clip's settings.
+  late final TabController _panelTabs = TabController(length: 5, vsync: this);
+  static const int _settingsTab = 4;
+
   @override
   Widget build(BuildContext context) {
     _wantMatches();
@@ -2970,6 +2983,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 savedAt: _savedAt,
                 err: _saveError,
                 onRetry: _save,
+                compact: _phone,
               ),
               IconButton(
                 tooltip: 'Undo (Ctrl+Z)',
@@ -2981,6 +2995,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 onPressed: _history.canRedo ? _redo : null,
                 icon: const Icon(Icons.redo),
               ),
+              if (!_phone) ...[
               IconButton(
                 tooltip: _magnet
                     ? 'magnet on: snaps to the beat, clip edges and the playhead'
@@ -2998,6 +3013,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 icon: const Icon(Icons.keyboard_tab),
                 selectedIcon: const Icon(Icons.keyboard_tab, color: Colors.orange),
               ),
+              ],
               PopupMenuButton<String>(
                 key: const Key('screen-menu'),
                 onSelected: (v) {
@@ -3010,42 +3026,60 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   if (v == 'apply-preset') _applyPreset();
                   if (v == 'apply-style') _applyPreset(styleOnly: true);
                   if (v == 'save-preset') _savePreset();
+                  if (v == 'magnet') setState(() => _magnet = !_magnet);
+                  if (v == 'insert') setState(() => _insert = !_insert);
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'rename', child: Text('Rename')),
-                  PopupMenuItem(
+                itemBuilder: (_) => [
+                  // on a phone the two switches of the top bar live here
+                  if (_phone) ...[
+                    CheckedPopupMenuItem(
+                      key: const Key('menu-magnet'),
+                      value: 'magnet',
+                      checked: _magnet,
+                      child: const Text('Magnet'),
+                    ),
+                    CheckedPopupMenuItem(
+                      key: const Key('menu-insert'),
+                      value: 'insert',
+                      checked: _insert,
+                      child: const Text('Insert mode'),
+                    ),
+                    const PopupMenuDivider(),
+                  ],
+                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  const PopupMenuItem(
                     value: 'duplicate',
                     child: Text('Duplicate this montage'),
                   ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
                     value: 'apply-preset',
                     child: Text('Apply template…'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     key: Key('apply-style'),
                     value: 'apply-style',
                     child: Text('Apply template style…'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: 'save-preset',
                     child: Text('Save as template…'),
                   ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
                     value: 'mark',
                     child: Text('Mark this version'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: 'history',
                     child: Text('Version history…'),
                   ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
                     value: 'shortcuts',
                     child: Text('Keyboard shortcuts'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: 'discard',
                     child: Text('Delete this montage'),
                   ),
@@ -3057,7 +3091,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             builder: (context, bounds) {
               final sidebarFits = bounds.maxWidth >= _editorWidth;
               if (!sidebarFits) {
-                return _main(dockMoments: true);
+                return _main(tabs: true);
               }
               final aside = bounds.maxWidth >= _settingsAsideWidth;
               return Row(
@@ -3066,7 +3100,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   SizedBox(width: 300, child: _sidebar()),
                   const VerticalDivider(width: 1),
                   Expanded(
-                    child: _main(dockMoments: false, settingsAside: aside),
+                    child: _main(settingsAside: aside),
                   ),
                   if (aside) ...[
                     const VerticalDivider(width: 1),
@@ -3157,7 +3191,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             child: ListView(
               key: const Key('montage-panels'),
               padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
-              children: _settingsChildren(dockMoments: false),
+              children: _settingsChildren(),
             ),
           ),
         ],
@@ -3173,29 +3207,72 @@ class _TimelineScreenState extends State<TimelineScreen> {
           // four tabs in 300px: short labels, tight padding — a scrolling
           // bar hid the last tabs off the edge
           labelPadding: EdgeInsets.symmetric(horizontal: 2),
+          tabs: _shelfTabs,
+        ),
+        Expanded(child: TabBarView(children: _shelves())),
+      ],
+    ),
+  );
+
+  static const _shelfTabs = [
+    Tab(text: 'Moments'),
+    Tab(text: 'Source'),
+    Tab(text: 'Library'),
+    Tab(text: 'Transitions'),
+  ];
+
+  /// What goes in: the same four shelves in the sidebar and on a phone.
+  List<Widget> _shelves() => [
+    _moments(docked: false),
+    SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: _recordingPanel(),
+    ),
+    _libraryPanel(docked: false),
+    _transitions(docked: false),
+  ];
+
+  /// One column: the shelves and the settings as tabs under the ruler.
+  Widget _panelsAsTabs(List<Widget> settings) {
+    final selected = _state.selectionIds.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TabBar(
+          key: const Key('panel-tabs'),
+          controller: _panelTabs,
+          // five tabs in a phone's 390px: short labels, tight padding
+          labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+          labelStyle: Theme.of(context).textTheme.labelMedium,
           tabs: [
-            Tab(text: 'Moments'),
-            Tab(text: 'Source'),
-            Tab(text: 'Library'),
-            Tab(text: 'Transitions'),
+            ..._shelfTabs,
+            Tab(
+              key: const Key('tab-settings'),
+              child: Badge(
+                isLabelVisible: selected > 0,
+                label: Text('$selected'),
+                offset: const Offset(6, -4),
+                child: const Text('Settings'),
+              ),
+            ),
           ],
         ),
         Expanded(
           child: TabBarView(
+            controller: _panelTabs,
             children: [
-              _moments(docked: false),
-              SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
-                child: _recordingPanel(),
+              ..._shelves(),
+              ListView(
+                key: const Key('montage-panels'),
+                padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
+                children: settings,
               ),
-              _libraryPanel(docked: false),
-              _transitions(docked: false),
             ],
           ),
         ),
       ],
-    ),
-  );
+    );
+  }
 
   /// The whole recording, to cut by hand what the analysis did not find.
   ///
@@ -3378,7 +3455,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// The settings: the selected clip, the mix, the beat grid, the export and
   /// the render. Under the ruler on a narrow screen, in the right-hand
   /// sidebar on a wide one.
-  List<Widget> _settingsChildren({required bool dockMoments}) {
+  List<Widget> _settingsChildren() {
     final theme = Theme.of(context);
     final durationValue = videoDuration(_state.clips);
     final blackS = blackDuration(_state.clips);
@@ -3464,29 +3541,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ),
             ),
           ),
-        ),
-      ],
-
-      if (dockMoments) ...[
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _moments(docked: true),
-        ),
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _recordingPanel(),
-        ),
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _libraryPanel(docked: true),
-        ),
-        const SizedBox(height: 18),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _transitions(docked: true),
         ),
       ],
 
@@ -3600,7 +3654,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   }
 
-  Widget _main({required bool dockMoments, bool settingsAside = false}) {
+  Widget _main({bool tabs = false, bool settingsAside = false}) {
     final theme = Theme.of(context);
     final selectionIds = _state.selectionIds;
 
@@ -3842,11 +3896,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
         layers: _state.layers,
         activeLayer: _state.activeLayer,
         selectionIds: selectionIds,
+        labelsWidth: _phone
+            ? MusicTimeline.narrowHeaderWidth
+            : MusicTimeline.headerWidth,
         pxPerSecond: _px,
         playheadS: _cursor,
         scroll: _scroll,
         onSeek: (s) => _goTo(s, reveal: false),
-        onSelect: _select,
+        onSelect: (id, {bool toggle = false}) {
+          _select(id, toggle: toggle);
+          // in one column the settings are a tab away: a clip tapped on the
+          // ruler is a clip to adjust, so its tab comes forward
+          if (id != null && _panelTabs.index != _settingsTab) {
+            _panelTabs.animateTo(_settingsTab);
+          }
+        },
         onMove: _move,
         onTrim: _trim,
         onStretch: _stretch,
@@ -3936,7 +4000,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       const SizedBox(height: 4),
     ];
 
-    final scrolling = _settingsChildren(dockMoments: dockMoments);
+    final scrolling = _settingsChildren();
 
     // wide: the settings live in the sidebar on the right, and the monitor,
     // transport and ruler have the whole height
@@ -3950,28 +4014,51 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
 
     return LayoutBuilder(
-      builder: (context, box) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: box.maxHeight * 0.7),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: pinned,
+      builder: (context, box) {
+        // a phone on its side: under the ruler there was no height left for
+        // the tabs, so they go beside it
+        if (tabs && box.maxWidth > box.maxHeight * 1.4) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: pinned,
+                  ),
+                ),
+              ),
+              const VerticalDivider(width: 1),
+              SizedBox(width: _settingsWidth, child: _panelsAsTabs(scrolling)),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: box.maxHeight * 0.7),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: pinned,
+                ),
               ),
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView(
-              key: const Key('montage-panels'),
-              padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
-              children: scrolling,
+            const Divider(height: 1),
+            Expanded(
+              child: tabs
+                  ? _panelsAsTabs(scrolling)
+                  : ListView(
+                      key: const Key('montage-panels'),
+                      padding: const EdgeInsets.fromLTRB(0, 0, 0, 32),
+                      children: scrolling,
+                    ),
             ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 }
@@ -5054,7 +5141,11 @@ class _DraftStatus extends StatelessWidget {
     required this.savedAt,
     required this.err,
     required this.onRetry,
+    this.compact = false,
   });
+
+  /// On a phone: the icon alone, so the montage's name keeps the room.
+  final bool compact;
 
   final bool saving;
   final DateTime? savedAt;
@@ -5075,6 +5166,12 @@ class _DraftStatus extends StatelessWidget {
         ),
       );
     }
+    if (saving && compact) {
+      return Tooltip(
+        message: 'saving…',
+        child: Icon(Icons.cloud_upload_outlined, size: 18, color: theme.hintColor),
+      );
+    }
     if (saving) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -5088,19 +5185,28 @@ class _DraftStatus extends StatelessWidget {
     }
     if (savedAt == null) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 12),
       child: Center(
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_done_outlined, size: 15, color: theme.hintColor),
-            const SizedBox(width: 5),
-            Text(
-              'saved',
-              style: theme.textTheme.bodySmall?.copyWith(
+            Tooltip(
+              message: 'saved',
+              child: Icon(
+                Icons.cloud_done_outlined,
+                size: 15,
                 color: theme.hintColor,
               ),
             ),
+            if (!compact) ...[
+              const SizedBox(width: 5),
+              Text(
+                'saved',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.hintColor,
+                ),
+              ),
+            ],
           ],
         ),
       ),
