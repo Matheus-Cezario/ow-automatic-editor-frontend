@@ -13,8 +13,10 @@ import '../export_options.dart';
 import '../levels.dart';
 import '../fullscreen.dart';
 import '../fonts.dart';
+import '../keymap.dart';
 import '../montage_state.dart';
 import '../recipe.dart';
+import '../prefs_store.dart';
 import '../undo_store.dart';
 import '../voice_recorder.dart';
 import '../labels.dart';
@@ -27,6 +29,7 @@ import '../widgets/motion_panel.dart';
 import '../widgets/music_timeline.dart';
 import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
+import '../widgets/shortcuts_dialog.dart';
 import '../widgets/blend_panel.dart';
 import '../widgets/crop_panel.dart';
 import '../widgets/fx_panel.dart';
@@ -576,7 +579,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   // ── block operations ──────────────────────────────────────────────────────
 
-  void _add(DetectionEvent e) {
+  void _add(DetectionEvent e, {bool? insert}) {
     _edit(
       addClip(
         _state,
@@ -588,9 +591,103 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         beats: _beats,
         snap: _magnet,
-        insert: _insert,
+        insert: insert ?? _insert,
       ),
     );
+  }
+
+  /// Where a right-click menu opens: at the pointer.
+  RelativeRect _menuAt(Offset global) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    return RelativeRect.fromRect(
+      global & const Size(1, 1),
+      Offset.zero & overlay.size,
+    );
+  }
+
+  /// The blocks a moment is already in.
+  List<TimelineClip> _blocksOf(DetectionEvent e) {
+    final key = momentKey(e.kind, e.t, jobId: e.jobId);
+    return [
+      for (final c in _state.clips)
+        if (momentKey(c.kind, c.sourceT, jobId: c.jobId) == key) c,
+    ]..sort((a, b) => a.atS.compareTo(b.atS));
+  }
+
+  /// The right-click menu of a moment on the shelf.
+  Future<void> _momentMenu(DetectionEvent e, Offset global) async {
+    final placed = _blocksOf(e);
+    final choice = await showMenu<String>(
+      context: context,
+      position: _menuAt(global),
+      items: [
+        PopupMenuItem(
+          key: const Key('moment-menu-place'),
+          value: 'place',
+          enabled: !_sending,
+          child: const Text('Place at the playhead'),
+        ),
+        PopupMenuItem(
+          key: const Key('moment-menu-insert'),
+          value: 'insert',
+          enabled: !_sending,
+          child: const Text('Insert at the playhead, pushing the rest'),
+        ),
+        if (placed.isNotEmpty)
+          PopupMenuItem(
+            key: const Key('moment-menu-show'),
+            value: 'show',
+            child: Text(
+              placed.length == 1
+                  ? 'Show it on the ruler'
+                  : 'Show it on the ruler (${placed.length} times)',
+            ),
+          ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'place':
+        _add(e, insert: false);
+      case 'insert':
+        _add(e, insert: true);
+      case 'show':
+        _withoutHistory(
+          _state.copyWith(selectionIds: {for (final c in placed) c.id}),
+        );
+        _goTo(placed.first.atS);
+    }
+    _restoreFocus();
+  }
+
+  /// The right-click menu of a library item.
+  Future<void> _libraryMenu(Media m, Offset global) async {
+    final choice = await showMenu<String>(
+      context: context,
+      position: _menuAt(global),
+      items: [
+        PopupMenuItem(
+          key: const Key('media-menu-use'),
+          value: 'use',
+          enabled: !_sending && m.isReady,
+          child: const Text('Place at the playhead'),
+        ),
+        PopupMenuItem(
+          key: const Key('media-menu-remove'),
+          value: 'remove',
+          enabled: !_sending,
+          child: const Text('Remove from the library'),
+        ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'use':
+        _useMedia(m);
+      case 'remove':
+        _removeFromLibrary(m);
+    }
+    _restoreFocus();
   }
 
   /// What the magnet pulls the clip [id] toward: beats, the other clips'
@@ -2758,107 +2855,75 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (id == null) _restoreFocus();
   }
 
-  /// The shortcuts, with Ctrl and Cmd working the same.
+  /// The keys the user chose, over the defaults.
+  Keymap _keymap = Keymap.fromJson(readPref(kKeymapPref));
+
+  void _setKeymap(Keymap k) {
+    setState(() => _keymap = k);
+    writePref(kKeymapPref, k.isDefault ? null : k.toJson());
+  }
+
+  /// What each command does.
+  Map<String, VoidCallback> get _commands => {
+    'play': _togglePlay,
+    'play-on': () {
+      if (!_playing) _play();
+    },
+    'back': () => _goTo(_cursor - 2),
+    'left': () => _goTo(_cursor - 1),
+    'right': () => _goTo(_cursor + 1),
+    // comma and period move one frame, like in any editor. The arrows keep
+    // the coarse one-second step — both have their use.
+    'frame-back': () => _frameStep(-1),
+    'frame-on': () => _frameStep(1),
+    'nudge-left': () => _push(-0.1),
+    'nudge-right': () => _push(0.1),
+    'layer-up': () => _shiftSelection(1),
+    'layer-down': () => _shiftSelection(-1),
+    'split': _splitAtCursor,
+    'split-all': () => _splitAtCursor(everyLayer: true),
+    'trim-start': () => _trimAtCursor(startTime: true),
+    'trim-end': () => _trimAtCursor(startTime: false),
+    'align': _alignMomentToCursor,
+    'zoom-in': () => _setZoom(_px * kZoomStep),
+    'zoom-out': () => _setZoom(_px / kZoomStep),
+    'zoom-fit': _zoomToFit,
+    'marker': _toggleMarker,
+    'next-marker': () {
+      if (nextMarker(_state, _cursor) case final t?) _goTo(t);
+    },
+    'mark-in': _markIn,
+    'mark-out': _markOut,
+    'clear-range': _clearRange,
+    'loop': () => setState(() => _loop = !_loop),
+    'volume': () => setState(() => _volumeMode = !_volumeMode),
+    'fullscreen': () => _setFullscreen(!_fullscreen),
+    'delete': _deleteSelection,
+    'ripple-delete': _rippleDeleteSelection,
+    'undo': _undo,
+    'redo': _redo,
+    'copy': _copy,
+    'paste': _paste,
+    'duplicate': _duplicate,
+    'select-all': _selectAll,
+    'copy-effects': _copyEffects,
+    'paste-effects': _pasteEffects,
+  };
+
+  /// The shortcuts: every command on its keys, with Ctrl and Cmd working the
+  /// same. Esc is fixed — it is the way out of full screen.
   Map<ShortcutActivator, VoidCallback> get _shortcuts {
     final b = <ShortcutActivator, VoidCallback>{
-      const SingleActivator(LogicalKeyboardKey.space): _togglePlay,
-      const SingleActivator(LogicalKeyboardKey.keyK): _togglePlay,
-      const SingleActivator(LogicalKeyboardKey.keyL): () {
-        if (!_playing) _play();
-      },
-      const SingleActivator(LogicalKeyboardKey.keyJ): () =>
-          _goTo(_cursor - 2),
-      const SingleActivator(LogicalKeyboardKey.keyS): _splitAtCursor,
-      const SingleActivator(
-        LogicalKeyboardKey.keyC,
-        control: true,
-        shift: true,
-      ): _copyEffects,
-      const SingleActivator(
-        LogicalKeyboardKey.keyC,
-        meta: true,
-        shift: true,
-      ): _copyEffects,
-      const SingleActivator(
-        LogicalKeyboardKey.keyV,
-        control: true,
-        shift: true,
-      ): _pasteEffects,
-      const SingleActivator(
-        LogicalKeyboardKey.keyV,
-        meta: true,
-        shift: true,
-      ): _pasteEffects,
-      const SingleActivator(LogicalKeyboardKey.equal): () =>
-          _setZoom(_px * kZoomStep),
-      const SingleActivator(LogicalKeyboardKey.minus): () =>
-          _setZoom(_px / kZoomStep),
-      const SingleActivator(LogicalKeyboardKey.backslash): _zoomToFit,
-      const SingleActivator(LogicalKeyboardKey.keyS, shift: true): () =>
-          _splitAtCursor(everyLayer: true),
-      const SingleActivator(LogicalKeyboardKey.keyM): _alignMomentToCursor,
-      const SingleActivator(LogicalKeyboardKey.keyN): _toggleMarker,
-      const SingleActivator(LogicalKeyboardKey.keyV): () =>
-          setState(() => _volumeMode = !_volumeMode),
-      const SingleActivator(LogicalKeyboardKey.keyI): _markIn,
-      const SingleActivator(LogicalKeyboardKey.keyO): _markOut,
-      const SingleActivator(LogicalKeyboardKey.keyX, alt: true): _clearRange,
-      const SingleActivator(LogicalKeyboardKey.keyL, shift: true): () =>
-          setState(() => _loop = !_loop),
-      const SingleActivator(LogicalKeyboardKey.keyN, shift: true): () {
-        if (nextMarker(_state, _cursor) case final t?) _goTo(t);
-      },
-      // comma and period move one frame, like in any editor. The arrows keep
-      // the coarse one-second step — both have their use.
-      const SingleActivator(LogicalKeyboardKey.comma): () => _frameStep(-1),
-      const SingleActivator(LogicalKeyboardKey.period): () => _frameStep(1),
-      const SingleActivator(LogicalKeyboardKey.delete): _deleteSelection,
-      const SingleActivator(LogicalKeyboardKey.backspace): _deleteSelection,
-      const SingleActivator(LogicalKeyboardKey.delete, shift: true):
-          _rippleDeleteSelection,
-      const SingleActivator(LogicalKeyboardKey.backspace, shift: true):
-          _rippleDeleteSelection,
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           _fullscreen ? _setFullscreen(false) : _select(null),
-      const SingleActivator(LogicalKeyboardKey.keyF): () =>
-          _setFullscreen(!_fullscreen),
-      const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
-          _goTo(_cursor - 1),
-      const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
-          _goTo(_cursor + 1),
-      const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): () =>
-          _push(-0.1),
-      const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
-          _push(0.1),
-      const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): () =>
-          _shiftSelection(1),
-      const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): () =>
-          _shiftSelection(-1),
-      const SingleActivator(LogicalKeyboardKey.bracketLeft): () =>
-          _trimAtCursor(startTime: true),
-      const SingleActivator(LogicalKeyboardKey.bracketRight): () =>
-          _trimAtCursor(startTime: false),
     };
-
-    // Ctrl on Windows/Linux, Cmd on Mac: the same shortcut registered twice
-    // costs one line and avoids a "why does it not work here".
-    void command(
-      LogicalKeyboardKey keyName,
-      VoidCallback action, {
-      bool shift = false,
-    }) {
-      b[SingleActivator(keyName, control: true, shift: shift)] = action;
-      b[SingleActivator(keyName, meta: true, shift: shift)] = action;
+    for (final MapEntry(key: id, value: action) in _commands.entries) {
+      for (final combo in _keymap.keysOf(id)) {
+        for (final a in combo.activators) {
+          b[a] = action;
+        }
+      }
     }
-
-    command(LogicalKeyboardKey.keyZ, _undo);
-    command(LogicalKeyboardKey.keyZ, _redo, shift: true);
-    command(LogicalKeyboardKey.keyY, _redo);
-    command(LogicalKeyboardKey.keyC, _copy);
-    command(LogicalKeyboardKey.keyV, _paste);
-    command(LogicalKeyboardKey.keyD, _duplicate);
-    command(LogicalKeyboardKey.keyA, _selectAll);
-
     return b;
   }
 
@@ -3024,55 +3089,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   void _showShortcuts() {
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Shortcuts'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              _Shortcut('Space / K', 'play or pause'),
-              _Shortcut('J / L', 'back 2s / play'),
-              _Shortcut('← →', 'move the playhead (1s)'),
-              _Shortcut(', / .', 'step one frame'),
-              _Shortcut('Shift + ← →', 'nudge the selected cuts'),
-              _Shortcut('Alt + ↑ ↓', 'move the selected cuts a layer up / down'),
-              _Shortcut('S', 'split the cut under the cursor'),
-              _Shortcut('Shift + S', 'split every layer at the cursor'),
-              _Shortcut('= / -', 'zoom the ruler in / out'),
-              _Shortcut('\\', 'fit the whole montage'),
-              _Shortcut('Ctrl + scroll', 'zoom around the mouse'),
-              _Shortcut('Shift + Delete', 'delete and close the gap'),
-              _Shortcut('drag on an empty track', 'select with a rectangle'),
-              _Shortcut('M', 'align the selected block\'s play to the cursor'),
-              _Shortcut('[ / ]', 'trim the start / end to the cursor'),
-              _Shortcut('N / Shift + N', 'marker at the playhead / next marker'),
-              _Shortcut('I / O', 'in / out point at the playhead'),
-              _Shortcut('V', 'volume lines: drag, click to add a point'),
-              _Shortcut('F', 'monitor full screen (Esc leaves)'),
-              _Shortcut('Alt + X', 'clear the in and out points'),
-              _Shortcut('Shift + L', 'loop playback (the in/out range, or all)'),
-              _Shortcut('Delete', 'remove from the montage'),
-              _Shortcut('Ctrl+Z / Ctrl+Shift+Z', 'undo / redo'),
-              _Shortcut('Ctrl+C / Ctrl+V', 'copy / paste'),
-              _Shortcut('Ctrl+D', 'duplicate'),
-              _Shortcut('Ctrl+Shift+C / V', 'copy / paste effects'),
-              _Shortcut('Ctrl+A', 'select all'),
-              _Shortcut('Shift + click', 'add to the selection'),
-              _Shortcut('drag ↑ ↓', 'move the cut to another layer'),
-              _Shortcut('right-click a layer', 'rename, reorder or delete it'),
-              _Shortcut('Esc', 'clear the selection'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+      builder: (_) => ShortcutsDialog(keymap: _keymap, onChanged: _setKeymap),
+    ).whenComplete(_restoreFocus);
   }
 
   /// The sidebar: what the system found and what the user brought, side by
@@ -3292,6 +3310,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     onImport: _import,
     onUse: _useMedia,
     onRemove: _removeFromLibrary,
+    onMenu: _libraryMenu,
     stickers: StickerShelf(
       library: _stickers,
       error: _stickersError,
@@ -3326,6 +3345,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       enabled: !_sending,
       docked: docked,
       onAdd: _add,
+      onMenu: _momentMenu,
       picker: _otherMatchList?.isNotEmpty ?? false
           ? _matchPicker(from)
           : null,
@@ -4046,33 +4066,6 @@ class _MontagePicker extends StatelessWidget {
   }
 }
 
-/// A row of the shortcut list.
-class _Shortcut extends StatelessWidget {
-  const _Shortcut(this.keyName, this.whatItDoes);
-
-  final String keyName;
-  final String whatItDoes;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 3),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 170,
-          child: Text(keyName, style: const TextStyle(fontFeatures: [])),
-        ),
-        Expanded(
-          child: Text(
-            whatItDoes,
-            style: TextStyle(color: Theme.of(context).hintColor),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 /// The beat grid control.
 ///
 /// The rhythm detector gets the tempo right almost always and fails in two
@@ -4710,7 +4703,11 @@ class _Moments extends StatelessWidget {
     required this.onAdd,
     this.loading = false,
     this.picker,
+    this.onMenu,
   });
+
+  /// A right-click (or a long press) on a moment, where it happened.
+  final void Function(DetectionEvent, Offset)? onMenu;
 
   final String jobId;
 
@@ -4794,6 +4791,7 @@ class _Moments extends StatelessWidget {
           used: usedKeys.contains(momentKey(e.kind, e.t, jobId: e.jobId)),
           enabled: enabled,
           onAdd: () => onAdd(e),
+          onMenu: onMenu == null ? null : (at) => onMenu!(e, at),
         ),
     ];
 
@@ -4860,6 +4858,7 @@ class _MomentTile extends StatelessWidget {
     required this.used,
     required this.enabled,
     required this.onAdd,
+    this.onMenu,
   });
 
   final String jobId;
@@ -4869,6 +4868,7 @@ class _MomentTile extends StatelessWidget {
   final bool used;
   final bool enabled;
   final VoidCallback onAdd;
+  final ValueChanged<Offset>? onMenu;
 
   /// The name this moment carries on the card and on the ghost.
   ///
@@ -4919,6 +4919,12 @@ class _MomentTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: enabled ? onAdd : null,
+        onSecondaryTapDown: onMenu == null
+            ? null
+            : (d) => onMenu!(d.globalPosition),
+        onLongPress: onMenu == null
+            ? null
+            : () => onMenu!(_centreOf(context)),
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
@@ -5117,6 +5123,7 @@ class _Library extends StatelessWidget {
     required this.onImport,
     required this.onUse,
     required this.onRemove,
+    this.onMenu,
     this.stickers,
     this.sounds,
   });
@@ -5129,6 +5136,9 @@ class _Library extends StatelessWidget {
   final VoidCallback onImport;
   final ValueChanged<Media> onUse;
   final ValueChanged<Media> onRemove;
+
+  /// A right-click (or a long press) on an item, where it happened.
+  final void Function(Media, Offset)? onMenu;
 
   /// The stickers shelf, under what the user brought.
   final Widget? stickers;
@@ -5207,6 +5217,7 @@ class _Library extends StatelessWidget {
                 enabled: enabled,
                 onUse: () => onUse(m),
                 onRemove: () => onRemove(m),
+                onMenu: onMenu == null ? null : (at) => onMenu!(m, at),
               ),
           ];
 
@@ -5238,12 +5249,14 @@ class _LibraryItem extends StatelessWidget {
     required this.enabled,
     required this.onUse,
     required this.onRemove,
+    this.onMenu,
   });
 
   final Media item;
   final bool enabled;
   final VoidCallback onUse;
   final VoidCallback onRemove;
+  final ValueChanged<Offset>? onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -5261,16 +5274,22 @@ class _LibraryItem extends StatelessWidget {
             ? theme.colorScheme.primary
             : theme.colorScheme.secondary,
       ),
-      childWhenDragging: Opacity(opacity: 0.4, child: _card(theme, ready)),
-      child: _card(theme, ready),
+      childWhenDragging: Opacity(opacity: 0.4, child: _card(context, theme, ready)),
+      child: _card(context, theme, ready),
     );
   }
 
-  Widget _card(ThemeData theme, bool ready) {
+  Widget _card(BuildContext context, ThemeData theme, bool ready) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: enabled && ready ? onUse : null,
+        onSecondaryTapDown: onMenu == null
+            ? null
+            : (d) => onMenu!(d.globalPosition),
+        onLongPress: onMenu == null
+            ? null
+            : () => onMenu!(_centreOf(context)),
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
@@ -6421,4 +6440,12 @@ class _ClipText extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The middle of [context]'s box, on screen: where a menu opened by a long
+/// press appears, since a long press gives no point of its own here.
+Offset _centreOf(BuildContext context) {
+  final box = context.findRenderObject() as RenderBox?;
+  if (box == null || !box.hasSize) return Offset.zero;
+  return box.localToGlobal(box.size.center(Offset.zero));
 }
