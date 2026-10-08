@@ -180,13 +180,15 @@ const _slideFrom = {
 
 /// The frame at [t], in assembled-video seconds.
 ///
-/// [matchUrl] is what a recording clip shows (the match proxy); [library]
-/// resolves media clips. A clip whose source cannot be found is left out —
+/// [matchUrl] is what a recording clip shows (the match proxy);
+/// [otherMatches] is the same for a moment brought from another match, by its
+/// job id; [library] resolves media clips. A clip whose source cannot be found is left out —
 /// the server would refuse it, and showing the match instead would lie.
 Frame frameAt(
   List<Layer> layers,
   double t, {
   required String? matchUrl,
+  Map<String, String> otherMatches = const {},
   Map<String, Media> library = const {},
   ExportSpec export = const ExportSpec(),
 }) {
@@ -222,7 +224,7 @@ Frame frameAt(
         t - clip.atS,
         drawn,
         dipOut: dipOut,
-        matchUrl: matchUrl,
+        matchUrl: clip.jobId == null ? matchUrl : otherMatches[clip.jobId],
         library: library,
         fit: export.fit,
       );

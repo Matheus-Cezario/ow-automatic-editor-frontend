@@ -252,6 +252,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     unawaited(_fonts.start());
     unawaited(_loadSounds());
     unawaited(_loadStickers());
+    unawaited(_loadMatchList());
     // the most recent one is the one being edited -- and the one you want back
     final present = _montages.firstOrNull;
     final draft = present?.montage ?? widget.job.draft;
@@ -327,6 +328,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     child: _withExact(PreviewPlayer(
                 // the proxy when there is one; for old matches, the recording
                 videoUrl: widget.job.monitorUrl,
+                otherMatches: _otherMonitorUrls,
                 layers: _state.layers,
                 cuts: _state.visibleClips,
                 library: {for (final m in _library) m.id: m},
@@ -582,7 +584,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           e,
           atS: _cursor,
           beats: _beats,
-          sourceDurationS: widget.job.durationS,
+          sourceDurationS: _recordingSOf(e.jobId),
         ),
         beats: _beats,
         snap: _magnet,
@@ -658,15 +660,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
         durationValue,
         beats: _magnetFor(id),
         snap: _magnet,
-        sourceDurationS: widget.job.durationS,
+        sourceDurationS: _recordingSOfClip(id),
       ),
     );
     _guideFor(id);
   }
 
-  void _shift(String id, double delta) => _edit(
-    shiftContent(_state, id, delta, sourceDurationS: widget.job.durationS),
-  );
+  void _shift(String id, double delta) {
+    // the other match's length is not known until it loads: nothing to
+    // slide against yet
+    final reach = _recordingSOfClip(id);
+    if (reach == null) return;
+    _edit(shiftContent(_state, id, delta, sourceDurationS: reach));
+  }
 
   void _deleteSelection() => _edit(removeClips(_state, _state.selectionIds));
 
@@ -1235,12 +1241,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _notify('This block has no marked play.');
       return;
     }
-    final done = alignMoment(
-      _state,
-      target,
-      _cursor,
-      sourceDurationS: widget.job.durationS,
-    );
+    final reach = _recordingSOfClip(target);
+    if (reach == null) {
+      _notify('The match this block comes from is still loading.');
+      return;
+    }
+    final done = alignMoment(_state, target, _cursor, sourceDurationS: reach);
     if (done == null) {
       _notify('The play cannot reach this point: the recording ends before.');
       return;
@@ -1338,7 +1344,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               at - c.atS,
               beats: _beats,
               snap: false,
-              sourceDurationS: widget.job.durationS,
+              sourceDurationS: _recordingSOf(c.jobId),
             ),
     );
   }
@@ -1435,6 +1441,103 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (id == null) return;
     final raw = readUndo(_historyKey(id));
     if (raw != null) _history.restore(raw, opened: _state);
+  }
+
+  // ── other matches ─────────────────────────────────────────────────────────
+
+  /// The other analysed matches whose moments can come into this montage.
+  /// Null while the list has not arrived (or could not be read).
+  List<Job>? _otherMatchList;
+
+  /// Other matches loaded in full — moments, recording, waveform — by id.
+  final Map<String, Job> _matches = {};
+  final Set<String> _matchesLoading = {};
+
+  /// Matches that could not be loaded: not asked again on every frame.
+  final Set<String> _matchesMissing = {};
+
+  /// Whose moments the shelf shows: null is this match.
+  String? _momentsFrom;
+
+  /// The match a moment or a block is cut from: this one for null.
+  Job? _matchOf(String? jobId) =>
+      jobId == null || jobId == widget.job.id ? widget.job : _matches[jobId];
+
+  /// How long that match's recording runs; null while it is not loaded.
+  double? _recordingSOf(String? jobId) => _matchOf(jobId)?.durationS;
+
+  /// The same, for the block [id].
+  double? _recordingSOfClip(String id) =>
+      _recordingSOf(_state.clipItem(id)?.jobId);
+
+  Map<String, String> get _otherMonitorUrls => {
+    for (final e in _matches.entries)
+      e.key: ?e.value.monitorUrl,
+  };
+
+  Map<String, (List<double>, double)> get _otherWaves => {
+    for (final e in _matches.entries)
+      e.key: (e.value.waveform, e.value.durationS),
+  };
+
+  Future<void> _loadMatchList() async {
+    try {
+      final all = await _api.listJobs();
+      if (!mounted) return;
+      setState(
+        () => _otherMatchList = [
+          for (final j in all)
+            if (j.id != widget.job.id && j.status == 'ready') j,
+        ],
+      );
+    } catch (_) {
+      // without the list the shelf offers this match only
+    }
+  }
+
+  Future<void> _loadMatch(String id) async {
+    if (_matches.containsKey(id) || !_matchesLoading.add(id)) return;
+    try {
+      final job = await _api.getJob(id);
+      if (mounted) setState(() => _matches[id] = job);
+    } catch (_) {
+      // its blocks stay dark in the monitor; the server still renders them
+      _matchesMissing.add(id);
+    } finally {
+      _matchesLoading.remove(id);
+    }
+  }
+
+  /// Loads the matches the montage's blocks come from — on opening it, and
+  /// after an undo brings one back.
+  void _wantMatches() {
+    for (final c in _state.clips) {
+      final id = c.jobId;
+      if (id != null &&
+          id != widget.job.id &&
+          !_matches.containsKey(id) &&
+          !_matchesMissing.contains(id)) {
+        unawaited(_loadMatch(id));
+      }
+    }
+  }
+
+  void _showMomentsFrom(String? id) {
+    setState(() => _momentsFrom = id);
+    if (id != null) unawaited(_loadMatch(id));
+  }
+
+  /// The moments on the shelf: this match's, or the chosen match's, each
+  /// carrying where it was found.
+  List<DetectionEvent> get _shelfMoments {
+    final from = _momentsFrom;
+    if (from == null) return _matchMoments;
+    final m = _matches[from];
+    if (m == null) return const [];
+    return [
+      for (final e in m.events)
+        if (_usefulMoments.contains(e.kind)) e.inMatch(from),
+    ];
   }
 
   // ── music ─────────────────────────────────────────────────────────────────
@@ -1692,7 +1795,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           event,
           atS: atS,
           beats: _beats,
-          sourceDurationS: widget.job.durationS,
+          sourceDurationS: _recordingSOf(event.jobId),
         ),
         beats: _beats,
         snap: _magnet,
@@ -2772,6 +2875,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _wantMatches();
     return CallbackShortcuts(
       // While someone is typing, **no shortcut is registered** — and that is
       // quite different from having one that does nothing: `CallbackShortcuts`
@@ -3206,15 +3310,49 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
-  Widget _moments({required bool docked}) => _Moments(
-    jobId: widget.job.id,
-    videoUrl: widget.job.monitorUrl,
-    recordingS: widget.job.durationS,
-    moments: _matchMoments,
-    usedKeys: {for (final c in _state.clips) momentKey(c.kind, c.sourceT)},
-    enabled: !_sending,
-    docked: docked,
-    onAdd: _add,
+  Widget _moments({required bool docked}) {
+    final from = _momentsFrom;
+    final match = _matchOf(from);
+    return _Moments(
+      jobId: from ?? widget.job.id,
+      videoUrl: match?.monitorUrl,
+      recordingS: match?.durationS ?? 0,
+      moments: _shelfMoments,
+      loading: match == null,
+      usedKeys: {
+        for (final c in _state.clips)
+          momentKey(c.kind, c.sourceT, jobId: c.jobId),
+      },
+      enabled: !_sending,
+      docked: docked,
+      onAdd: _add,
+      picker: _otherMatchList?.isNotEmpty ?? false
+          ? _matchPicker(from)
+          : null,
+    );
+  }
+
+  /// Which match's moments the shelf shows.
+  Widget _matchPicker(String? from) => DropdownButton<String?>(
+    key: const Key('moments-match'),
+    value: from,
+    isExpanded: true,
+    isDense: true,
+    onChanged: _sending ? null : _showMomentsFrom,
+    items: [
+      DropdownMenuItem<String?>(
+        value: null,
+        child: Text(
+          'This match · ${widget.job.videoName}',
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      for (final j in _otherMatchList ?? const <Job>[])
+        DropdownMenuItem<String?>(
+          value: j.id,
+          child: Text(j.videoName, overflow: TextOverflow.ellipsis),
+        ),
+    ],
   );
 
   /// The settings: the selected clip, the mix, the beat grid, the export and
@@ -3514,6 +3652,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     tracks: _tracks,
                     matchWave: widget.job.waveform,
                     matchDurationS: widget.job.durationS,
+                    otherMatches: _otherWaves,
                   ),
                 ),
               ],
@@ -3754,6 +3893,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         matchWaveform: widget.job.waveform,
         matchDuration: widget.job.durationS,
+        otherMatchWaveforms: _otherWaves,
         onDrop: _dropOnRuler,
       ),
 
@@ -4568,9 +4708,17 @@ class _Moments extends StatelessWidget {
     required this.enabled,
     required this.docked,
     required this.onAdd,
+    this.loading = false,
+    this.picker,
   });
 
   final String jobId;
+
+  /// Which match's moments are shown, when there are other matches to pick.
+  final Widget? picker;
+
+  /// The chosen match is still on its way.
+  final bool loading;
 
   /// What the hover preview plays; `null` when the match has no recording to
   /// play from, and then there is no preview.
@@ -4595,12 +4743,23 @@ class _Moments extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final pick = picker;
     if (moments.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(
-          'The analysis found no moments in this match.',
-          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (pick != null) ...[pick, const SizedBox(height: 12)],
+            loading
+                ? const LinearProgressIndicator()
+                : Text(
+                    'The analysis found no moments in this match.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+          ],
         ),
       );
     }
@@ -4611,6 +4770,7 @@ class _Moments extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Match moments', style: theme.textTheme.titleSmall),
+          if (pick != null) ...[const SizedBox(height: 4), pick],
           const SizedBox(height: 4),
           Text(
             'Click to place the cut where the song is. The same moment '
@@ -4626,12 +4786,12 @@ class _Moments extends StatelessWidget {
         _MomentTile(
           // kind + instant: two detectors can land on the same time, and two
           // equal keys in the same list bring the screen down
-          key: ValueKey('moment-${momentKey(e.kind, e.t)}'),
+          key: ValueKey('moment-${momentKey(e.kind, e.t, jobId: e.jobId)}'),
           jobId: jobId,
           videoUrl: videoUrl,
           recordingS: recordingS,
           event: e,
-          used: usedKeys.contains(momentKey(e.kind, e.t)),
+          used: usedKeys.contains(momentKey(e.kind, e.t, jobId: e.jobId)),
           enabled: enabled,
           onAdd: () => onAdd(e),
         ),

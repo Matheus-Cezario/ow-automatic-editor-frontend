@@ -130,7 +130,15 @@ class _JobsScreenState extends State<JobsScreen> {
             _refresh();
           },
           onDelete: () async {
-            await _api.deleteJob(_jobs![i].id);
+            final messenger = ScaffoldMessenger.of(context);
+            try {
+              await _api.deleteJob(_jobs![i].id);
+            } on ApiException catch (e) {
+              // another match's montage uses its moments: say whose
+              messenger.showSnackBar(
+                SnackBar(content: Text('Not deleted: ${e.message}')),
+              );
+            }
             _refresh();
           },
         ),

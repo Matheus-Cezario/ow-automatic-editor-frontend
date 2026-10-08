@@ -47,6 +47,7 @@ class PreviewPlayer extends StatelessWidget {
     required this.atS,
     required this.playing,
     this.library = const {},
+    this.otherMatches = const {},
     this.export = const ExportSpec(),
     this.aspectRatio = 16 / 9,
     this.texts = const [],
@@ -72,6 +73,9 @@ class PreviewPlayer extends StatelessWidget {
 
   /// What a clip of the match shows: the proxy, or the recording itself.
   final String? videoUrl;
+
+  /// The same for moments brought from other matches, by job id.
+  final Map<String, String> otherMatches;
 
   /// Every layer, bottom to top — the monitor composes them all.
   final List<Layer> layers;
@@ -132,6 +136,7 @@ class PreviewPlayer extends StatelessWidget {
     layers,
     t,
     matchUrl: videoUrl,
+    otherMatches: otherMatches,
     library: library,
     export: export,
   );

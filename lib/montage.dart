@@ -131,8 +131,10 @@ List<double> adjustedGrid(
 /// detector and the critical hits one almost on the same frame, and both
 /// events can fall at the same rounded time. With the kind included, each card
 /// on the shelf has its own key and knows by itself whether it is already on
-/// the ruler.
-String momentKey(String kind, double t) => '$kind@${t.toStringAsFixed(3)}';
+/// the ruler. A moment brought from another match carries that match too: the
+/// same kind at the same second of two recordings are two different plays.
+String momentKey(String kind, double t, {String? jobId}) =>
+    '${jobId == null ? '' : '$jobId/'}$kind@${t.toStringAsFixed(3)}';
 
 /// The block born when the user drops a moment on the timeline.
 ///
@@ -152,6 +154,7 @@ TimelineClip cutForMoment(
   return TimelineClip(
     sourceT: event.t,
     kind: event.kind,
+    jobId: event.jobId,
     atS: math.max(0, atS),
     durationS: durationValue,
     startS: sourceStartFor(event.t, durationValue, sourceDurationS: sourceDurationS),
