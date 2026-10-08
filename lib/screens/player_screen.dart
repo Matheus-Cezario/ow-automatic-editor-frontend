@@ -141,6 +141,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     Row(
                       children: [
                         IconButton.filled(
+                          tooltip: c.value.isPlaying ? 'Pause' : 'Play',
                           onPressed: () => setState(
                             () => c.value.isPlaying ? c.pause() : c.play(),
                           ),

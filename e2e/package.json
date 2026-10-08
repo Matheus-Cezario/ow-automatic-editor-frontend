@@ -1,0 +1,11 @@
+{
+  "name": "ow-editor-e2e",
+  "private": true,
+  "description": "The editor in a real browser: drags, keys and layouts that widget tests cannot reach.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

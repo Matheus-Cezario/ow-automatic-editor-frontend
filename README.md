@@ -41,6 +41,27 @@ flutter analyze
 flutter test
 ```
 
+### In a real browser (`e2e/`)
+
+Widget tests simulate gestures; these drive the web build in Chromium with a
+real mouse, keyboard and touch: a moment dragged onto the ruler, a cut moved,
+trimmed and taken to another layer, Ctrl+Z, Alt+arrows, the phone layout.
+The server is not needed: `e2e/tests/mock_api.js` answers the API inside the
+browser with one finished match and keeps what the editor saves.
+
+```bash
+flutter build web --no-web-resources-cdn --dart-define=API_BASE=
+cd e2e
+npm install
+npx playwright install chromium   # once, if Playwright has no browser yet
+npx playwright test
+```
+
+The page is one canvas, so the tests find things through Flutter's semantics
+tree — the same labels a screen reader hears ("Kill, layer 1, from 00:00 to
+00:01, 1.2 seconds"). Renaming one of those labels means updating the test
+that looks for it.
+
 ---
 
 ## Screens
