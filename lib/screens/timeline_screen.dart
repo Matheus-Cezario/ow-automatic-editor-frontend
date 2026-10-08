@@ -17,6 +17,8 @@ import '../montage_state.dart';
 import '../recipe.dart';
 import '../undo_store.dart';
 import '../labels.dart';
+import '../subtitles.dart';
+import '../widgets/download.dart';
 import '../widgets/exact_preview.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/moment_preview.dart';
@@ -778,6 +780,52 @@ class _TimelineScreenState extends State<TimelineScreen> {
         snap: _magnet,
       ),
     );
+  }
+
+  // ── subtitles ─────────────────────────────────────────────────────────────
+
+  /// Reads an `.srt` or `.vtt` onto the subtitles layer, timed from the
+  /// montage's first frame.
+  Future<void> _importSubtitles() async {
+    final picked = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['srt', 'vtt'],
+    );
+    if (picked == null) return;
+    final String source;
+    try {
+      source = utf8.decode(await picked.readAsBytes(), allowMalformed: true);
+    } catch (e) {
+      _notify('Could not read ${picked.name}: $e');
+      return;
+    }
+    _importSubtitlesText(source, picked.name);
+  }
+
+  void _importSubtitlesText(String source, String name) {
+    final cues = parseSubtitles(source);
+    if (cues.isEmpty) {
+      _notify('No subtitles found in $name.');
+      return;
+    }
+    final before = subtitlesOf(_state).length;
+    final updated = putSubtitles(_state, cues);
+    _edit(updated);
+    final placed = subtitlesOf(updated).length;
+    _notify(
+      '$placed subtitle(s) imported'
+      '${before > 0 ? ', replacing $before' : ''}'
+      '${placed < cues.length ? '; ${cues.length - placed} too short or overlapping were left out' : ''}.',
+    );
+  }
+
+  void _downloadSubtitles() {
+    final subs = subtitlesOf(_state);
+    if (subs.isEmpty) {
+      _notify('There are no subtitles in this montage yet.');
+      return;
+    }
+    unawaited(downloadText(context, 'subtitles.srt', writeSrt(subs)));
   }
 
   /// How many layers draw pictures — sound layers do not take text.
@@ -3409,6 +3457,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           streakLabels(_state.clips),
                           'streaks',
                         ),
+                        'subtitle' => _edit(addSubtitle(_state, _cursor)),
+                        'import-subtitles' => _importSubtitles(),
+                        'download-subtitles' => _downloadSubtitles(),
                         _ => null,
                       },
                       itemBuilder: (_) => const [
@@ -3424,6 +3475,22 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         PopupMenuItem(
                           value: 'streak',
                           child: Text('Streak labels'),
+                        ),
+                        PopupMenuDivider(),
+                        PopupMenuItem(
+                          key: Key('menu-subtitle'),
+                          value: 'subtitle',
+                          child: Text('Subtitle at the playhead'),
+                        ),
+                        PopupMenuItem(
+                          key: Key('menu-import-subtitles'),
+                          value: 'import-subtitles',
+                          child: Text('Import subtitles (.srt, .vtt)…'),
+                        ),
+                        PopupMenuItem(
+                          key: Key('menu-download-subtitles'),
+                          value: 'download-subtitles',
+                          child: Text('Download subtitles (.srt)'),
                         ),
                       ],
                     ),

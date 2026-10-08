@@ -19,3 +19,15 @@ Future<void> openDownload(String url) async {
   a.click();
   a.remove();
 }
+
+/// Saves text made in the app (no server file behind it) as a download
+/// called [name].
+Future<void> saveTextFile(String name, String text) async {
+  final a = web.HTMLAnchorElement()
+    ..href = 'data:text/plain;charset=utf-8,${Uri.encodeComponent(text)}'
+    ..download = name
+    ..style.display = 'none';
+  web.document.body!.append(a);
+  a.click();
+  a.remove();
+}

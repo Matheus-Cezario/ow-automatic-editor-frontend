@@ -9,3 +9,9 @@ Future<void> openDownload(String url) async {
   );
   if (!ok) throw Exception('the system refused to open $url');
 }
+
+/// Text made in the app has no URL to open off the web; the editor is a web
+/// app, and this path only exists so the code compiles elsewhere.
+Future<void> saveTextFile(String name, String text) async {
+  throw UnsupportedError('saving $name works in the browser');
+}
