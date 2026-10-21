@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../stage_text.dart';
-import '../main.dart' show PhoneWidth;
 import '../widgets/download.dart';
 import '../widgets/highlight_style.dart';
 import '../widgets/render_queue.dart';
@@ -82,6 +81,13 @@ class _JobsScreenState extends State<JobsScreen> {
       appBar: AppBar(
         title: const Text('Matches'),
         actions: [
+          FilledButton.icon(
+            onPressed: _newJob,
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+            icon: const Icon(Icons.add),
+            label: const Text('New match'),
+          ),
+          const SizedBox(width: 4),
           RenderQueueButton(
             load: _api.renderQueue,
             cancel: _api.cancelRender,
@@ -96,12 +102,7 @@ class _JobsScreenState extends State<JobsScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _newJob,
-        icon: const Icon(Icons.add),
-        label: const Text('New match'),
-      ),
-      body: PhoneWidth(child: _body()),
+      body: _body(),
     );
   }
 
@@ -116,8 +117,14 @@ class _JobsScreenState extends State<JobsScreen> {
 
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
+      child: GridView.builder(
+        padding: const EdgeInsets.all(16),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 340,
+          mainAxisSpacing: 14,
+          crossAxisSpacing: 14,
+          childAspectRatio: 1.15,
+        ),
         itemCount: _jobs!.length,
         itemBuilder: (_, i) => _JobCard(
           job: _jobs![i],
@@ -162,107 +169,125 @@ class _JobCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Expanded(
-                    child: Text(
-                      job.videoName,
-                      style: theme.textTheme.titleMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                  ColoredBox(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: job.isReady
+                        ? Image.network(
+                            frameUrl(job.id, job.durationS * 0.1),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _thumbFallback(theme),
+                          )
+                        : _thumbFallback(theme),
+                  ),
+                  Positioned(top: 8, left: 8, child: _StatusChip(job: job)),
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: PopupMenuButton<String>(
+                      onSelected: (v) {
+                        if (v == 'zip' && job.zipUrl != null) {
+                          downloadFile(context, job.zipUrl!);
+                        } else if (v == 'del') {
+                          onDelete();
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        if (job.zipUrl != null)
+                          const PopupMenuItem(
+                            value: 'zip',
+                            child: Text('Download all (.zip)'),
+                          ),
+                        const PopupMenuItem(
+                          value: 'del',
+                          child: Text('Delete'),
+                        ),
+                      ],
                     ),
                   ),
-                  _StatusChip(job: job),
-                  PopupMenuButton<String>(
-                    onSelected: (v) {
-                      if (v == 'zip' && job.zipUrl != null) {
-                        downloadFile(context, job.zipUrl!);
-                      } else if (v == 'del') {
-                        onDelete();
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      if (job.zipUrl != null)
-                        const PopupMenuItem(
-                          value: 'zip',
-                          child: Text('Download all (.zip)'),
+                  if (job.isReady)
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
                         ),
-                      const PopupMenuItem(value: 'del', child: Text('Delete')),
-                    ],
-                  ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          formatDuration(job.durationS),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(
-                jobStageText(job),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.hintColor,
-                ),
-              ),
-              if (job.isAnalyzing) ...[
-                const SizedBox(height: 10),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: job.progress > 0 ? job.progress : null,
-                    minHeight: 6,
-                  ),
-                ),
-                if (formatRemaining(job.remaining) case final missing?) ...[
-                  const SizedBox(height: 6),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    '${(job.progress * 100).toStringAsFixed(0)}% · $missing left',
+                    job.videoName,
+                    style: theme.textTheme.titleSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    jobStageText(job),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.hintColor,
                     ),
                   ),
-                ],
-              ],
-              if (job.isFailed && job.error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  job.error!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-              ],
-              if (job.isReady) ...[
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Icon(Icons.movie_filter, size: 16, color: theme.hintColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      job.nClips > 0
-                          ? '${job.nClips} video(s) generated'
-                          : 'ready to edit',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    const SizedBox(width: 14),
-                    Icon(Icons.schedule, size: 16, color: theme.hintColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      formatDuration(job.durationS),
-                      style: theme.textTheme.bodySmall,
+                  if (job.isAnalyzing) ...[
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: job.progress > 0 ? job.progress : null,
+                        minHeight: 6,
+                      ),
                     ),
                   ],
-                ),
-              ],
-            ],
-          ),
+                  if (job.isFailed && job.error != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      job.error!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+
+  Widget _thumbFallback(ThemeData theme) =>
+      Center(child: Icon(Icons.movie, size: 40, color: theme.hintColor));
 }
 
 class _StatusChip extends StatelessWidget {
@@ -353,10 +378,7 @@ class _ErrorState extends StatelessWidget {
           children: [
             Icon(Icons.cloud_off, size: 48, color: theme.colorScheme.error),
             const SizedBox(height: 14),
-            Text(
-              'Could not reach the API',
-              style: theme.textTheme.titleMedium,
-            ),
+            Text('Could not reach the API', style: theme.textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
               message,

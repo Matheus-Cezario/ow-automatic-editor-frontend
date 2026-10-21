@@ -236,6 +236,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Monitor height, draggable by the handle below it.
   double _monitorH = 200;
 
+  /// Until the user drags the height handle, the monitor takes whatever the
+  /// wide layout leaves free above the ruler.
+  bool _monitorAuto = true;
+
   /// Autosave state, so the screen can say the work is saved.
   /// The montages of this match, and which one is on screen.
   ///
@@ -332,39 +336,40 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// black and reload on the way.
   Widget _monitorView() => KeyedSubtree(
     key: _monitorKey,
-    child: _withExact(PreviewPlayer(
-                // the proxy when there is one; for old matches, the recording
-                videoUrl: widget.job.monitorUrl,
-                otherMatches: _otherMonitorUrls,
-                layers: _state.layers,
-                cuts: _state.visibleClips,
-                library: {for (final m in _library) m.id: m},
-                export: _state.export,
-                aspectRatio: frameAspect(
-                  _state.export,
-                  width: widget.job.width,
-                  height: widget.job.height,
-                ),
-                atS: _cursor,
-                playing: _playing,
-                // the text is drawn over the picture, and dragging it there is
-                // how you decide where it goes: the alternative was typing two
-                // numbers and rendering the video to check
-                texts: _visibleTexts,
-                selectionIds: _state.selectionIds,
-                onSelectText: _select,
-                onMoveText: (id, x, y) =>
-                    _edit(positionOnFrame(_state, id, x: x, y: y)),
-                onDragging: (t) => setState(() => _dragLabel = t),
-                editingId: _editingTextId,
-                onEditing: _typeOnFrame,
-                onTextChanged: (id, v) =>
-                    _edit(changeText(_state, id, textValue: v)),
-                onGestureStart: _history.startGesture,
-                onGestureEnd: _history.endGesture,
-                fontFamily: _fonts.familyFor,
-                guides: _guides,
-              )),
+    child: _withExact(
+      PreviewPlayer(
+        // the proxy when there is one; for old matches, the recording
+        videoUrl: widget.job.monitorUrl,
+        otherMatches: _otherMonitorUrls,
+        layers: _state.layers,
+        cuts: _state.visibleClips,
+        library: {for (final m in _library) m.id: m},
+        export: _state.export,
+        aspectRatio: frameAspect(
+          _state.export,
+          width: widget.job.width,
+          height: widget.job.height,
+        ),
+        atS: _cursor,
+        playing: _playing,
+        // the text is drawn over the picture, and dragging it there is
+        // how you decide where it goes: the alternative was typing two
+        // numbers and rendering the video to check
+        texts: _visibleTexts,
+        selectionIds: _state.selectionIds,
+        onSelectText: _select,
+        onMoveText: (id, x, y) =>
+            _edit(positionOnFrame(_state, id, x: x, y: y)),
+        onDragging: (t) => setState(() => _dragLabel = t),
+        editingId: _editingTextId,
+        onEditing: _typeOnFrame,
+        onTextChanged: (id, v) => _edit(changeText(_state, id, textValue: v)),
+        onGestureStart: _history.startGesture,
+        onGestureEnd: _history.endGesture,
+        fontFamily: _fonts.familyFor,
+        guides: _guides,
+      ),
+    ),
   );
 
   /// In the monitor's corner: the in/out range, looping and full screen —
@@ -405,7 +410,10 @@ class _TimelineScreenState extends State<TimelineScreen>
             isSelected: _loop,
             onPressed: () => setState(() => _loop = !_loop),
             icon: const Icon(Icons.repeat),
-            selectedIcon: Icon(Icons.repeat_on, color: theme.colorScheme.primary),
+            selectedIcon: Icon(
+              Icons.repeat_on,
+              color: theme.colorScheme.primary,
+            ),
           ),
           PopupMenuButton<MonitorGuide>(
             key: const Key('guides'),
@@ -497,7 +505,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                   Expanded(
                     child: Slider(
                       value: _cursor
-                          .clamp(0.0, math.max(0.001, videoDuration(_state.clips)))
+                          .clamp(
+                            0.0,
+                            math.max(0.001, videoDuration(_state.clips)),
+                          )
                           .toDouble(),
                       max: math.max(0.001, videoDuration(_state.clips)),
                       onChanged: (v) => _goTo(v, reveal: false),
@@ -696,12 +707,8 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// What the magnet pulls the clip [id] toward: beats, the other clips'
   /// edges and the playhead.
-  List<double> _magnetFor(String id) => magnetPoints(
-    _state,
-    moving: {id},
-    beats: _beats,
-    playheadS: _cursor,
-  );
+  List<double> _magnetFor(String id) =>
+      magnetPoints(_state, moving: {id}, beats: _beats, playheadS: _cursor);
 
   /// After a snapping gesture, the guide line at the edge or playhead the
   /// clip stuck to — while the gesture lasts.
@@ -739,9 +746,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
       snap: _magnet,
     );
-    final first = _state.selectedClips
-        .map((c) => c.atS)
-        .reduce(math.min);
+    final first = _state.selectedClips.map((c) => c.atS).reduce(math.min);
     final delta = math.max(landing - clip.atS, -first);
     if (delta.abs() < 1e-9) return;
     _edit(moveSelection(_state, delta, beats: const [], snap: false));
@@ -786,7 +791,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       return;
     }
     _edit(ramped);
-    _notify('Ramped: full speed in, slow motion through the play, full speed out.');
+    _notify(
+      'Ramped: full speed in, slow motion through the play, full speed out.',
+    );
   }
 
   /// The playhead in seconds from the clip's start.
@@ -821,9 +828,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       blend: clip.blend,
       chroma: clip.chroma,
       overSomething: overSomething,
-      onChanged: (blend, chroma) => _edit(
-        setBlendKey(_state, id, blend: blend, chroma: chroma),
-      ),
+      onChanged: (blend, chroma) =>
+          _edit(setBlendKey(_state, id, blend: blend, chroma: chroma)),
       onGestureStart: _history.startGesture,
       onGestureEnd: _history.endGesture,
     );
@@ -870,11 +876,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       clip: clip,
       props: props,
       localS: _localIn(id),
-      onSet: (p, v) =>
-          _edit(setMotion(_state, id, p, v, localS: _localIn(id))),
-      onAnimate: (p, on) => _edit(
-        animateMotion(_state, id, p, on: on, localS: _localIn(id)),
-      ),
+      onSet: (p, v) => _edit(setMotion(_state, id, p, v, localS: _localIn(id))),
+      onAnimate: (p, on) =>
+          _edit(animateMotion(_state, id, p, on: on, localS: _localIn(id))),
       onRemoveKey: (p) =>
           _edit(removeMotionKey(_state, id, p, localS: _localIn(id))),
       onEase: (p, e) =>
@@ -893,7 +897,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// guess when only one exists.
   void _addText(String contents) {
     var updated = _state;
-    if (_pictureLayers(updated) == 1) updated = addLayer(updated, displayName: 'Text');
+    if (_pictureLayers(updated) == 1)
+      updated = addLayer(updated, displayName: 'Text');
     _edit(
       addClip(
         updated,
@@ -1020,10 +1025,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _importError = null;
     });
     try {
-      final sent = await _api.uploadMedia(
-        jobId: widget.job.id,
-        file: picked,
-      );
+      final sent = await _api.uploadMedia(jobId: widget.job.id, file: picked);
       final ready = await _api.waitForMedia(sent.id);
       if (!mounted) return;
       setState(() {
@@ -1063,7 +1065,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       return;
     }
     var base = _state;
-    if (layerIndex != null && layerIndex >= 0 && layerIndex < base.layers.length) {
+    if (layerIndex != null &&
+        layerIndex >= 0 &&
+        layerIndex < base.layers.length) {
       if (base.layers[layerIndex].isAudio) {
         _notify('This is a sound layer: pictures do not go in it.');
         return;
@@ -1333,7 +1337,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// gesture of snapping the kill to the beat without counting the run-up.
   void _alignMomentToCursor([String? id]) {
     final target =
-        id ?? (_state.selectionIds.length == 1 ? _state.selectionIds.first : null);
+        id ??
+        (_state.selectionIds.length == 1 ? _state.selectionIds.first : null);
     if (target == null) {
       _notify('Pick a block to align its play.');
       return;
@@ -1386,7 +1391,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// Takes the effects of [id] — or of the one selected clip.
   void _copyEffects([String? id]) {
-    final from = id ?? (_state.selectionIds.length == 1 ? _state.selectionIds.first : null);
+    final from =
+        id ??
+        (_state.selectionIds.length == 1 ? _state.selectionIds.first : null);
     final clip = from == null ? null : _state.clipItem(from);
     if (clip == null) {
       _notify('Select one clip to copy its effects.');
@@ -1572,8 +1579,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _recordingSOf(_state.clipItem(id)?.jobId);
 
   Map<String, String> get _otherMonitorUrls => {
-    for (final e in _matches.entries)
-      e.key: ?e.value.monitorUrl,
+    for (final e in _matches.entries) e.key: ?e.value.monitorUrl,
   };
 
   Map<String, (List<double>, double)> get _otherWaves => {
@@ -1854,9 +1860,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   ];
 
   /// Does the montage have music? It decides whether the mix has anything to balance.
-  bool get _hasMusic => _state.layers.any(
-    (l) => l.isAudio && l.clips.any((c) => c.isMusic),
-  );
+  bool get _hasMusic =>
+      _state.layers.any((l) => l.isAudio && l.clips.any((c) => c.isMusic));
 
   /// What was dropped on the timeline, and where.
   ///
@@ -1916,11 +1921,15 @@ class _TimelineScreenState extends State<TimelineScreen>
         layerIndex >= 0 &&
         layerIndex < _state.layers.length &&
         _state.layers[layerIndex].isAudio) {
-      _notify('This is a sound layer: a cut of the recording does not go in it.');
+      _notify(
+        'This is a sound layer: a cut of the recording does not go in it.',
+      );
       return;
     }
     var base = _state;
-    if (layerIndex != null && layerIndex >= 0 && layerIndex < base.layers.length) {
+    if (layerIndex != null &&
+        layerIndex >= 0 &&
+        layerIndex < base.layers.length) {
       base = base.copyWith(activeLayer: layerIndex);
     }
     _edit(
@@ -2014,7 +2023,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     setState(() {
       if (loop != null) {
         // looping a stretch starts in it
-        if (_cursor < loop.from || _cursor >= loop.to - 0.05) _cursor = loop.from;
+        if (_cursor < loop.from || _cursor >= loop.to - 0.05)
+          _cursor = loop.from;
       } else if (_cursor >= endTime - 0.05) {
         _cursor = 0;
       }
@@ -2196,10 +2206,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       final nowS = c.value.position.inMilliseconds / 1000.0;
       // the montage's music volume, and the dip at each play, so ducking is
       // heard while editing — the player cannot go above full
-      final duck = math.max(
-        _state.duckPlays ? duckAt(playTimes(_state.layers), _cursor) : 0.0,
-        voiceDipAt(voiceSpans(_state.layers), _cursor),
-      ) * (1 - _state.duckLevel);
+      final duck =
+          math.max(
+            _state.duckPlays ? duckAt(playTimes(_state.layers), _cursor) : 0.0,
+            voiceDipAt(voiceSpans(_state.layers), _cursor),
+          ) *
+          (1 - _state.duckLevel);
       // and the block's own volume — its line on the ruler — and fades; the
       // player cannot go above full, so a boost past 100% is only heard in
       // the render
@@ -2525,7 +2537,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     _debounce?.cancel();
     try {
       await _api.deleteMontage(widget.job.id, present.id);
-      final remainingOnes = [..._montages]..removeWhere((m) => m.id == present.id);
+      final remainingOnes = [..._montages]
+        ..removeWhere((m) => m.id == present.id);
       if (!mounted) return;
       setState(() {
         _montages = remainingOnes;
@@ -2605,7 +2618,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
       if (!mounted) return;
       _notify(
-        happened ? 'Version marked.' : 'Nothing changed since the last marked version.',
+        happened
+            ? 'Version marked.'
+            : 'Nothing changed since the last marked version.',
       );
       await _reloadMontages();
     } catch (e) {
@@ -3052,147 +3067,151 @@ class _TimelineScreenState extends State<TimelineScreen>
         child: Stack(
           children: [
             Scaffold(
-          appBar: AppBar(
-            title: _MontagePicker(
-              displayName: _montageName,
-              montageList: _montages,
-              present: _montageId,
-              onOpen: _open,
-              onNew: _newMontage,
-            ),
-            actions: [
-              _DraftStatus(
-                saving: _saving,
-                savedAt: _savedAt,
-                err: _saveError,
-                onRetry: _save,
-                compact: _phone,
+              appBar: AppBar(
+                title: _MontagePicker(
+                  displayName: _montageName,
+                  montageList: _montages,
+                  present: _montageId,
+                  onOpen: _open,
+                  onNew: _newMontage,
+                ),
+                actions: [
+                  _DraftStatus(
+                    saving: _saving,
+                    savedAt: _savedAt,
+                    err: _saveError,
+                    onRetry: _save,
+                    compact: _phone,
+                  ),
+                  IconButton(
+                    tooltip: 'Undo (Ctrl+Z)',
+                    onPressed: _history.canUndo ? _undo : null,
+                    icon: const Icon(Icons.undo),
+                  ),
+                  IconButton(
+                    tooltip: 'Redo (Ctrl+Shift+Z)',
+                    onPressed: _history.canRedo ? _redo : null,
+                    icon: const Icon(Icons.redo),
+                  ),
+                  if (!_phone) ...[
+                    IconButton(
+                      tooltip: _magnet
+                          ? 'magnet on: snaps to the beat, clip edges and the playhead'
+                          : 'magnet off',
+                      onPressed: () => setState(() => _magnet = !_magnet),
+                      icon: Icon(_magnet ? Icons.grid_on : Icons.grid_off),
+                    ),
+                    IconButton(
+                      key: const Key('insert-mode'),
+                      tooltip: _insert
+                          ? 'insert mode: new clips push the others right'
+                          : 'overwrite-free mode: new clips go to a free spot',
+                      isSelected: _insert,
+                      onPressed: () => setState(() => _insert = !_insert),
+                      icon: const Icon(Icons.keyboard_tab),
+                      selectedIcon: const Icon(
+                        Icons.keyboard_tab,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ],
+                  PopupMenuButton<String>(
+                    key: const Key('screen-menu'),
+                    onSelected: (v) {
+                      if (v == 'discard') _deleteMontage();
+                      if (v == 'shortcuts') _showShortcuts();
+                      if (v == 'rename') _renameMontage();
+                      if (v == 'duplicate') _duplicateMontage();
+                      if (v == 'mark') _markVersion();
+                      if (v == 'history') _showHistory();
+                      if (v == 'apply-preset') _applyPreset();
+                      if (v == 'apply-style') _applyPreset(styleOnly: true);
+                      if (v == 'save-preset') _savePreset();
+                      if (v == 'magnet') setState(() => _magnet = !_magnet);
+                      if (v == 'insert') setState(() => _insert = !_insert);
+                    },
+                    itemBuilder: (_) => [
+                      // on a phone the two switches of the top bar live here
+                      if (_phone) ...[
+                        CheckedPopupMenuItem(
+                          key: const Key('menu-magnet'),
+                          value: 'magnet',
+                          checked: _magnet,
+                          child: const Text('Magnet'),
+                        ),
+                        CheckedPopupMenuItem(
+                          key: const Key('menu-insert'),
+                          value: 'insert',
+                          checked: _insert,
+                          child: const Text('Insert mode'),
+                        ),
+                        const PopupMenuDivider(),
+                      ],
+                      const PopupMenuItem(
+                        value: 'rename',
+                        child: Text('Rename'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'duplicate',
+                        child: Text('Duplicate this montage'),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'apply-preset',
+                        child: Text('Apply template…'),
+                      ),
+                      const PopupMenuItem(
+                        key: Key('apply-style'),
+                        value: 'apply-style',
+                        child: Text('Apply template style…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'save-preset',
+                        child: Text('Save as template…'),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'mark',
+                        child: Text('Mark this version'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'history',
+                        child: Text('Version history…'),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'shortcuts',
+                        child: Text('Keyboard shortcuts'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'discard',
+                        child: Text('Delete this montage'),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              IconButton(
-                tooltip: 'Undo (Ctrl+Z)',
-                onPressed: _history.canUndo ? _undo : null,
-                icon: const Icon(Icons.undo),
-              ),
-              IconButton(
-                tooltip: 'Redo (Ctrl+Shift+Z)',
-                onPressed: _history.canRedo ? _redo : null,
-                icon: const Icon(Icons.redo),
-              ),
-              if (!_phone) ...[
-              IconButton(
-                tooltip: _magnet
-                    ? 'magnet on: snaps to the beat, clip edges and the playhead'
-                    : 'magnet off',
-                onPressed: () => setState(() => _magnet = !_magnet),
-                icon: Icon(_magnet ? Icons.grid_on : Icons.grid_off),
-              ),
-              IconButton(
-                key: const Key('insert-mode'),
-                tooltip: _insert
-                    ? 'insert mode: new clips push the others right'
-                    : 'overwrite-free mode: new clips go to a free spot',
-                isSelected: _insert,
-                onPressed: () => setState(() => _insert = !_insert),
-                icon: const Icon(Icons.keyboard_tab),
-                selectedIcon: const Icon(Icons.keyboard_tab, color: Colors.orange),
-              ),
-              ],
-              PopupMenuButton<String>(
-                key: const Key('screen-menu'),
-                onSelected: (v) {
-                  if (v == 'discard') _deleteMontage();
-                  if (v == 'shortcuts') _showShortcuts();
-                  if (v == 'rename') _renameMontage();
-                  if (v == 'duplicate') _duplicateMontage();
-                  if (v == 'mark') _markVersion();
-                  if (v == 'history') _showHistory();
-                  if (v == 'apply-preset') _applyPreset();
-                  if (v == 'apply-style') _applyPreset(styleOnly: true);
-                  if (v == 'save-preset') _savePreset();
-                  if (v == 'magnet') setState(() => _magnet = !_magnet);
-                  if (v == 'insert') setState(() => _insert = !_insert);
+              body: LayoutBuilder(
+                builder: (context, bounds) {
+                  final sidebarFits = bounds.maxWidth >= _editorWidth;
+                  if (!sidebarFits) {
+                    return _main(tabs: true);
+                  }
+                  final aside = bounds.maxWidth >= _settingsAsideWidth;
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(width: 300, child: _sidebar()),
+                      const VerticalDivider(width: 1),
+                      Expanded(child: _main(settingsAside: aside)),
+                      if (aside) ...[
+                        const VerticalDivider(width: 1),
+                        _settingsSidebar(),
+                      ],
+                    ],
+                  );
                 },
-                itemBuilder: (_) => [
-                  // on a phone the two switches of the top bar live here
-                  if (_phone) ...[
-                    CheckedPopupMenuItem(
-                      key: const Key('menu-magnet'),
-                      value: 'magnet',
-                      checked: _magnet,
-                      child: const Text('Magnet'),
-                    ),
-                    CheckedPopupMenuItem(
-                      key: const Key('menu-insert'),
-                      value: 'insert',
-                      checked: _insert,
-                      child: const Text('Insert mode'),
-                    ),
-                    const PopupMenuDivider(),
-                  ],
-                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                  const PopupMenuItem(
-                    value: 'duplicate',
-                    child: Text('Duplicate this montage'),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(
-                    value: 'apply-preset',
-                    child: Text('Apply template…'),
-                  ),
-                  const PopupMenuItem(
-                    key: Key('apply-style'),
-                    value: 'apply-style',
-                    child: Text('Apply template style…'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'save-preset',
-                    child: Text('Save as template…'),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(
-                    value: 'mark',
-                    child: Text('Mark this version'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'history',
-                    child: Text('Version history…'),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(
-                    value: 'shortcuts',
-                    child: Text('Keyboard shortcuts'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'discard',
-                    child: Text('Delete this montage'),
-                  ),
-                ],
               ),
-            ],
-          ),
-          body: LayoutBuilder(
-            builder: (context, bounds) {
-              final sidebarFits = bounds.maxWidth >= _editorWidth;
-              if (!sidebarFits) {
-                return _main(tabs: true);
-              }
-              final aside = bounds.maxWidth >= _settingsAsideWidth;
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(width: 300, child: _sidebar()),
-                  const VerticalDivider(width: 1),
-                  Expanded(
-                    child: _main(settingsAside: aside),
-                  ),
-                  if (aside) ...[
-                    const VerticalDivider(width: 1),
-                    _settingsSidebar(),
-                  ],
-                ],
-              );
-            },
-          ),
             ),
             // the monitor over everything; the editor stays built underneath,
             // so leaving full screen is instant
@@ -3421,11 +3440,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       onBeat: _beats.isEmpty || selected.isEmpty
           ? null
           : () {
-              final (s, moved) = landOnBeats(
-                _state,
-                {for (final c in selected) c.id},
-                _beats,
-              );
+              final (s, moved) = landOnBeats(_state, {
+                for (final c in selected) c.id,
+              }, _beats);
               _edit(s);
               _notify(
                 moved == selected.length
@@ -3506,9 +3523,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       docked: docked,
       onAdd: _add,
       onMenu: _momentMenu,
-      picker: _otherMatchList?.isNotEmpty ?? false
-          ? _matchPicker(from)
-          : null,
+      picker: _otherMatchList?.isNotEmpty ?? false ? _matchPicker(from) : null,
     );
   }
 
@@ -3557,9 +3572,8 @@ class _TimelineScreenState extends State<TimelineScreen>
             onZoom: (v) => _effect(selectionIds.first, zoom: v),
             onFreeze: (v) => _effect(selectionIds.first, freeze: v),
             onReverse: (v) => _effect(selectionIds.first, reverse: v),
-            onWhole: (v) => _edit(
-              setFit(_state, selectionIds.first, v ? 'contain' : null),
-            ),
+            onWhole: (v) =>
+                _edit(setFit(_state, selectionIds.first, v ? 'contain' : null)),
             onStyle: (v) =>
                 _edit(changeText(_state, selectionIds.first, styleSpec: v)),
             onTypeOnFrame: () => _typeOnFrame(selectionIds.first),
@@ -3598,9 +3612,8 @@ class _TimelineScreenState extends State<TimelineScreen>
             musicVolume: _state.musicVolume,
             gameVolume: _state.gameVolume,
             hasMusic: true,
-            onChange: (music, game) => _edit(
-              _state.copyWith(musicVolume: music, gameVolume: game),
-            ),
+            onChange: (music, game) =>
+                _edit(_state.copyWith(musicVolume: music, gameVolume: game)),
             duckPlays: _state.duckPlays,
             duckLevel: _state.duckLevel,
             plays: playTimes(_state.layers).length,
@@ -3734,10 +3747,29 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
     ];
-
   }
 
-  Widget _main({bool tabs = false, bool settingsAside = false}) {
+  Widget _main({
+    bool tabs = false,
+    bool settingsAside = false,
+    double? monitorHeight,
+    double? monitorMax,
+  }) {
+    if (settingsAside && monitorMax == null) {
+      return LayoutBuilder(
+        builder: (context, box) {
+          // The monitor starts at 70% of the height; the transport and the
+          // layers share the rest, and the layers scroll inside it.
+          final room = math.max(120.0, box.maxHeight - 8 - 16 - 120.0 - 60);
+          final auto = math.min(box.maxHeight * 0.7, room);
+          return _main(
+            settingsAside: true,
+            monitorMax: room,
+            monitorHeight: _monitorAuto ? auto : null,
+          );
+        },
+      );
+    }
     final theme = Theme.of(context);
     final selectionIds = _state.selectionIds;
 
@@ -3747,12 +3779,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     //
     // In a short window the pinned part would take the whole screen: past 70%
     // of the height it scrolls by itself, and the panels stay within reach.
-    final pinned = <Widget>[
+    final head = <Widget>[
       const SizedBox(height: 8),
       // ── the monitor, with the height handle ─────────────────────────────
       if (widget.job.monitorUrl != null) ...[
         SizedBox(
-          height: _monitorH,
+          height: monitorHeight ?? _monitorH,
           child: Stack(
             children: [
               Positioned.fill(
@@ -3763,7 +3795,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                         ? const SizedBox.shrink()
                         : Semantics(
                             image: true,
-                            label: 'Monitor: the montage at '
+                            label:
+                                'Monitor: the montage at '
                                 '${formatClock(_cursor)}',
                             child: _monitorView(),
                           ),
@@ -3776,8 +3809,14 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
         _HeightHandle(
           key: const Key('monitor-handle'),
-          onDrag: (dy) =>
-              setState(() => _monitorH = (_monitorH + dy).clamp(120.0, 560.0)),
+          onDrag: (dy) => setState(() {
+            // a drag hands the height to the user for good
+            _monitorH = ((monitorHeight ?? _monitorH) + dy).clamp(
+              120.0,
+              monitorMax ?? 560.0,
+            );
+            _monitorAuto = false;
+          }),
         ),
       ],
 
@@ -3862,10 +3901,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                         _ => null,
                       },
                       itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'free',
-                          child: Text('Free text'),
-                        ),
+                        PopupMenuItem(value: 'free', child: Text('Free text')),
                         PopupMenuDivider(),
                         PopupMenuItem(
                           value: 'counter',
@@ -3936,9 +3972,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                           ? 'Remove the active layer'
                           : 'The last layer cannot be removed',
                       onPressed: _state.layers.length > 1
-                          ? () => _edit(
-                              removeLayer(_state, _state.activeLayer),
-                            )
+                          ? () => _edit(removeLayer(_state, _state.activeLayer))
                           : null,
                       icon: const Icon(Icons.layers_clear_outlined),
                     ),
@@ -3977,7 +4011,9 @@ class _TimelineScreenState extends State<TimelineScreen>
           ],
         ),
       ),
+    ];
 
+    final rulerPart = <Widget>[
       // ── the music ruler with the blocks ─────────────────────────────────
       // the ruler is drawn: for a screen reader it is this sentence, with
       // each cut inside it as a button of its own
@@ -4036,9 +4072,9 @@ class _TimelineScreenState extends State<TimelineScreen>
               selectionIds: add ? {..._state.selectionIds, ...ids} : ids,
             ),
           ),
-          onActiveLayer: (i) => _withoutHistory(_state.copyWith(activeLayer: i)),
-          onReorderLayers: (from, to) =>
-              _edit(reorderLayers(_state, from, to)),
+          onActiveLayer: (i) =>
+              _withoutHistory(_state.copyWith(activeLayer: i)),
+          onReorderLayers: (from, to) => _edit(reorderLayers(_state, from, to)),
           onRenameLayer: (i, name) => _edit(adjustLayer(_state, i, name: name)),
           onRemoveLayer: (i) => _edit(removeLayer(_state, i)),
           markers: _state.markers,
@@ -4095,17 +4131,27 @@ class _TimelineScreenState extends State<TimelineScreen>
 
       const SizedBox(height: 4),
     ];
+    final pinned = [...head, ...rulerPart];
 
     final scrolling = _settingsChildren();
 
     // wide: the settings live in the sidebar on the right, and the monitor,
     // transport and ruler have the whole height
     if (settingsAside) {
-      return SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: pinned,
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ...head,
+          // the layers scroll on their own: tall montages never push the
+          // monitor or the transport out of view
+          Flexible(
+            child: SingleChildScrollView(
+              key: const Key('layers-scroll'),
+              child: rulerPart.first,
+            ),
+          ),
+          ...rulerPart.skip(1),
+        ],
       );
     }
 
@@ -4289,10 +4335,7 @@ class _BeatGrid extends StatelessWidget {
                 const Icon(Icons.straighten, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    'Beat grid',
-                    style: theme.textTheme.titleSmall,
-                  ),
+                  child: Text('Beat grid', style: theme.textTheme.titleSmall),
                 ),
                 Text(
                   '$howMany in the video',
@@ -4329,8 +4372,7 @@ class _BeatGrid extends StatelessWidget {
                     ButtonSegment(value: 2.0, label: Text('2×')),
                   ],
                   selected: {multiplier},
-                  onSelectionChanged: (v) =>
-                      onChange(offsetS, v.first, bar),
+                  onSelectionChanged: (v) => onChange(offsetS, v.first, bar),
                 ),
               ],
             ),
@@ -4364,10 +4406,8 @@ class _BeatGrid extends StatelessWidget {
                   ),
                 ),
                 _Step(
-                  onLess: () =>
-                      onChange(offsetS - 0.02, multiplier, bar),
-                  onMore: () =>
-                      onChange(offsetS + 0.02, multiplier, bar),
+                  onLess: () => onChange(offsetS - 0.02, multiplier, bar),
+                  onMore: () => onChange(offsetS + 0.02, multiplier, bar),
                   less: 'Beat grid earlier',
                   more: 'Beat grid later',
                 ),
@@ -4605,7 +4645,11 @@ class _SelectedBlock extends StatelessWidget {
               '${cut.durationS.toStringAsFixed(2)}s'
               // which point of the track this piece came from: it tells whether
               // the block took the chorus or the intro
-              '${sound ? '  ·  from ${formatClock(cut.startS)} of the ${cut.isSoundEffect ? 'effect' : cut.isVoice ? 'voice-over' : 'song'}' : ''}',
+              '${sound ? '  ·  from ${formatClock(cut.startS)} of the ${cut.isSoundEffect
+                        ? 'effect'
+                        : cut.isVoice
+                        ? 'voice-over'
+                        : 'song'}' : ''}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -5195,7 +5239,11 @@ class _MomentTile extends StatelessWidget {
 /// own when the editor asks. Instead of showing a final error, the frame
 /// retries a few times and shows up on its own.
 class _Frame extends StatefulWidget {
-  const _Frame({required this.url, required this.fillColour, required this.widthPx});
+  const _Frame({
+    required this.url,
+    required this.fillColour,
+    required this.widthPx,
+  });
 
   final String url;
   final Color fillColour;
@@ -5296,7 +5344,11 @@ class _DraftStatus extends StatelessWidget {
     if (saving && compact) {
       return Tooltip(
         message: 'saving…',
-        child: Icon(Icons.cloud_upload_outlined, size: 18, color: theme.hintColor),
+        child: Icon(
+          Icons.cloud_upload_outlined,
+          size: 18,
+          color: theme.hintColor,
+        ),
       );
     }
     if (saving) {
@@ -5507,7 +5559,10 @@ class _LibraryItem extends StatelessWidget {
             ? theme.colorScheme.primary
             : theme.colorScheme.secondary,
       ),
-      childWhenDragging: Opacity(opacity: 0.4, child: _card(context, theme, ready)),
+      childWhenDragging: Opacity(
+        opacity: 0.4,
+        child: _card(context, theme, ready),
+      ),
       child: _card(context, theme, ready),
     );
   }
@@ -5520,9 +5575,7 @@ class _LibraryItem extends StatelessWidget {
         onSecondaryTapDown: onMenu == null
             ? null
             : (d) => onMenu!(d.globalPosition),
-        onLongPress: onMenu == null
-            ? null
-            : () => onMenu!(_centreOf(context)),
+        onLongPress: onMenu == null ? null : () => onMenu!(_centreOf(context)),
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
@@ -6036,8 +6089,7 @@ class _ExportPanel extends StatelessWidget {
   final VoidCallback onExportSelection;
   final VoidCallback onExportAll;
 
-  double get _ratio =>
-      outputRatio(spec, widthPx: widthPx, heightPx: heightPx);
+  double get _ratio => outputRatio(spec, widthPx: widthPx, heightPx: heightPx);
 
   /// Does the output require cropping or bars? Only then does choosing between them matter.
   bool get _changesAspect {
@@ -6137,7 +6189,9 @@ class _ExportPanel extends StatelessWidget {
                   ),
                 ],
               ),
-            if (_changesAspect && spec.fit == 'cover' && spec.height > spec.width)
+            if (_changesAspect &&
+                spec.fit == 'cover' &&
+                spec.height > spec.width)
               _OptionRow(
                 textClip: 'Killfeed',
                 children: [
@@ -6189,8 +6243,7 @@ class _ExportPanel extends StatelessWidget {
                   ChoiceChip(
                     key: const Key('extra-fit-cover'),
                     label: const Text('Crop to the centre'),
-                    tooltip:
-                        'the crosshair is in the middle: so is the action',
+                    tooltip: 'the crosshair is in the middle: so is the action',
                     selected: spec.extraFit == 'cover',
                     onSelected: enabled
                         ? (_) => onChange(spec.copyWith(extraFit: 'cover'))
@@ -6233,7 +6286,8 @@ class _ExportPanel extends StatelessWidget {
                   ChoiceChip(
                     key: ValueKey('loudness-${lufs.round()}'),
                     label: Text('${lufs.round()} LUFS'),
-                    tooltip: '$where — the render brings the whole mix to '
+                    tooltip:
+                        '$where — the render brings the whole mix to '
                         'it, peaks under -1.5 dBTP',
                     selected: spec.loudness == lufs,
                     onSelected: enabled
@@ -6609,9 +6663,7 @@ class _ClipText extends StatelessWidget {
                       ? fonts!.defaultId
                       : styleSpec.font,
                   onChanged: (id) => onStyle(
-                    styleSpec.copyWith(
-                      font: id == fonts!.defaultId ? '' : id,
-                    ),
+                    styleSpec.copyWith(font: id == fonts!.defaultId ? '' : id),
                   ),
                   items: [
                     for (final f in fonts!.fonts)
