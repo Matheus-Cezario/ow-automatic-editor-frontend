@@ -982,6 +982,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     List<ZoomKey>? zoom,
     bool? freeze,
     bool? reverse,
+    bool? smooth,
   }) => _edit(
     adjustEffect(
       _state,
@@ -992,6 +993,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       zoom: zoom,
       freeze: freeze,
       reverse: reverse,
+      smooth: smooth,
     ),
   );
 
@@ -3572,6 +3574,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             onZoom: (v) => _effect(selectionIds.first, zoom: v),
             onFreeze: (v) => _effect(selectionIds.first, freeze: v),
             onReverse: (v) => _effect(selectionIds.first, reverse: v),
+            onSmooth: (v) => _effect(selectionIds.first, smooth: v),
             onWhole: (v) =>
                 _edit(setFit(_state, selectionIds.first, v ? 'contain' : null)),
             onStyle: (v) =>
@@ -4533,6 +4536,7 @@ class _SelectedBlock extends StatelessWidget {
     required this.onZoom,
     required this.onFreeze,
     required this.onReverse,
+    required this.onSmooth,
     required this.onStyle,
     required this.onTypeOnFrame,
     this.motion,
@@ -4574,6 +4578,7 @@ class _SelectedBlock extends StatelessWidget {
   final ValueChanged<List<ZoomKey>> onZoom;
   final ValueChanged<bool> onFreeze;
   final ValueChanged<bool> onReverse;
+  final ValueChanged<bool> onSmooth;
   final ValueChanged<ClipTextStyle> onStyle;
 
   /// Opens typing on the monitor, over the video.
@@ -4745,6 +4750,7 @@ class _SelectedBlock extends StatelessWidget {
                 onZoom: onZoom,
                 onFreeze: onFreeze,
                 onReverse: onReverse,
+                onSmooth: onSmooth,
                 onRamp: momentInVideo(cut) == null ? null : onRamp,
               ),
           ],
@@ -5681,6 +5687,7 @@ class _Effects extends StatelessWidget {
     required this.onZoom,
     required this.onFreeze,
     required this.onReverse,
+    required this.onSmooth,
     this.onRamp,
   });
 
@@ -5691,6 +5698,7 @@ class _Effects extends StatelessWidget {
   final ValueChanged<List<ZoomKey>> onZoom;
   final ValueChanged<bool> onFreeze;
   final ValueChanged<bool> onReverse;
+  final ValueChanged<bool> onSmooth;
 
   /// Full speed into the play, slow motion through it — `null` when the clip
   /// has no play to ramp around.
@@ -5704,7 +5712,8 @@ class _Effects extends StatelessWidget {
       (cut.fade.isNeutral ? 0 : 1) +
       (cut.zoom.isEmpty ? 0 : 1) +
       (cut.freeze ? 1 : 0) +
-      (cut.reverse ? 1 : 0);
+      (cut.reverse ? 1 : 0) +
+      (cut.smooth ? 1 : 0);
 
   @override
   Widget build(BuildContext context) {
@@ -5817,6 +5826,18 @@ class _Effects extends StatelessWidget {
                       '${cut.sourceConsumedS.toStringAsFixed(1)}s of recording',
             onChanged: onSpeed,
             onReset: cut.speed == 1 ? null : () => onSpeed(1),
+          ),
+        if (cut.speed < 1 || cut.isRamped || cut.smooth)
+          SwitchListTile(
+            key: const Key('smooth-slow-motion'),
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            value: cut.smooth,
+            onChanged: onSmooth,
+            title: const Text('Smooth slow motion'),
+            subtitle: const Text(
+              'fills in frames so it flows; slower to render, seen on export',
+            ),
           ),
         if (onRamp != null)
           Align(

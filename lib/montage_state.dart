@@ -996,6 +996,7 @@ MontageState adjustEffect(
   List<ZoomKey>? zoom,
   bool? freeze,
   bool? reverse,
+  bool? smooth,
 }) {
   final location = s.locate(id);
   if (location == null) return s;
@@ -1032,6 +1033,7 @@ MontageState adjustEffect(
       zoom: zoom,
       freeze: freeze ?? (willReverse ? false : willFreeze),
       reverse: reverse ?? (willFreeze ? false : willReverse),
+      smooth: smooth,
       keys: dropsRamp
           ? [
               for (final k in c.keys)
@@ -1370,6 +1372,7 @@ MontageState pasteEffects(MontageState s, Set<String> ids, TimelineClip from) {
         speed: from.speed,
         freeze: from.freeze,
         reverse: from.reverse,
+        smooth: from.smooth,
         audio: from.audio,
         textStyle: c.isText && from.isText ? from.textStyle : null,
         transition: tr?.copyWith(

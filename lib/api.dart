@@ -1084,6 +1084,7 @@ class TimelineClip {
     this.keys = const [],
     this.freeze = false,
     this.reverse = false,
+    this.smooth = false,
     this.text = '',
     this.textStyle = const ClipTextStyle(),
     this.transition,
@@ -1158,6 +1159,10 @@ class TimelineClip {
   /// Freezes instead of running. The duration is still the block's.
   final bool freeze;
   final bool reverse;
+
+  /// Slow motion filled in with interpolated frames (rendered by the server;
+  /// the monitor shows the plain slow motion).
+  final bool smooth;
 
   /// The name the user gave the clip — shown on the ruler, never drawn in
   /// the video.
@@ -1284,6 +1289,7 @@ class TimelineClip {
     List<ClipKey>? keys,
     bool? freeze,
     bool? reverse,
+    bool? smooth,
     String? text,
     ClipTextStyle? textStyle,
     ClipTransition? transition,
@@ -1313,6 +1319,7 @@ class TimelineClip {
     keys: keys ?? this.keys,
     freeze: freeze ?? this.freeze,
     reverse: reverse ?? this.reverse,
+    smooth: smooth ?? this.smooth,
     text: text ?? this.text,
     textStyle: textStyle ?? this.textStyle,
     transition: clearTransition ? null : transition ?? this.transition,
@@ -1362,6 +1369,7 @@ class TimelineClip {
     ],
     freeze: j['freeze'] as bool? ?? false,
     reverse: j['reverse'] as bool? ?? false,
+    smooth: j['smooth'] as bool? ?? false,
     text: j['text'] as String? ?? '',
     textStyle: ClipTextStyle.fromJson(
       (j['text_style'] as Map?)?.cast<String, dynamic>() ?? const {},
@@ -1394,6 +1402,7 @@ class TimelineClip {
     if (keys.isNotEmpty) 'keys': [for (final k in keys) k.toJson()],
     if (freeze) 'freeze': true,
     if (reverse) 'reverse': true,
+    if (smooth) 'smooth': true,
     if (isText) 'text': text,
     if (isText) 'text_style': textStyle.toJson(),
     if (transition != null) 'transition': transition!.toJsonFor(durationS),

@@ -124,6 +124,20 @@ void main() {
       expect(slow.clips.first.durationS, 2.0, reason: 'the block did not shrink');
     });
 
+    test('smooth slow motion is set, kept across other edits and serialised', () {
+      final s = stateWith([cut(0, 2, t: 10)]);
+      final id = s.clips.first.id;
+
+      final smooth = adjustEffect(adjustEffect(s, id, speed: 0.5), id, smooth: true);
+      final later = adjustEffect(smooth, id, speed: 0.4);
+
+      expect(smooth.clips.first.smooth, isTrue);
+      expect(later.clips.first.smooth, isTrue, reason: 'other edits keep it');
+      expect(smooth.clips.first.toJson()['smooth'], isTrue);
+      expect(s.clips.first.toJson().containsKey('smooth'), isFalse);
+      expect(adjustEffect(smooth, id, smooth: false).clips.first.smooth, isFalse);
+    });
+
     test('an absurd speed is clamped instead of refused by the server', () {
       final s = stateWith([cut(0, 1)]);
       final id = s.clips.first.id;
