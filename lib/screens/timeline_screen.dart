@@ -33,6 +33,7 @@ import '../monitor/frame.dart';
 import '../widgets/preview_player.dart';
 import '../widgets/shortcuts_dialog.dart';
 import '../widgets/blend_panel.dart';
+import '../widgets/crop_overlay.dart';
 import '../widgets/crop_panel.dart';
 import '../widgets/fx_panel.dart';
 import '../widgets/level_meter.dart';
@@ -208,6 +209,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// Framing guides over the monitor — see [MonitorGuide].
   Set<MonitorGuide> _guides = const {};
+
+  /// The crop window drawn over the monitor, for the selected picture clip.
+  bool _cropOnMonitor = false;
   final _monitorKey = GlobalKey(debugLabel: 'monitor');
   void Function()? _stopFullscreenWatch;
   bool _magnet = true;
@@ -368,9 +372,23 @@ class _TimelineScreenState extends State<TimelineScreen>
         onGestureEnd: _history.endGesture,
         fontFamily: _fonts.familyFor,
         guides: _guides,
+        overlay: _cropOverlay(),
       ),
     ),
   );
+
+  Widget? _cropOverlay() {
+    if (!_cropOnMonitor || _state.selectionIds.length != 1) return null;
+    final id = _state.selectionIds.first;
+    final clip = _state.clipItem(id);
+    if (clip == null || clip.isText || _isAudioClip(id)) return null;
+    return CropOverlay(
+      transform: clip.transform,
+      onChanged: (t) => _edit(setTransform(_state, id, t)),
+      onGestureStart: _history.startGesture,
+      onGestureEnd: _history.endGesture,
+    );
+  }
 
   /// In the monitor's corner: the in/out range, looping and full screen —
   /// how the picture is watched, next to the picture.
@@ -854,6 +872,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     final clip = _state.clipItem(id);
     if (clip == null || clip.isText || _isAudioClip(id)) return null;
     return CropPanel(
+      onMonitor: _cropOnMonitor,
+      onMonitorToggle: (on) => setState(() => _cropOnMonitor = on),
       transform: clip.transform,
       onChanged: (t) => _edit(setTransform(_state, id, t)),
       onGestureStart: _history.startGesture,

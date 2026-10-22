@@ -15,7 +15,14 @@ class CropPanel extends StatelessWidget {
     required this.onChanged,
     this.onGestureStart,
     this.onGestureEnd,
+    this.onMonitorToggle,
+    this.onMonitor = false,
   });
+
+  /// Draws the crop window on the monitor, to drag it there; `null` hides the
+  /// switch.
+  final ValueChanged<bool>? onMonitorToggle;
+  final bool onMonitor;
 
   final ClipTransform transform;
   final ValueChanged<ClipTransform> onChanged;
@@ -102,6 +109,17 @@ class CropPanel extends StatelessWidget {
         ],
       ),
       children: [
+        if (onMonitorToggle != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilterChip(
+              key: const Key('crop-on-monitor'),
+              avatar: const Icon(Icons.crop, size: 16),
+              label: const Text('Crop on the monitor'),
+              selected: onMonitor,
+              onSelected: onMonitorToggle,
+            ),
+          ),
         edge('Left', t.cropLeft, (v) => t.copyWith(cropLeft: v)),
         edge('Right', t.cropRight, (v) => t.copyWith(cropRight: v)),
         edge('Top', t.cropTop, (v) => t.copyWith(cropTop: v)),

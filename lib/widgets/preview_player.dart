@@ -62,7 +62,11 @@ class PreviewPlayer extends StatelessWidget {
     this.onGestureEnd,
     this.fontFamily,
     this.guides = const {},
+    this.overlay,
   });
+
+  /// Drawn over the picture and the text, taking the taps — the crop window.
+  final Widget? overlay;
 
   /// Framing guides drawn over the picture.
   final Set<MonitorGuide> guides;
@@ -249,6 +253,7 @@ class PreviewPlayer extends StatelessWidget {
                   onGestureStart: onGestureStart,
                   onGestureEnd: onGestureEnd,
                 ),
+            ?overlay,
           ],
         ),
       ),
