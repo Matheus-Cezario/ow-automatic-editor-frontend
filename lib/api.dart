@@ -189,12 +189,7 @@ class ClipTransform {
 
   /// The clip comes in as it came, with nothing on top.
   bool get isNeutral =>
-      scale == 1 &&
-      x == 0 &&
-      y == 0 &&
-      opacity == 1 &&
-      !hasCrop &&
-      !hasTurn;
+      scale == 1 && x == 0 && y == 0 && opacity == 1 && !hasCrop && !hasTurn;
 
   ClipTransform copyWith({
     double? scale,
@@ -381,10 +376,8 @@ enum Look {
   /// The name on the wire: `teal_orange`, not `tealOrange`.
   String get wire => this == tealOrange ? 'teal_orange' : name;
 
-  static Look fromWire(String? v) => Look.values.firstWhere(
-    (l) => l.wire == v,
-    orElse: () => Look.none,
-  );
+  static Look fromWire(String? v) =>
+      Look.values.firstWhere((l) => l.wire == v, orElse: () => Look.none);
 }
 
 /// The clip's visual effects; each is 0 (off) to 1 (full).
@@ -858,7 +851,13 @@ enum KeyProp {
   volume('volume', 'Volume', 0, 2, 1),
 
   /// Keyframed, a speed ramp.
-  speed('speed', 'Speed', 0.1, 4, 1);
+  speed('speed', 'Speed', 0.1, 4, 1),
+
+  /// Degrees; keyframed, the picture turns over time.
+  rotation('rotation', 'Rotation', -360, 360, 0),
+  brightness('brightness', 'Brightness', -1, 1, 0),
+  contrast('contrast', 'Contrast', 0, 3, 1),
+  saturation('saturation', 'Saturation', 0, 3, 1);
 
   const KeyProp(this.wire, this.label, this.min, this.max, this.neutral);
 
@@ -1150,11 +1149,10 @@ class TimelineClip {
   final List<ClipKey> keys;
 
   /// This property's keyframes, in time order.
-  List<ClipKey> keysFor(KeyProp prop) =>
-      [
-        for (final k in keys)
-          if (k.prop == prop) k,
-      ]..sort((a, b) => a.t.compareTo(b.t));
+  List<ClipKey> keysFor(KeyProp prop) => [
+    for (final k in keys)
+      if (k.prop == prop) k,
+  ]..sort((a, b) => a.t.compareTo(b.t));
 
   /// Freezes instead of running. The duration is still the block's.
   final bool freeze;
@@ -1349,9 +1347,7 @@ class TimelineClip {
     color: ClipColor.fromJson(
       (j['color'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
-    fx: ClipFx.fromJson(
-      (j['fx'] as Map?)?.cast<String, dynamic>() ?? const {},
-    ),
+    fx: ClipFx.fromJson((j['fx'] as Map?)?.cast<String, dynamic>() ?? const {}),
     blend: ClipBlend.fromWire(j['blend'] as String?),
     chroma: j['chroma'] is Map
         ? ChromaKey.fromJson((j['chroma'] as Map).cast<String, dynamic>())
@@ -1658,8 +1654,10 @@ class Sticker {
 class StickerColor {
   const StickerColor({required this.id, required this.hex});
 
-  factory StickerColor.fromJson(Map<String, dynamic> j) =>
-      StickerColor(id: j['id'] as String, hex: j['hex'] as String? ?? '#ffffff');
+  factory StickerColor.fromJson(Map<String, dynamic> j) => StickerColor(
+    id: j['id'] as String,
+    hex: j['hex'] as String? ?? '#ffffff',
+  );
 
   final String id;
   final String hex;
@@ -2920,7 +2918,10 @@ class ApiClient {
     required String fileName,
   }) async {
     final request =
-        http.MultipartRequest('POST', Uri.parse('$baseUrl/api/jobs/$jobId/media'))
+        http.MultipartRequest(
+            'POST',
+            Uri.parse('$baseUrl/api/jobs/$jobId/media'),
+          )
           ..fields['size'] = '${bytes.length}'
           ..fields['voice'] = 'true'
           ..files.add(

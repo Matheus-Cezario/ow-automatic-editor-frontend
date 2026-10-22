@@ -114,7 +114,8 @@ class FramePiece {
 
   /// The picture is enlarged a little while it shakes, so the edges never
   /// show — the server's margin.
-  double get shakeZoom => fx.shake > 0 || fx.impact > 0 ? 1 + 2 * kShakeMargin : 1;
+  double get shakeZoom =>
+      fx.shake > 0 || fx.impact > 0 ? 1 + 2 * kShakeMargin : 1;
 
   /// A dip's colour over the clip (`#000000` / `#ffffff`), if one is on.
   final String? veil;
@@ -344,14 +345,20 @@ FramePiece? _piece(
         ? fx.impact * math.exp(-kImpactDecay * (local - hit))
         : 0.0;
     final amount = math.min(1.0, fx.shake * 0.5 + burst);
-    shakeX = kShakeMargin * amount *
+    shakeX =
+        kShakeMargin *
+        amount *
         (0.6 * math.sin(local * 41.3) + 0.4 * math.sin(local * 23.1 + 1.7));
-    shakeY = kShakeMargin * amount *
-        (0.6 * math.sin(local * 37.9 + 0.6) + 0.4 * math.sin(local * 19.7 + 2.3));
+    shakeY =
+        kShakeMargin *
+        amount *
+        (0.6 * math.sin(local * 37.9 + 0.6) +
+            0.4 * math.sin(local * 19.7 + 2.3));
   }
   if (fx.impact > 0) {
     // the flash brightens towards white: on the monitor, a white veil
-    final flash = fx.impact *
+    final flash =
+        fx.impact *
         0.6 *
         math.max(0.0, 1 - (local - impactAt(clip)).abs() / kFlashS);
     if (flash > veilOpacity) {
@@ -372,7 +379,9 @@ FramePiece? _piece(
 
   // ── wipes, zoom, spin and glitch, on the server's `_entrance_chain` ──
   var scale = valueAt(clip, KeyProp.scale, local);
-  var turn = 0.0;
+  // a keyed rotation arrives as the difference from the static angle, which
+  // the picture adds on its own
+  var turn = valueAt(clip, KeyProp.rotation, local) - clip.transform.rotation;
   var wipe = (left: 0.0, top: 0.0, right: 0.0, bottom: 0.0);
   if (tr != null && tr.durationS > 0 && local < tr.durationS) {
     final p = (local / tr.durationS).clamp(0.0, 1.0);
@@ -415,9 +424,9 @@ FramePiece? _piece(
     wipe: wipe,
     offsetX: ox,
     offsetY: oy,
-    brightness: clip.color.brightness,
-    contrast: clip.color.contrast,
-    saturation: clip.color.saturation,
+    brightness: valueAt(clip, KeyProp.brightness, local),
+    contrast: valueAt(clip, KeyProp.contrast, local),
+    saturation: valueAt(clip, KeyProp.saturation, local),
     fit: clip.fit ?? fit,
     crop: clip.transform,
     fx: fx,
@@ -454,7 +463,8 @@ String? chromaMatrix(ChromaKey key) {
   final hex = key.color.replaceFirst('#', '');
   if (hex.length != 6) return null;
   final c = [
-    for (var i = 0; i < 6; i += 2) int.parse(hex.substring(i, i + 2), radix: 16) / 255,
+    for (var i = 0; i < 6; i += 2)
+      int.parse(hex.substring(i, i + 2), radix: 16) / 255,
   ];
   final mean = (c[0] + c[1] + c[2]) / 3;
   final d = [for (final v in c) v - mean];
@@ -473,7 +483,8 @@ String? chromaMatrix(ChromaKey key) {
 String? lookCss(Look look) => switch (look) {
   Look.none => null,
   Look.noir => 'grayscale(1) contrast(1.25) brightness(0.98)',
-  Look.tealOrange => 'sepia(0.2) hue-rotate(-12deg) saturate(1.25) contrast(1.05)',
+  Look.tealOrange =>
+    'sepia(0.2) hue-rotate(-12deg) saturate(1.25) contrast(1.05)',
   Look.warm => 'sepia(0.25) saturate(1.1)',
   Look.cold => 'hue-rotate(12deg) saturate(0.9) brightness(1.02)',
   Look.vivid => 'saturate(1.45) contrast(1.12)',

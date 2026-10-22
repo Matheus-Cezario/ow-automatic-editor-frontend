@@ -157,7 +157,11 @@ TimelineClip cutForMoment(
     jobId: event.jobId,
     atS: math.max(0, atS),
     durationS: durationValue,
-    startS: sourceStartFor(event.t, durationValue, sourceDurationS: sourceDurationS),
+    startS: sourceStartFor(
+      event.t,
+      durationValue,
+      sourceDurationS: sourceDurationS,
+    ),
   );
 }
 
@@ -316,7 +320,8 @@ TimelineClip move(
 }) {
   final present = cuts[index];
   final destination = snapMove(present, atS, beats: beats, snap: snap);
-  if (!fits(cuts, destination, present.durationS, ignore: index)) return present;
+  if (!fits(cuts, destination, present.durationS, ignore: index))
+    return present;
   return present.copyWith(atS: destination);
 }
 
@@ -391,7 +396,10 @@ TimelineClip stretchRight(
 
   // what was not recorded cannot be shown
   if (sourceDurationS != null) {
-    fresh = math.min(fresh, math.max(kMinCutS, sourceDurationS - present.startS));
+    fresh = math.min(
+      fresh,
+      math.max(kMinCutS, sourceDurationS - present.startS),
+    );
   }
   if (snap) {
     final endTime = snapToBeat(present.atS + fresh, beats);
@@ -445,7 +453,8 @@ double? _nextAfter(List<TimelineClip> cuts, int index, double at) {
   for (var i = 0; i < cuts.length; i++) {
     if (i == index) continue;
     final other = cuts[i].atS;
-    if (other >= at - 1e-6 && (smaller == null || other < smaller)) smaller = other;
+    if (other >= at - 1e-6 && (smaller == null || other < smaller))
+      smaller = other;
   }
   return smaller;
 }
@@ -456,7 +465,8 @@ double? _previousBefore(List<TimelineClip> cuts, int index, double at) {
   for (var i = 0; i < cuts.length; i++) {
     if (i == index) continue;
     final endTime = cuts[i].untilS;
-    if (endTime <= at + 1e-6 && (larger == null || endTime > larger)) larger = endTime;
+    if (endTime <= at + 1e-6 && (larger == null || endTime > larger))
+      larger = endTime;
   }
   return larger;
 }
@@ -582,10 +592,9 @@ double blackDuration(List<TimelineClip> cuts) {
 double valueAt(TimelineClip clip, KeyProp prop, double localS) {
   final keys = clip.keysFor(prop);
   if (keys.isEmpty) return staticValue(clip, prop);
-  return curveAt(
-    [for (final k in keys) (k.t * clip.durationS, k.value, k.ease)],
-    localS,
-  );
+  return curveAt([
+    for (final k in keys) (k.t * clip.durationS, k.value, k.ease),
+  ], localS);
 }
 
 /// The value a property has when it is not animated.
@@ -596,6 +605,10 @@ double staticValue(TimelineClip clip, KeyProp prop) => switch (prop) {
   KeyProp.opacity => clip.transform.opacity,
   KeyProp.volume => clip.audio.volume,
   KeyProp.speed => clip.speed,
+  KeyProp.rotation => clip.transform.rotation,
+  KeyProp.brightness => clip.color.brightness,
+  KeyProp.contrast => clip.color.contrast,
+  KeyProp.saturation => clip.color.saturation,
 };
 
 /// A curve through (seconds, value, ease) points, in time order.
@@ -655,7 +668,10 @@ double voiceDipAt(List<(double, double)> spans, double t) {
   for (final (a, b) in spans) {
     final v = math.min(
       1.0,
-      math.min((t - (a - kVoiceAttack)) / kVoiceAttack, (b + kVoiceRelease - t) / kVoiceRelease),
+      math.min(
+        (t - (a - kVoiceAttack)) / kVoiceAttack,
+        (b + kVoiceRelease - t) / kVoiceRelease,
+      ),
     );
     if (v > most) most = v;
   }

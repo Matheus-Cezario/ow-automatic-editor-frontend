@@ -238,9 +238,7 @@ class MontageState {
 MontageState montageFromDraft(Montage draft) => MontageState(
   layers: [
     for (final l in draft.layers)
-      l.copyWith(
-        clips: [for (final c in l.clips) c.copyWith(id: newCutId())],
-      ),
+      l.copyWith(clips: [for (final c in l.clips) c.copyWith(id: newCutId())]),
     // the old continuous track becomes a music block covering the video: that
     // is exactly what it did, and now it has ends to grab
     ...?_trackBecomesBlock(draft),
@@ -467,9 +465,7 @@ const kMarkerToleranceS = 0.05;
 
 /// The marker at [tS], if there is one.
 int? markerAt(MontageState s, double tS) {
-  final i = s.markers.indexWhere(
-    (m) => (m.tS - tS).abs() <= kMarkerToleranceS,
-  );
+  final i = s.markers.indexWhere((m) => (m.tS - tS).abs() <= kMarkerToleranceS);
   return i < 0 ? null : i;
 }
 
@@ -478,7 +474,12 @@ int? markerAt(MontageState s, double tS) {
 MontageState toggleMarker(MontageState s, double tS) {
   final i = markerAt(s, tS);
   if (i != null) return removeMarker(s, i);
-  return s.copyWith(markers: [...s.markers, Marker(tS: math.max(0, tS))]);
+  return s.copyWith(
+    markers: [
+      ...s.markers,
+      Marker(tS: math.max(0, tS)),
+    ],
+  );
 }
 
 MontageState removeMarker(MontageState s, int index) =>
@@ -511,11 +512,7 @@ double? nextMarker(MontageState s, double tS) {
 
 /// The edge or playhead a clip ended up stuck to, for the guide line —
 /// `null` when it rests on none (a beat already has its own line).
-double? stuckTo(
-  MontageState s,
-  String id, {
-  double? playheadS,
-}) {
+double? stuckTo(MontageState s, String id, {double? playheadS}) {
   final c = s.clipItem(id);
   if (c == null) return null;
   final points = magnetPoints(
@@ -601,7 +598,10 @@ MontageState addClip(
     at,
     [
       for (final c in clips)
-        if (c.atS >= at - 1e-6 && push > 0) c.copyWith(atS: c.atS + push) else c,
+        if (c.atS >= at - 1e-6 && push > 0)
+          c.copyWith(atS: c.atS + push)
+        else
+          c,
     ],
   );
 }
@@ -621,10 +621,12 @@ MontageState rippleDelete(MontageState s, Set<String> ids) {
               for (final c in l.clips)
                 if (!ids.contains(c.id))
                   c.copyWith(
-                    atS: c.atS -
+                    atS:
+                        c.atS -
                         [
                           for (final r in l.clips)
-                            if (ids.contains(r.id) && r.atS < c.atS) r.durationS,
+                            if (ids.contains(r.id) && r.atS < c.atS)
+                              r.durationS,
                         ].fold(0.0, (a, b) => a + b),
                   ),
             ],
@@ -878,8 +880,7 @@ MontageState setMotion(
   final keys = [
     for (final k in c.keys)
       if (identical(k, here)) k.copyWith(value: v) else k,
-    if (here == null)
-      ClipKey(prop: prop, t: _fraction(c, localS), value: v),
+    if (here == null) ClipKey(prop: prop, t: _fraction(c, localS), value: v),
   ];
   return s.withClip(layerIndex, i, c.copyWith(keys: keys));
 }
@@ -975,17 +976,22 @@ MontageState easeMotionKey(
 double _fraction(TimelineClip c, double localS) =>
     (localS / c.durationS).clamp(0.0, 1.0);
 
-TimelineClip _withStatic(TimelineClip c, KeyProp prop, double v) =>
-    switch (prop) {
-      KeyProp.x => c.copyWith(transform: c.transform.copyWith(x: v)),
-      KeyProp.y => c.copyWith(transform: c.transform.copyWith(y: v)),
-      KeyProp.scale => c.copyWith(transform: c.transform.copyWith(scale: v)),
-      KeyProp.opacity => c.copyWith(
-        transform: c.transform.copyWith(opacity: v),
-      ),
-      KeyProp.volume => c.copyWith(audio: c.audio.copyWith(volume: v)),
-      KeyProp.speed => c.copyWith(speed: v),
-    };
+TimelineClip _withStatic(
+  TimelineClip c,
+  KeyProp prop,
+  double v,
+) => switch (prop) {
+  KeyProp.x => c.copyWith(transform: c.transform.copyWith(x: v)),
+  KeyProp.y => c.copyWith(transform: c.transform.copyWith(y: v)),
+  KeyProp.scale => c.copyWith(transform: c.transform.copyWith(scale: v)),
+  KeyProp.opacity => c.copyWith(transform: c.transform.copyWith(opacity: v)),
+  KeyProp.volume => c.copyWith(audio: c.audio.copyWith(volume: v)),
+  KeyProp.speed => c.copyWith(speed: v),
+  KeyProp.rotation => c.copyWith(transform: c.transform.copyWith(rotation: v)),
+  KeyProp.brightness => c.copyWith(color: c.color.copyWith(brightness: v)),
+  KeyProp.contrast => c.copyWith(color: c.color.copyWith(contrast: v)),
+  KeyProp.saturation => c.copyWith(color: c.color.copyWith(saturation: v)),
+};
 
 MontageState adjustEffect(
   MontageState s,
@@ -1117,7 +1123,12 @@ MontageState? rampIntoMoment(
       if (a > kKeyToleranceS) ClipKey(prop: KeyProp.speed, t: 0, value: 1),
       ClipKey(prop: KeyProp.speed, t: a / d, value: 1, ease: Ease.easeInOut),
       ClipKey(prop: KeyProp.speed, t: (a + easeS) / d, value: slow),
-      ClipKey(prop: KeyProp.speed, t: end / d, value: slow, ease: Ease.easeInOut),
+      ClipKey(
+        prop: KeyProp.speed,
+        t: end / d,
+        value: slow,
+        ease: Ease.easeInOut,
+      ),
       ClipKey(prop: KeyProp.speed, t: (end + easeS) / d, value: 1),
     ],
   );
@@ -1139,8 +1150,14 @@ MontageState changeText(
 
   // the server refuses empty text, and an invisible clip on the ruler would be
   // worse than a blank space
-  final updated = (textValue ?? c.text).trim().isEmpty ? c.text : (textValue ?? c.text);
-  return s.withClip(layerIndex, i, c.copyWith(text: updated, textStyle: styleSpec));
+  final updated = (textValue ?? c.text).trim().isEmpty
+      ? c.text
+      : (textValue ?? c.text);
+  return s.withClip(
+    layerIndex,
+    i,
+    c.copyWith(text: updated, textStyle: styleSpec),
+  );
 }
 
 /// Sets (or clears, with `null`) the entrance transition of clips [ids].
@@ -1312,14 +1329,22 @@ List<ClipKey> _keysWithin(TimelineClip c, double fromS, double toS) {
   for (final prop in KeyProp.values) {
     final ks = c.keysFor(prop);
     if (ks.isEmpty) continue;
-    ClipKey edge(double at) =>
-        ClipKey(prop: prop, t: (at - fromS) / span, value: valueAt(c, prop, at));
+    ClipKey edge(double at) => ClipKey(
+      prop: prop,
+      t: (at - fromS) / span,
+      value: valueAt(c, prop, at),
+    );
     out.add(edge(fromS));
     for (final k in ks) {
       final at = k.t * c.durationS;
       if (at > fromS + kKeyToleranceS && at < toS - kKeyToleranceS) {
         out.add(
-          ClipKey(prop: prop, t: (at - fromS) / span, value: k.value, ease: k.ease),
+          ClipKey(
+            prop: prop,
+            t: (at - fromS) / span,
+            value: k.value,
+            ease: k.ease,
+          ),
         );
       }
     }
@@ -1509,7 +1534,8 @@ MontageState adjustLayer(
 /// another instant would change two things when one was asked.
 MontageState moveToLayer(MontageState s, String id, int destination) {
   final location = s.locate(id);
-  if (location == null || destination < 0 || destination >= s.layers.length) return s;
+  if (location == null || destination < 0 || destination >= s.layers.length)
+    return s;
   final (origin, i) = location;
   if (origin == destination) return s;
 
@@ -1797,17 +1823,8 @@ const kVoiceKind = 'voice';
 /// when the recording started, so the words land on what was on screen. Like
 /// an effect, it goes over the music and never moves; it opens a Voice layer
 /// when none is free there.
-MontageState putVoice(
-  MontageState s,
-  Track voice, {
-  required double atS,
-}) => _putOver(
-  s,
-  voice,
-  atS: atS,
-  kind: kVoiceKind,
-  layerName: kVoiceLayerName,
-);
+MontageState putVoice(MontageState s, Track voice, {required double atS}) =>
+    _putOver(s, voice, atS: atS, kind: kVoiceKind, layerName: kVoiceLayerName);
 
 MontageState _putOver(
   MontageState s,

@@ -266,11 +266,40 @@ void main() {
         'duration_s': 1,
         'start_s': 0,
         'keys': [
-          {'prop': 'rotation', 't': 0, 'value': 1},
+          {'prop': 'hue', 't': 0, 'value': 1},
           {'prop': 'x', 't': 0, 'value': 1},
         ],
       });
       expect(back.keys.single.prop, KeyProp.x);
+    });
+  });
+
+  group('rotation and colour keys', () {
+    test(
+      'fall back to the static value and follow the keys when there are some',
+      () {
+        final plain = clip();
+        expect(valueAt(plain, KeyProp.saturation, 1), 1);
+        expect(valueAt(plain, KeyProp.rotation, 1), 0);
+
+        final c = clip(
+          keys: const [
+            ClipKey(prop: KeyProp.rotation, t: 0, value: 0),
+            ClipKey(prop: KeyProp.rotation, t: 1, value: 90),
+            ClipKey(prop: KeyProp.saturation, t: 0, value: 1),
+            ClipKey(prop: KeyProp.saturation, t: 1, value: 0),
+          ],
+        );
+        expect(valueAt(c, KeyProp.rotation, 2), closeTo(45, 1e-9));
+        expect(valueAt(c, KeyProp.saturation, 2), closeTo(0.5, 1e-9));
+      },
+    );
+
+    test('the wire names match the server', () {
+      expect(KeyProp.of('rotation'), KeyProp.rotation);
+      expect(KeyProp.of('brightness'), KeyProp.brightness);
+      expect(KeyProp.of('contrast'), KeyProp.contrast);
+      expect(KeyProp.of('saturation'), KeyProp.saturation);
     });
   });
 }

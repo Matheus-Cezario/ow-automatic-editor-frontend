@@ -242,6 +242,10 @@ class MotionPanel extends StatelessWidget {
     KeyProp.opacity || KeyProp.volume => '${(v * 100).round()}%',
     KeyProp.scale || KeyProp.speed => '${v.toStringAsFixed(2)}×',
     KeyProp.x || KeyProp.y => v.toStringAsFixed(2),
+    KeyProp.rotation => '${v.round()}°',
+    KeyProp.brightness ||
+    KeyProp.contrast ||
+    KeyProp.saturation => v.toStringAsFixed(2),
   };
 }
 
@@ -257,7 +261,16 @@ List<KeyProp> motionPropsFor(
   if (onSoundLayer) return const [KeyProp.volume];
   if (clip.isText) return const [];
   if (media?.isImage ?? false) {
-    return const [KeyProp.x, KeyProp.y, KeyProp.scale, KeyProp.opacity];
+    return const [
+      KeyProp.x,
+      KeyProp.y,
+      KeyProp.scale,
+      KeyProp.opacity,
+      KeyProp.rotation,
+      KeyProp.brightness,
+      KeyProp.contrast,
+      KeyProp.saturation,
+    ];
   }
   // a frozen or reversed clip cannot ramp: the server refuses both together
   if (clip.freeze || clip.reverse) {
